@@ -29,6 +29,68 @@ struct Reader {
   }
 };
 } // namespace
+std::vector<std::optional<Motion>> decode_motion_bank(const Bytes &data,
+                                                      size_t begin, size_t end,
+                                                      size_t key_limit) {
+  if (begin > end || end > data.size() || end - begin > 64 * 1024 * 1024)
+    throw std::runtime_error("Invalid motion bank extent");
+  Reader r{data};
+  std::vector<std::optional<Motion>> result;
+  size_t p = begin;
+  for (;;) {
+    if (end - p < 4)
+      throw std::runtime_error("Missing motion bank terminator");
+    uint32_t size = r.u32(p);
+    p += 4;
+    if (size == 0xffffffff)
+      return result;
+    if (result.size() >= 512 || size > end - p)
+      throw std::runtime_error("Motion bank record outside limit");
+    if (!size)
+      result.push_back(std::nullopt);
+    else {
+      auto motion = decode_motion(
+          Bytes(data.begin() + p, data.begin() + p + size), key_limit);
+      for (const auto &track : motion.tracks)
+        key_limit -= track.positions.size() + track.angles.size();
+      result.push_back(std::move(motion));
+    }
+    p += size;
+  }
+}
+std::vector<std::optional<Motion>> decode_room_motion_bank(const Bytes &data,
+                                                           size_t key_limit) {
+  auto info = room_info(data);
+  Reader r{data};
+  size_t table = r.u32(24);
+  if (!table)
+    return std::vector<std::optional<Motion>>(512);
+  if (info.enemies > 128)
+    throw std::runtime_error("Too many room enemy motion pointers");
+  size_t count = size_t(info.enemies) + 3;
+  r.range(table, count * 4);
+  size_t table_end = table + count * 4;
+  size_t begin = r.u32(table + size_t(info.enemies) * 4);
+  if (!begin)
+    return std::vector<std::optional<Motion>>(512);
+  if (begin < table_end || begin >= data.size())
+    throw std::runtime_error("Room motion bank overlaps pointer table");
+  size_t end = data.size();
+  for (size_t i = 0; i < count; ++i) {
+    size_t pointer = r.u32(table + i * 4);
+    if (pointer > begin && pointer < end)
+      end = pointer;
+  }
+  for (size_t header :
+       {size_t(16), size_t(20), size_t(24), size_t(28), size_t(32)}) {
+    size_t pointer = r.u32(header);
+    if (pointer > begin && pointer < end)
+      end = pointer;
+  }
+  auto result = decode_motion_bank(data, begin, end, key_limit);
+  result.resize(512);
+  return result;
+}
 Motion decode_motion(const Bytes &data, size_t key_limit) {
   Reader r{data};
   r.range(0, 16);

@@ -4,6 +4,7 @@
 #include "collision.hpp"
 #include "room.hpp"
 #include "scenario.hpp"
+#include "motion.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -37,6 +38,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t corridor_initializations=0;
         size_t corridor_controls=0;
         size_t corridor_door_requests=0;
+        size_t room_motions=0, room_motion_poses=0;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
@@ -45,6 +47,18 @@ int wmain(int argc,wchar_t** argv) {
                 auto records=decode_room_records(data);
                 auto scenario=decode_room_scenario(data);
                 scenario_entries+=scenario.entry_count();
+                if(scenario_check) {
+                    auto bank=decode_room_motion_bank(data);
+                    for(const auto& motion:bank) if(motion) {
+                        ++room_motions;
+                        for(uint32_t frame:{0u,motion->frames/2,motion->frames-1}) {
+                            sample_motion(*motion,int64_t(frame)*65536,true);
+                            ++room_motion_poses;
+                        }
+                    }
+                    if(i==1 && !bank[0])
+                        throw std::runtime_error("Retail corridor room motion 0 missing");
+                }
                 if(scenario_check && i==1) {
                     // RM_0010 initialization, both map-flag paths and both
                     // item-persistence states. No event commands are skipped.
@@ -141,6 +155,7 @@ int wmain(int argc,wchar_t** argv) {
         if(!output) throw std::runtime_error("Could not write room report");
         std::cout<<"Validated "<<entries.size()<<" rooms and "<<scenario_entries<<" scenario entry slots\n";
         if(scenario_check) {
+            std::cout<<"Decoded "<<room_motions<<" room motions and sampled "<<room_motion_poses<<" poses\n";
             if(corridor_initializations!=4)throw std::runtime_error("Missing retail corridor scenario check");
             std::cout<<"Executed four retail corridor initialization states\n";
             if(corridor_controls!=16)throw std::runtime_error("Missing retail corridor control check");

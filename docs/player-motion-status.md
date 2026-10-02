@@ -33,6 +33,16 @@ was sampled. Entries 11–14 also decoded and sampled successfully. Entries
 15–17 are 11-byte unavailable-asset records, not complete player packages.
 No retail data is included in source, tests or distribution.
 
+The native room-motion-bank decoder follows `room.c::bhSetRoomMtn`:
+length-prefixed MTN records with empty index slots and a `0xffffffff`
+terminator. It resolves the bank after the per-enemy pointers in RDX section
+24, bounds records by the next motion/auxiliary or outer-header section, caps
+record count and aggregate keys, and supplies the original 512 runtime slots.
+This bank is distinct from regular enemy motions: CommonCtr motion selection
+uses the room bank. The headless retail room probe decoded 624 motions across
+205 rooms and sampled 1,872 first/middle/last poses, including the corridor's
+motion 0. This verifies decoding and sampling, not actor-controller playback.
+
 Step 1 remains incomplete. Next is application integration and original
 movement/collision, room interactions
 and transitions, enemy combat, inventory, audio and versioned save/load.
