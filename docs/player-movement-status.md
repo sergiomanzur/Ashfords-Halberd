@@ -18,6 +18,9 @@ by the baseline speed helper.
 endpoint asymmetry. It preserves height and rejects nonfinite inputs and
 overflow. Motion transitions, input state changes, simulation cadence, floor
 height and wall collision remain to be integrated before this is playable.
+The reference `ps2_NaSystem.c::Ps2SwapDBuff` waits until `Ps2_vcount >= 2`;
+`vsync_func` increments that counter once per vertical-sync interrupt. Native
+simulation must preserve this two-field update cadence independently of rendering.
 
 Twelve CTest suites pass headlessly, including new cut selection and movement
 primitive suites. Tests cover triangular boundaries, floor mismatch, cut
