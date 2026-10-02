@@ -51,11 +51,23 @@ int wmain(int argc, wchar_t **argv) {
         afs_index(read(f, 0, 8 + size_t(count) * 8), fs::file_size(archive));
     if (index >= entries.size())
       throw std::runtime_error("Room index outside archive");
-    auto scene = decode_room_scene(
-        expand(read(f, entries[index].offset, entries[index].size)));
+    auto room=expand(read(f,entries[index].offset,entries[index].size));
+    auto scene=decode_room_scene(room);
     auto image = render_overview(scene, 960, 720);
     fs::create_directories(destination);
     ppm(destination / "overview.ppm", image.width, image.height, image.rgb);
+    auto cuts=decode_room_cuts(room);
+    size_t camera_views=0;
+    for(size_t cut=0;cut<cuts.size();++cut)for(size_t variant=0;variant<2;++variant){
+      try{
+        auto camera=resolve_camera(cuts[cut],variant);
+        auto view=render_camera(scene,camera,640,480);
+        ppm(destination/("camera-"+std::to_string(cut)+"-"+std::to_string(variant)+".ppm"),view.width,view.height,view.rgb);
+        ++camera_views;
+      }catch(const std::runtime_error& error){
+        std::cerr<<"Camera "<<cut<<'/'<<variant<<": "<<error.what()<<'\n';
+      }
+    }
     for (size_t i = 0; i < scene.textures.size(); ++i) {
       const auto &t = scene.textures[i];
       Bytes rgb(size_t(t.width) * t.height * 3);
@@ -72,7 +84,7 @@ int wmain(int argc, wchar_t **argv) {
     info << "Room index: " << index << "\nMeshes: " << scene.meshes.size()
          << "\nTriangles: " << triangles
          << "\nTextures: " << scene.textures.size()
-         << "\nCamera: diagnostic orthographic overview\n";
+         << "\nAuthored camera snapshots: "<<camera_views<<"\nActive cameras sampled at cut midpoint\n";
     info.flush();
     if (!info)
       throw std::runtime_error("Summary write failed");

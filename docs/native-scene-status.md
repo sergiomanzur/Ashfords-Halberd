@@ -1,8 +1,8 @@
 # Native scene decoding — 2026-10-02
 
 This increment adds a portable C++ scene decoder and a native, headless software
-rasterizer. The Windows game executable still contains the foundation menu;
-these development tools are not a playable game mode.
+rasterizer. The Windows executable now also has a main-menu Room Viewer;
+see [viewer status](authored-camera-viewer-status.md). There is no playable game mode.
 
 ## Verified coverage
 
@@ -35,7 +35,7 @@ No original assets or generated previews enter Git or the Windows ZIP.
 
 ## Checks and limits
 
-Six CTest suites cover asset, scene, raster, settings/disc, headless menu and
+Eight CTest suites cover asset, scene, raster, camera, settings/disc, headless menu/viewer and
 packaged-runtime behavior. Scene tests include strip padding, invalid indices,
 invalid pointers, cyclic links, transforms, palette/alpha conversion and 1,500
 deterministic model mutations. Raster tests check transparency, repeatable
@@ -50,11 +50,10 @@ An UndefinedBehaviorSanitizer build was attempted but this installed MinGW
 toolchain lacks `libubsan`; no sanitizer pass is claimed.
 
 Only main-room models have been validated across the archive. Character models,
-animation, additional chunk/texture encodings, authored camera behavior,
-visibility masks, original lighting/fog and transparency blending still need
+animation, additional chunk/texture encodings, full dynamic camera behavior,
+original lighting/fog and transparency blending still need
 implementation and verification. Current strips retain source winding, but
 the diagnostic render draws both sides and does not reproduce render states.
 
-Next: integrate room loading with a real-time native backend, reproduce an
-authored room camera and its visibility masks, then adapt player animation,
+Next: adapt player animation,
 collision, events and room transitions for the playable slice.

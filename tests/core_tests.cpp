@@ -18,16 +18,19 @@ int main(int argc, char** argv) {
         require(defaults.width == 1120 && defaults.mode == "windowed", "missing INI defaults");
         defaults.iso_path = "C:/Games/CVX USA/日本語.iso";
         defaults.width = 1280; defaults.height = 720; defaults.vsync = false;
+        defaults.viewer_room=87;defaults.viewer_cut=2;defaults.viewer_variant=1;
         save_settings(ini, defaults);
         auto restored = load_settings(ini);
         require(restored.iso_path == defaults.iso_path && restored.width == 1280 && !restored.vsync,
                 "settings must survive restart, including Unicode paths");
+        require(restored.viewer_room==87 && restored.viewer_cut==2 && restored.viewer_variant==1,"viewer selection persistence");
         restored.width = 1920; save_settings(ini, restored);
         require(fs::exists(ini.string() + ".bak"), "settings backup");
-        { std::ofstream file(ini); file << "[Display]\nwidth=oops\nheight=999999\nmode=invalid\nvsync=0\n[GameData]\niso_path=C:/good.iso\n"; }
+        { std::ofstream file(ini); file << "[Display]\nwidth=oops\nheight=999999\nmode=invalid\nvsync=0\n[GameData]\niso_path=C:/good.iso\n[Viewer]\nroom=-1\ncut=999999\nvariant=7\n"; }
         auto partial = load_settings(ini);
         require(partial.width == 1120 && partial.height == 720 && partial.mode == "windowed" &&
                 !partial.vsync && partial.iso_path == "C:/good.iso", "invalid keys must preserve valid keys");
+        require(partial.viewer_room==0 && partial.viewer_cut==0 && partial.viewer_variant==0,"invalid viewer settings must default safely");
         { std::ofstream file(ini, std::ios::app); file << "broken section [\n"; }
         load_settings(ini);
         require(fs::exists(ini.wstring() + L".damaged"), "damaged INI preserved");

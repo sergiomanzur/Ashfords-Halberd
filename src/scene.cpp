@@ -162,8 +162,8 @@ Mesh chunks(const Reader &r, size_t base, size_t model, const Matrix &world,
         Corner c;
         c.position = vertices[index];
         if (type != 64) {
-          c.u = float(take()) / (type == 65 ? 1023.f : 255.f);
-          c.v = float(take()) / (type == 65 ? 1023.f : 255.f);
+          c.u = float(take()) / (type == 65 ? 255.f : 1023.f);
+          c.v = float(take()) / (type == 65 ? 255.f : 1023.f);
         }
         corners.push_back(c);
         if (type == 64 && i >= 2)
@@ -194,7 +194,7 @@ Mesh chunks(const Reader &r, size_t base, size_t model, const Matrix &world,
   return mesh;
 }
 } // namespace
-std::vector<Mesh> decode_model(const Bytes &data, size_t offset) {
+std::vector<Mesh> decode_model(const Bytes &data, size_t offset,bool include_hidden) {
   Reader r{data};
   r.range(offset, 16);
   if (data[offset] != 'M' || data[offset + 1] != 'D' ||
@@ -248,8 +248,9 @@ std::vector<Mesh> decode_model(const Bytes &data, size_t offset) {
         }
         auto world = multiply(parent, local);
         auto model = r.u32(o + 4);
-        if (!(flags & 8) && model != 0xffffffff) {
+        if ((include_hidden || !(flags & 8)) && model != 0xffffffff) {
           auto mesh = chunks(r, base, base + model, world, uint32_t(i));
+          mesh.initially_hidden=bool(flags&8);
           total += mesh.triangles.size();
           if (total > 2000000)
             throw std::runtime_error("Scene triangle limit exceeded");
@@ -356,7 +357,7 @@ Scene decode_room_scene(const Bytes &data) {
   if (!model_table || !tex_table || !r.u32(tex_table))
     throw std::runtime_error("Missing room scene tables");
   Scene s;
-  s.meshes = decode_model(data, r.u32(model_table));
+  s.meshes = decode_model(data, r.u32(model_table),true);
   s.textures = decode_texture_pack(data, r.u32(tex_table + 4));
   for (const auto &m : s.meshes)
     for (const auto &t : m.triangles)

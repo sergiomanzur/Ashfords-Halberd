@@ -1,5 +1,6 @@
 #include "core.hpp"
 #include "text.hpp"
+#include "viewer.hpp"
 #include <SDL.h>
 #include <SDL_syswm.h>
 #define WIN32_LEAN_AND_MEAN
@@ -97,7 +98,7 @@ void apply_display(SDL_Window* window, SDL_Renderer* renderer, const Settings& s
     if (SDL_RenderSetVSync(renderer, settings.vsync ? 1 : 0) < 0)
         throw std::runtime_error("This renderer cannot change vertical sync.");
 }
-int run_app(const fs::path& root, bool smoke) {
+int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::path& archive_override={}) {
     Instance instance(root);
     recover_import(root);
     auto settings_path = root / "AshfordsHalberd.ini";
@@ -118,8 +119,16 @@ int run_app(const fs::path& root, bool smoke) {
     if (!renderer) throw std::runtime_error(SDL_GetError());
     SDL_RenderSetLogicalSize(renderer.get(), 1120, 720);
     Text text(renderer.get());
-    bool ready = cache_valid(root), running = true, first_launch = !ready && !smoke;
-    int page = 0, selected = 0, frames = 0;
+    bool ready = cache_valid(root)||scene_smoke, running = true, first_launch = !ready && !smoke;
+    int page = scene_smoke?3:0, selected = 0, frames = 0;
+    std::unique_ptr<RoomViewer> viewer;
+    auto open_viewer=[&]{
+        viewer=std::make_unique<RoomViewer>(renderer.get(),archive_override.empty()?root/"assets/RDX_LNK.AFS":archive_override);
+        auto next=settings;viewer->select(next);save_settings(settings_path,next);settings=next;
+    };
+    if(scene_smoke)open_viewer();
+    auto trace_viewer=[&]{if(scene_smoke)std::ofstream(root/"scene-navigation.tsv",std::ios::app)<<settings.viewer_room<<'\t'<<settings.viewer_cut<<'\t'<<settings.viewer_variant<<'\n';};
+    if(scene_smoke){std::ofstream(root/"scene-navigation.tsv")<<"room\tcut\tvariant\n";trace_viewer();}
     std::string notice;
     std::unique_ptr<ImportJob> job;
     std::vector<SDL_GameController*> controllers;
@@ -154,9 +163,10 @@ int run_app(const fs::path& root, bool smoke) {
             if (job) return;
             if (page == 0) {
                 if (selected == 0) notice = "The playable room slice is the next development milestone.";
-                if (selected == 1) { page = 1; selected = 0; notice.clear(); }
-                else if (selected == 2) { page = 2; selected = 0; notice.clear(); }
-                else if (selected == 3) running = false;
+                if (selected == 1) { if(!ready){notice="Import your ISO in Game data first.";return;}open_viewer();page=3;notice.clear(); }
+                else if (selected == 2) { page = 1; selected = 0; notice.clear(); }
+                else if (selected == 3) { page = 2; selected = 0; notice.clear(); }
+                else if (selected == 4) running = false;
             } else if (page == 1) {
                 auto next = settings;
                 if (selected == 0) {
@@ -166,10 +176,10 @@ int run_app(const fs::path& root, bool smoke) {
                 } else if (selected == 1) { next.mode = next.mode == "windowed" ? "borderless" : next.mode == "borderless" ? "fullscreen" : "windowed"; persist(next); }
                 else if (selected == 2) { next.vsync = !next.vsync; persist(next); }
                 else if (selected == 3) { page = 2; selected = 0; notice.clear(); }
-                else { page = 0; selected = 1; notice.clear(); }
+                else { page = 0; selected = 2; notice.clear(); }
             } else {
                 if (selected == 0) choose();
-                else { page = 0; selected = 2; notice.clear(); }
+                else { page = 0; selected = 3; notice.clear(); }
             }
         };
         SDL_Event event;
@@ -192,7 +202,28 @@ int run_app(const fs::path& root, bool smoke) {
                 back |= event.cbutton.button == SDL_CONTROLLER_BUTTON_B;
             }
             if (!job) {
-                int count = page == 0 ? 4 : page == 1 ? 5 : 2;
+                if(page==3){
+                    if(back){page=0;selected=1;notice.clear();continue;}
+                    bool left=event.type==SDL_KEYDOWN && event.key.keysym.sym==SDLK_LEFT;
+                    bool right=event.type==SDL_KEYDOWN && event.key.keysym.sym==SDLK_RIGHT;
+                    if(event.type==SDL_CONTROLLERBUTTONDOWN){left|=event.cbutton.button==SDL_CONTROLLER_BUTTON_DPAD_LEFT;right|=event.cbutton.button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT;}
+                    if(event.type==SDL_MOUSEBUTTONDOWN && event.button.button==SDL_BUTTON_LEFT && event.button.y>=660){
+                        if(event.button.x<320)down=true;
+                        else if(event.button.x<610)right=true;
+                        else if(event.button.x<840)confirm=true;
+                        else {page=0;selected=1;continue;}
+                    }
+                    if(up||down||left||right||confirm){
+                        auto next=settings;
+                        if(up||down){next.viewer_room=(next.viewer_room+int(viewer->room_count())+(down?1:-1))%int(viewer->room_count());next.viewer_cut=0;}
+                        if((left||right)&&viewer->cut_count())next.viewer_cut=(next.viewer_cut+int(viewer->cut_count())+(right?1:-1))%int(viewer->cut_count());
+                        if(confirm)next.viewer_variant=1-next.viewer_variant;
+                        try{viewer->select(next);save_settings(settings_path,next);settings=next;trace_viewer();}
+                        catch(const std::exception& error){if(scene_smoke)throw;try{viewer->select(settings);}catch(...){}notice=error.what();}
+                    }
+                    continue;
+                }
+                int count = page == 0 ? 5 : page == 1 ? 5 : 2;
                 if (up) selected = (selected + count - 1) % count;
                 if (down) selected = (selected + 1) % count;
                 if (back) { if (page) { page = 0; selected = 0; notice.clear(); } else running = false; }
@@ -212,6 +243,30 @@ int run_app(const fs::path& root, bool smoke) {
         if (!running) break;
         auto* r = renderer.get();
         SDL_SetRenderDrawColor(r, dark.r, dark.g, dark.b, 255); SDL_RenderClear(r);
+        if(page==3){
+            SDL_Rect image{160,55,800,600};viewer->draw(image);
+            text.draw("ROOM VIEWER  /  DEVELOPMENT BUILD",68,18,16,gold);
+            std::string label="Room "+std::to_string(settings.viewer_room+1)+" / "+std::to_string(viewer->room_count())+"  Camera "+std::to_string(settings.viewer_cut+1)+"  View "+std::to_string(settings.viewer_variant+1);
+            text.draw(label,640,18,15,white);
+            text.draw("UP/DOWN: Room",68,673,15,white);text.draw("LEFT/RIGHT: Camera",330,673,15,white);
+            text.draw("ENTER/A: Variant",620,673,15,white);text.draw("ESC/B: Back",870,673,15,white);
+            if(!notice.empty())text.draw(notice,170,600,15,gold,false,false,770);
+            text.draw(viewer->authored()?"Original camera snapshot / gameplay is not implemented":"Overview / this selection has no original camera",170,631,13,gold);
+            if(scene_smoke && ++frames==8){
+                int w=0,h=0;SDL_GetRendererOutputSize(r,&w,&h);std::vector<uint8_t> pixels(size_t(w)*h*3);
+                if(SDL_RenderReadPixels(r,nullptr,SDL_PIXELFORMAT_RGB24,pixels.data(),w*3)<0)throw std::runtime_error(SDL_GetError());
+                size_t red=0;for(size_t i=0;i<pixels.size();i+=3)if(pixels[i]>80 && pixels[i+1]<10 && pixels[i+2]<10)++red;
+                save_settings(settings_path,settings);auto saved=load_settings(settings_path);
+                if(saved.viewer_room!=settings.viewer_room || saved.viewer_cut!=settings.viewer_cut || saved.viewer_variant!=settings.viewer_variant)throw std::runtime_error("Viewer selection persistence failed.");
+                std::ofstream(root/"scene-smoke.txt")<<"Native scene displayed; selection persisted.\nred_pixels="<<red<<"\n";
+            }
+            SDL_RenderPresent(r);
+            if(scene_smoke && frames>=1 && frames<=8){
+                const SDL_Keycode steps[]={SDLK_RETURN,SDLK_RIGHT,SDLK_RIGHT,SDLK_DOWN,SDLK_DOWN,SDLK_UP,SDLK_UP,SDLK_ESCAPE};
+                SDL_Event e{};e.type=SDL_KEYDOWN;e.key.keysym.sym=steps[frames-1];SDL_PushEvent(&e);
+            }
+            SDL_Delay(8);continue;
+        }
         for (int y = 0; y < 720; ++y) {
             SDL_SetRenderDrawColor(r, Uint8(13 + y / 160), Uint8(18 + y / 120), Uint8(23 + y / 90), 255);
             SDL_RenderDrawLine(r, 0, y, 1120, y);
@@ -222,7 +277,7 @@ int run_app(const fs::path& root, bool smoke) {
         text.draw("Halberd", 68, 163, 60, white, true);
         text.draw("CODE VERONICA X  /  WINDOWS", 72, 243, 14, muted, false, true);
         std::vector<std::string> labels;
-        if (page == 0) labels = {"New game", "Options", "Game data", "Quit"};
+        if (page == 0) labels = {"New game", "Room viewer", "Options", "Game data", "Quit"};
         else if (page == 1) labels = {
             "Resolution     " + std::to_string(settings.width) + " x " + std::to_string(settings.height),
             "Window mode     " + settings.mode,
@@ -252,7 +307,7 @@ int run_app(const fs::path& root, bool smoke) {
             fill(r, 683, 347, 352, 1, {58, 64, 64, 255});
             text.draw(ready ? "GAME DATA READY" : "ISO REQUIRED", 683, 372, 14, ready ? gold : muted, false, true);
             text.draw("SLUS-20184  /  USA", 683, 401, 17, white);
-            text.draw("Development build 0.1\nPlayable rooms are the next milestone.", 683, 471, 17, muted, false, false, 352);
+            text.draw("Development build 0.2\nRoom viewer available. Gameplay is in development.", 683, 471, 17, muted, false, false, 352);
         }
         if (!notice.empty()) text.draw(notice, 72, 590, 16, gold, false, false, 950);
         fill(r, 68, 641, 967, 1, {58, 64, 64, 255});
@@ -260,7 +315,8 @@ int run_app(const fs::path& root, bool smoke) {
         text.draw("NATIVE WINDOWS BUILD", 837, 667, 12, muted);
         SDL_RenderPresent(r);
         if (first_launch && !job) { first_launch = false; try { choose(); } catch (const std::exception& error) { message(window.get(), error.what()); running = false; } }
-        if (smoke && ++frames == 3) {
+        if(scene_smoke){std::ofstream(root/"scene-menu-return.txt")<<"Returned to main menu.\n";running=false;}
+        else if (smoke && ++frames == 3) {
             save_settings(settings_path, settings);
             auto persisted = load_settings(settings_path);
             if (persisted.width != settings.width) throw std::runtime_error("Menu settings persistence failed.");
@@ -279,7 +335,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     if (!raw) return 1;
     std::vector<std::wstring> args(raw, raw + argc); LocalFree(raw);
     fs::path root;
-    bool command = false, smoke = false;
+    bool command = false, smoke = false,scene_smoke=false;
+    fs::path archive_override;
     try {
         root = user_root();
         for (std::size_t i = 1; i < args.size(); ++i) {
@@ -288,6 +345,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                 root = fs::absolute(fs::path(args[i]));
             }
             if (args[i] == L"--smoke-test") smoke = true;
+            if(args[i]==L"--scene-smoke-test"){scene_smoke=true;smoke=true;command=true;}
+            if(args[i]==L"--archive"){if(++i>=args.size())throw std::runtime_error("Missing archive argument.");archive_override=fs::absolute(fs::path(args[i]));}
             if (args[i] == L"--inspect-iso" || args[i] == L"--import-iso" || args[i] == L"--check-cache") command = true;
         }
         fs::create_directories(root);
@@ -309,7 +368,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             }
             if (args[i] == L"--check-cache") { recover_import(root); return cache_valid(root) ? 0 : 1; }
         }
-        return run_app(root, smoke);
+        return run_app(root, smoke,scene_smoke,archive_override);
     } catch (const std::exception& error) {
         if (!root.empty()) { std::ofstream log(root / "last-error.txt"); log << error.what() << '\n'; }
         if (!command && !smoke) MessageBoxW(nullptr, wide(error.what()).c_str(), L"Ashford's Halberd", MB_OK | MB_ICONERROR);

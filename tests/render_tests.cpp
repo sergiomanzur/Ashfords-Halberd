@@ -45,6 +45,15 @@ int main() {
     ck(blue > 100);
     std::swap(scene.meshes[0], scene.meshes[1]);
     ck(render_overview(scene, 64, 64).rgb == covered.rgb);
+    auto excluded = scene.meshes[0];
+    excluded.initially_hidden = true;
+    for (auto &t : excluded.triangles)
+      for (auto &corner : t.corners) {
+        corner.position.x += 1000;
+        corner.position.y += 1000;
+      }
+    scene.meshes.push_back(excluded);
+    ck(render_overview(scene, 64, 64).rgb == covered.rgb);
     bool rejected = false;
     try {
       render_overview(scene, 0, 64);

@@ -1,5 +1,6 @@
 #include "assets.hpp"
 #include "scene.hpp"
+#include "camera.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -34,6 +35,7 @@ int wmain(int argc,wchar_t** argv) {
                 std::string scene_columns="\t\t";
                 if(argc==4) {
                     auto scene=decode_room_scene(data);size_t triangles=0;
+                    decode_room_cuts(data);
                     for(const auto& mesh:scene.meshes)triangles+=mesh.triangles.size();
                     scene_columns="\t"+std::to_string(triangles)+"\t"+std::to_string(scene.textures.size());
                 }

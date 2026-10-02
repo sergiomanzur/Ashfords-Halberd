@@ -13,6 +13,7 @@ struct Settings {
     int width = 1120, height = 720;
     std::string mode = "windowed";
     bool vsync = true;
+    int viewer_room=0,viewer_cut=0,viewer_variant=0;
 };
 Settings load_settings(const fs::path& path);
 void save_settings(const fs::path& path, const Settings& settings);

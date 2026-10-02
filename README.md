@@ -4,8 +4,8 @@ A native PC port project for Resident Evil: Code Veronica X, based on
 [recvx-decomp](https://github.com/AshfordFamily/recvx-decomp).
 Players supply their own USA PS2 disc image (SLUS-20184).
 
-This repository contains the first Windows application foundation: a native
-executable, in-game main menu, ISO validation/import, and persistent settings.
+This repository contains a native Windows development build with a main menu,
+ISO validation/import, persistent settings, and an original-room camera viewer.
 It does not yet load playable rooms or run the original game logic.
 
 ## Run the Windows foundation
@@ -20,7 +20,8 @@ the original ISO may be moved without preventing startup.
 Settings are in `%LOCALAPPDATA%\AshfordsHalberd\AshfordsHalberd.ini`.
 Imported assets are in that directory's `assets` subfolder. Options in the
 main menu currently control resolution, window mode, and VSync; Game Data
-allows ISO reselection. Use the mouse, arrows/Enter/Escape, or a controller's
+allows ISO reselection. Room Viewer displays imported rooms and camera snapshots.
+Use the mouse, arrows/Enter/Escape, or a controller's
 D-pad/A/B. Settings changes are saved immediately with backup/recovery handling.
 
 New Game is marked in development. The original playable room slice and
@@ -104,6 +105,7 @@ is a separate setup and is not required by the native toolchain smoke check.
 The native asset module now decodes every main-room scene in the supplied USA
 archive. Development tools can validate the scenes and produce textured
 overviews entirely headlessly; see [native scene status](docs/native-scene-status.md).
-The next work is authored camera/visibility behavior and a real-time renderer,
-followed by adapting player and event logic. A completed decompilation still
+The menu now offers a native Room Viewer with original camera snapshots and
+persistent selections; see [viewer status](docs/authored-camera-viewer-status.md).
+The next work is adapting player and event logic. A completed decompilation still
 requires these console-service replacements to execute on a PC.

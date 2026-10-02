@@ -1,4 +1,5 @@
 #pragma once
+#include "camera.hpp"
 #include "scene.hpp"
 namespace ashford {
 struct RasterImage {
@@ -8,4 +9,6 @@ struct RasterImage {
 // Development overview camera, independent of SDL or a desktop window.
 RasterImage render_overview(const Scene &scene, uint32_t width,
                             uint32_t height);
+RasterImage render_camera(const Scene &scene, const Camera &camera,
+                          uint32_t width, uint32_t height);
 } // namespace ashford

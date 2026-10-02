@@ -65,8 +65,8 @@ Bytes model() {
   p16(b, 294, 3);
   for (int i = 0; i < 3; ++i) {
     p16(b, 296 + i * 6, uint16_t(i));
-    p16(b, 298 + i * 6, uint16_t(i == 1 ? 255 : 0));
-    p16(b, 300 + i * 6, uint16_t(i == 2 ? 255 : 0));
+    p16(b, 298 + i * 6, uint16_t(i == 1 ? 1023 : 0));
+    p16(b, 300 + i * 6, uint16_t(i == 2 ? 1023 : 0));
   }
   b[314] = 255;
   return b;
@@ -74,10 +74,19 @@ Bytes model() {
 int main() {
   try {
     auto b = model();
+    p32(b, 16, 15);
+    ck(decode_model(b, 0).empty());
+    ck(decode_model(b, 0, true)[0].initially_hidden);
+    b = model();
     auto meshes = decode_model(b, 0);
     ck(meshes.size() == 1 && meshes[0].triangles.size() == 1);
     ck(meshes[0].triangles[0].corners[1].position.x == 1 &&
        meshes[0].triangles[0].corners[1].u == 1);
+    b[288] = 65;
+    p16(b, 304, 255);
+    p16(b, 312, 255);
+    ck(decode_model(b, 0)[0].triangles[0].corners[1].u == 1);
+    b = model();
     p16(b, 290, 12);
     b[314] = 0;
     b[316] = 255;
@@ -119,10 +128,15 @@ int main() {
     ck(std::abs(decode_model(b, 0)[0].triangles[0].corners[1].position.y - 1) <
        .00001);
     b = model();
-    auto original=b;
-    for(size_t i=0;i<28;++i)b[296+i]=original[288+i];
-    b[288]=17;p16(b,290,2);
-    b[292]=0;b[293]=0;b[294]=255;b[295]=255;
+    auto original = b;
+    for (size_t i = 0; i < 28; ++i)
+      b[296 + i] = original[288 + i];
+    b[288] = 17;
+    p16(b, 290, 2);
+    b[292] = 0;
+    b[293] = 0;
+    b[294] = 255;
+    b[295] = 255;
     auto material = decode_model(b, 0)[0].triangles[0].color;
     ck(material[0] == 255 && material[2] == 0);
     Bytes t(16 + 48 + 2 + 1024);

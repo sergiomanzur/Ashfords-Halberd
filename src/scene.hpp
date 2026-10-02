@@ -17,12 +17,14 @@ struct Triangle {
 struct Mesh {
   uint32_t object = 0;
   std::vector<Triangle> triangles;
+  bool initially_hidden = false;
 };
 struct Texture {
   uint32_t width = 0, height = 0;
   Bytes rgba;
 };
-std::vector<Mesh> decode_model(const Bytes &data, size_t offset);
+std::vector<Mesh> decode_model(const Bytes &data, size_t offset,
+                               bool include_hidden = false);
 Texture decode_tim2(const Bytes &data, size_t offset, size_t size);
 std::vector<Texture> decode_texture_pack(const Bytes &data, size_t offset);
 struct Scene {

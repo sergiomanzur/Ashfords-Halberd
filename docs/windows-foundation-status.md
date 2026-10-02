@@ -1,7 +1,7 @@
 # Windows foundation — 2026-10-02
 
 The first Step 1 increment is implemented. The full Step 1 playable slice
-remains incomplete: there is no room renderer or adapted gameplay yet.
+remains incomplete. A native room viewer is now available, with no adapted gameplay yet.
 
 ## Delivered behavior
 
@@ -21,7 +21,7 @@ remains incomplete: there is no room renderer or adapted gameplay yet.
 
 ## Verification
 
-`tools/build.ps1` compiles the executable, runs six CTest entries, and packages
+`tools/build.ps1` compiles the executable, runs eight CTest entries, and packages
 the result. The checks cover core settings/disc boundaries, native SDL/text menu
 rendering, and standalone executable startup from another directory with only
 the Windows system directory on PATH. Malformed test inputs include wrong
@@ -85,7 +85,10 @@ expands to 5,392,084 bytes and contains three camera cuts, two enemy entries,
 Native model/texture decoding and a headless overview renderer are now implemented;
 see [native scene status](native-scene-status.md) for verified coverage and limits.
 
-Next, reproduce an authored camera, identify two connected rooms,
+The native menu now includes Room Viewer with original camera snapshots;
+see [viewer status](authored-camera-viewer-status.md).
+
+Next, adapt player animation and movement, identify two connected rooms,
 implement a native rendering backend, and begin adapting the original game
 logic through explicit console-service replacements. The over-the-shoulder
 camera remains a required Step 2 enhancement, with no nonfunctional toggle
