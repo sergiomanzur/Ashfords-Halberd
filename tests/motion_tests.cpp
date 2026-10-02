@@ -196,6 +196,58 @@ int main() {
     std::copy(bank.begin(), bank.end(), populated_room.begin() + 1300);
     auto populated_bank = decode_room_motion_bank(populated_room);
     ck(populated_bank[1]->frames == 2 && !populated_bank[0]);
+    auto enemy_room = populated_room;
+    put(enemy_room, 1440, 1);
+    put(enemy_room, 1476, 1);
+    put(enemy_room, 1440 + 4, 67);
+    put(enemy_room, 1476 + 4, 67);
+    put(enemy_room, 1200, 1300);
+    put(enemy_room, 1204, 0);
+    auto enemy_banks = decode_room_enemy_motion_banks(enemy_room);
+    ck(enemy_banks.size() == 2 && enemy_banks[0] == enemy_banks[1] &&
+       enemy_banks[0]->size() == 512 && (*enemy_banks[0])[1]->frames == 2);
+    // Sharing follows runtime enemy IDs and load order.
+    put(enemy_room, 1476 + 4, 68);
+    enemy_banks = decode_room_enemy_motion_banks(enemy_room);
+    ck(enemy_banks[0] != enemy_banks[1] && !(*enemy_banks[1])[1]);
+    put(enemy_room, 1200, 0);
+    put(enemy_room, 1476 + 4, 67);
+    enemy_banks = decode_room_enemy_motion_banks(enemy_room);
+    ck(enemy_banks[0] == enemy_banks[1] && !(*enemy_banks[0])[1]);
+    put(enemy_room, 24, 1200);
+    put(enemy_room, 1200, 1300);
+    put(enemy_room, 1204, 0);
+    put(enemy_room, 1440, 0);
+    put(enemy_room, 1440 + 4, 68);
+    enemy_banks = decode_room_enemy_motion_banks(enemy_room);
+    ck((*enemy_banks[0])[1] && !(*enemy_banks[1])[1] &&
+       enemy_banks[0] != enemy_banks[1]);
+    // The inactive authored entry's ID never enters the runtime cache.
+    put(enemy_room, 1440 + 4, 128);
+    ck(decode_room_enemy_motion_banks(enemy_room).size() == 2);
+    put(enemy_room, 1440, 1);
+    put(enemy_room, 1440 + 4, 67);
+    put(enemy_room, 1200, 0);
+    put(enemy_room, 1204, 1300);
+    enemy_banks = decode_room_enemy_motion_banks(enemy_room);
+    ck(enemy_banks[0] != enemy_banks[1] && !(*enemy_banks[0])[1] &&
+       (*enemy_banks[1])[1]->frames == 2);
+    bad([&] { decode_room_enemy_motion_banks(enemy_room, 3); });
+    put(enemy_room, 1200, 1300);
+    enemy_banks = decode_room_enemy_motion_banks(enemy_room);
+    ck(enemy_banks[0] != enemy_banks[1] && (*enemy_banks[0])[1] &&
+       (*enemy_banks[1])[1]);
+    bad([&] { decode_room_enemy_motion_banks(enemy_room, 7); });
+    ck(decode_room_enemy_motion_banks(enemy_room, 8).size() == 2);
+    put(enemy_room, 1204, 1208);
+    bad([&] { decode_room_enemy_motion_banks(enemy_room); });
+    put(enemy_room, 1204, 1300);
+    put(enemy_room, 1476 + 4, 128);
+    bad([&] { decode_room_enemy_motion_banks(enemy_room); });
+    put(enemy_room, 1476 + 4, 67);
+    put(enemy_room, 24, 0);
+    enemy_banks = decode_room_enemy_motion_banks(enemy_room);
+    ck(enemy_banks[0] == enemy_banks[1] && !(*enemy_banks[0])[1]);
     put(populated_room, 1212, uint32_t(1300 + bank.size() - 1));
     bad([&] { decode_room_motion_bank(populated_room); });
     ck(m.frames == 2 && m.tracks.size() == 1 && m.flags == 0x80);

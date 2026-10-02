@@ -6,6 +6,7 @@
 #include "scenario.hpp"
 #include "motion.hpp"
 #include "actor.hpp"
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -40,6 +41,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t corridor_controls=0;
         size_t corridor_door_requests=0;
         size_t room_motions=0, room_motion_poses=0;
+        size_t enemy_motions=0, enemy_motion_poses=0;
         size_t corridor_actor_poses=0;
         size_t corridor_model_rebuilds=0;
         for(size_t i=0;i<entries.size();++i) {
@@ -51,6 +53,19 @@ int wmain(int argc,wchar_t** argv) {
                 auto scenario=decode_room_scenario(data);
                 scenario_entries+=scenario.entry_count();
                 if(scenario_check) {
+                    auto enemy_motion_banks=decode_room_enemy_motion_banks(data);
+                    std::vector<const MotionBank*> checked_banks;
+                    for(const auto& enemy_bank:enemy_motion_banks) {
+                        if(std::find(checked_banks.begin(),checked_banks.end(),enemy_bank.get())!=checked_banks.end())continue;
+                        checked_banks.push_back(enemy_bank.get());
+                        for(const auto& motion:*enemy_bank)if(motion) {
+                            ++enemy_motions;
+                            for(uint32_t frame:{0u,motion->frames/2,motion->frames-1}) {
+                                sample_motion(*motion,int64_t(frame)*65536,true);
+                                ++enemy_motion_poses;
+                            }
+                        }
+                    }
                     auto bank=decode_room_motion_bank(data);
                     for(const auto& motion:bank) if(motion) {
                         ++room_motions;
@@ -86,9 +101,19 @@ int wmain(int argc,wchar_t** argv) {
                         controller.enemies[0].model=std::make_shared<const ActorModel>(enemies[0].models[0]);
                         controller.enemies[0].flags=records.enemies[0].flags;
                         controller.enemies[0].id=records.enemies[0].id;
+                        controller.enemies[0].motions=enemy_motion_banks[0];
+                        controller.enemies[0].position=records.enemies[0].position;
+                        controller.enemies[0].angles={0,records.enemies[0].rotation_y,0};
                         controller.room_motions=std::make_shared<const std::vector<std::optional<Motion>>>(bank);
                         controller.flags[6][0]=0x12;
                         controller.flags[4][0]=0x80000000;
+                        tick_scenario_actors(controller);
+                        int32_t startup_frame=(*enemy_motion_banks[0])[0]?32768:0;
+                        if(controller.enemies[0].frame!=startup_frame || controller.enemies[0].modes[3]!=3 ||
+                           !controller.enemies[0].rendered_model || controller.enemies[0].rendered_model->meshes.empty())
+                            throw std::runtime_error("Retail corridor startup actor mismatch");
+                        tick_scenario_actors(controller);
+                        if(controller.enemies[0].frame!=startup_frame)throw std::runtime_error("Retail corridor startup hold mismatch");
                         start_scenario_event(controller,0,0);
                         tick_scenario_tasks(controller);
                         auto hold_pc=controller.tasks[0].pc;
@@ -209,6 +234,7 @@ int wmain(int argc,wchar_t** argv) {
         if(!output) throw std::runtime_error("Could not write room report");
         std::cout<<"Validated "<<entries.size()<<" rooms and "<<scenario_entries<<" scenario entry slots\n";
         if(scenario_check) {
+            std::cout<<"Decoded "<<enemy_motions<<" enemy motions and sampled "<<enemy_motion_poses<<" poses\n";
             std::cout<<"Decoded "<<room_motions<<" room motions and sampled "<<room_motion_poses<<" poses\n";
             std::cout<<"Posed "<<corridor_actor_poses<<" retail corridor actor frames\n";
             std::cout<<"Executed "<<corridor_model_rebuilds<<" complete corridor events with native blended actor advancement through frame 149\n";

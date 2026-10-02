@@ -646,6 +646,41 @@ int main() {
       tick_scenario_actors(transformed);
     ck(bound.blend_count == 0 && bound.frame == 16 * 65536 &&
        bound.joint_pose[0].position->x == 26);
+    ScenarioState startup;
+    startup.flags[6][0] = 2;
+    startup.enemies.push_back(bound);
+    auto &starting = startup.enemies[0];
+    starting.modes = {};
+    starting.control2 = 0;
+    starting.frame = 42 * 65536;
+    starting.motion_number = 123;
+    starting.motion_step = 65536;
+    starting.blend_count = 7;
+    starting.blend_rate = 900;
+    starting.frame_direction = 0xffffffff;
+    starting.joint_pose.clear();
+    tick_scenario_actors(startup);
+    ck(starting.modes[0] == 1 && starting.modes[3] == 3 &&
+       starting.motion_number == 0 && starting.motion_step == 32768 &&
+       starting.motion_mode == 0x20 && starting.frame == 32768 &&
+       starting.frame_direction == 0 && starting.blend_count == 0 &&
+       starting.blend_rate == 0 && starting.joint_pose[0].position->x == 26);
+    tick_scenario_actors(startup);
+    ck(starting.frame == 32768 && starting.rendered_model.has_value());
+    starting.motions = std::make_shared<const MotionBank>(512);
+    starting.modes = {};
+    starting.joint_pose.clear();
+    tick_scenario_actors(startup);
+    ck(starting.frame == 0 && starting.modes[3] == 3 &&
+       starting.joint_pose.empty() && !starting.rendered_model->meshes.empty());
+    tick_scenario_actors(startup);
+    ck(starting.frame == 0);
+    starting.motions = animated_bank;
+    starting.modes[3] = 0;
+    starting.joint_pose.clear();
+    tick_scenario_actors(startup);
+    ck(starting.frame == 32768 && starting.modes[3] == 1 &&
+       starting.blend_count == 7 && starting.joint_pose[0].position->x == 12);
     bound.state_flags = 0x40000000;
     tick_scenario_actors(transformed);
     ck(bound.frame == 16 * 65536);

@@ -698,8 +698,10 @@ void tick_scenario_actors(ScenarioState &state) {
   for (auto &entity : state.enemies) {
     if (!(entity.flags & 1) || (entity.state_flags & 0x41000000))
       continue;
-    if (entity.id != 67 || entity.modes[0] != 1 || entity.modes[2] != 0 ||
-        entity.control2 != 10 || entity.modes[3] > 1)
+    if (entity.id != 67 || entity.modes[0] > 1 ||
+        (entity.modes[0] == 1 &&
+         (entity.modes[2] != 0 ||
+          (entity.control2 != 0 && entity.control2 != 10))))
       throw std::runtime_error("Unsupported scenario actor controller");
     if (!entity.model || !entity.motions || (entity.flags & 0x1080) ||
         (entity.motion_mode & 2) || entity.blend_count < 0)
@@ -707,12 +709,33 @@ void tick_scenario_actors(ScenarioState &state) {
     entity.previous_position = entity.position;
     entity.previous_angles = entity.angles;
     entity.flags = (entity.flags | 0x8100) & ~2u;
-    if (!entity.modes[3]) {
+    bool update_motion = true;
+    if (!entity.modes[0]) {
+      // subpl.c::init_subpl -> em60_init samples once, then holds mode3=3.
+      entity.modes[0] = 1;
+      entity.modes[3] = 3;
+      entity.blend_rate = 0;
+      entity.blend_count = 0;
+      entity.motion_step = 32768;
+      entity.frame = 0;
+      entity.motion_number = 0;
+      entity.motion_mode = 0x20;
+      entity.frame_direction = 0;
+    } else if (!entity.modes[3]) {
       entity.modes[3] = 1;
       entity.motion_number = entity.modes[1];
+      if (entity.control2 == 0)
+        entity.blend_count = 8;
       entity.blend_rate = 0;
       entity.motion_mode &= ~0x100u;
       entity.frame_direction = 0;
+    } else {
+      update_motion = entity.modes[3] == 1;
+    }
+    if (!update_motion) {
+      entity.rendered_model = pose_actor_rotated(
+          *entity.model, entity.joint_pose, entity.position, entity.angles);
+      continue;
     }
     if (entity.motion_number >= entity.motions->size())
       throw std::runtime_error("Scenario actor motion outside bank");

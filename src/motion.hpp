@@ -1,6 +1,7 @@
 #pragma once
 #include "scene.hpp"
 #include <optional>
+#include <memory>
 namespace ashford {
 struct MotionTrack {
   std::vector<Vec3> positions;
@@ -36,6 +37,13 @@ decode_motion_bank(const Bytes &data, size_t begin, size_t end,
 // Runtime storage has 512 slots, including null slots for absent records.
 std::vector<std::optional<Motion>>
 decode_room_motion_bank(const Bytes &data, size_t key_limit = 2000000);
+using MotionBank = std::vector<std::optional<Motion>>;
+// bhFinishRoom/bhSetEneMtn: runtime slots contain compacted active authored
+// enemies followed by zero-initialized slots. Null pointers reuse the latest
+// bank for that runtime ID; nonzero pointers replace it. Results are in
+// runtime-slot order, including the trailing unallocated slots.
+std::vector<std::shared_ptr<const MotionBank>>
+decode_room_enemy_motion_banks(const Bytes &data, size_t key_limit = 2000000);
 // Original 16.16 frame position; optional SetMtnSlow interpolation.
 std::vector<JointPose> sample_motion(const Motion &motion, int64_t frame_fixed,
                                      bool interpolate = false);

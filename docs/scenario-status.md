@@ -95,12 +95,16 @@ source speed/mode/blend fields without immediately posing. Other selection
 modes, calculation options and companion updates remain unsupported. FrameCheck
 supports player, mapped enemy and object 16.16 frames, including the half-frame
 offset. The native actor update now implements the corridor's `bhSubpl` path
-(ID 67, mode 1, controller 10), including startup, motion-number replacement,
+(ID 67, initialization and mode 1 controllers 0/10), including startup,
+motion-number replacement,
 16-step pose blending, attributes sampled before frame advancement and model
 rebuilding. It runs before the event update, as in the original game loop.
 The headless probe executes the unchanged corridor event through frame 149
 and exit using this actor update, with no assigned completion frame, then
-verifies the 150-frame loop wraps. Other actor controllers, initialization,
+verifies the 150-frame loop wraps. Regular motion banks are loaded in runtime
+slot order with the original per-ID reuse. The probe initializes the corridor
+actor and verifies its empty-bank hold before script selection. Other actor
+controllers and their initialization,
 mirroring, linked matrices and joint overrides remain to port. The application
 gameplay loop is not yet connected to these native updates.
 Player/effect bindings and sound commands remain unsupported.

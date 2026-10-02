@@ -53,6 +53,25 @@ uses the room bank. The headless retail room probe decoded 624 motions across
 205 rooms and sampled 1,872 first/middle/last poses, including the corridor's
 motion 0. This verifies decoding and sampling, not actor-controller playback.
 
+Regular enemy banks now follow `bhFinishRoom`/`bhSetEneMtn`. Model loading
+compacts active authored enemies into runtime slots; motion loading walks
+those slots, including trailing zero-initialized slots, rather than the ETTY
+IDs directly. A zero pointer shares the latest bank for the runtime enemy ID
+or creates an empty 512-slot bank; a nonzero pointer creates and replaces it.
+The decoder bounds every bank and enforces an aggregate key budget across
+new allocations. Synthetic checks cover load order, repeated IDs, inactive
+entries, replacement, null banks and cumulative limits. The headless retail
+probe decoded 20,429 enemy motions and sampled 61,287 first/middle/last poses
+across all 205 rooms. No retail bytes enter tests or distribution.
+
+The corridor ID67 controller now runs `init_subpl`/`em60_init`: it initializes
+motion 0, half-frame speed, zero blending and mode3=3, samples a present bank
+once and subsequently holds its frame while rebuilding the model. Retail
+RM_0010 has no regular startup motion, so it retains the model bind pose and
+frame zero until the event selects a room motion. Both populated and empty
+startup banks have synthetic coverage; the retail probe checks startup and
+hold before executing the unchanged corridor event.
+
 Step 1 remains incomplete. Next is application integration and original
 movement/collision, room interactions
 and transitions, enemy combat, inventory, audio and versioned save/load.

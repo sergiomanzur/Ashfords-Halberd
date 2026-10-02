@@ -1,4 +1,5 @@
 #include "motion.hpp"
+#include "room.hpp"
 // Adapted from MIT recvx-decomp binfunc.c::bhMnbBinRealize and
 // Motion.c::SetMtnNormal/SetMtnFast/SetMtnSlow. Disk pointers stay offsets.
 #include <cmath>
@@ -178,6 +179,59 @@ std::vector<std::optional<Motion>> decode_room_motion_bank(const Bytes &data,
   }
   auto result = decode_motion_bank(data, begin, end, key_limit);
   result.resize(512);
+  return result;
+}
+std::vector<std::shared_ptr<const MotionBank>>
+decode_room_enemy_motion_banks(const Bytes &data, size_t key_limit) {
+  if (data.size() > 64 * 1024 * 1024)
+    throw std::runtime_error("Room enemy motion input exceeds limit");
+  auto records = decode_room_records(data);
+  if (records.enemies.size() > 128)
+    throw std::runtime_error("Too many room enemy motion pointers");
+  Reader r{data};
+  size_t table = r.u32(24), count = records.enemies.size() + 3;
+  if (table)
+    r.range(table, count * 4);
+  std::array<std::shared_ptr<const MotionBank>, 128> cache{};
+  // bhSetRoom allocates only active authored enemies into the first free
+  // runtime slot. bhFinishRoom then walks ene[] rather than the ETTY table.
+  std::vector<uint16_t> runtime_ids(records.enemies.size());
+  size_t active = 0;
+  for (const auto &enemy : records.enemies)
+    if (enemy.flags & 1)
+      runtime_ids[active++] = enemy.id;
+  std::vector<std::shared_ptr<const MotionBank>> result;
+  for (size_t i = 0; i < records.enemies.size(); ++i) {
+    auto id = runtime_ids[i];
+    if (id >= cache.size())
+      throw std::runtime_error("Room enemy motion ID outside cache");
+    size_t begin = table ? r.u32(table + i * 4) : 0;
+    if (begin) {
+      if (begin < table + count * 4 || begin >= data.size())
+        throw std::runtime_error("Enemy motion bank overlaps pointer table");
+      size_t end = data.size();
+      for (size_t j = 0; j < count; ++j) {
+        size_t pointer = r.u32(table + j * 4);
+        if (pointer > begin && pointer < end)
+          end = pointer;
+      }
+      for (size_t header : {16u, 20u, 24u, 28u, 32u}) {
+        size_t pointer = r.u32(header);
+        if (pointer > begin && pointer < end)
+          end = pointer;
+      }
+      auto bank = decode_motion_bank(data, begin, end, key_limit);
+      for (const auto &motion : bank)
+        if (motion)
+          for (const auto &track : motion->tracks)
+            key_limit -= track.positions.size() + track.angles.size();
+      bank.resize(512);
+      cache[id] = std::make_shared<const MotionBank>(std::move(bank));
+    } else if (!cache[id]) {
+      cache[id] = std::make_shared<const MotionBank>(512);
+    }
+    result.push_back(cache[id]);
+  }
   return result;
 }
 Motion decode_motion(const Bytes &data, size_t key_limit) {
