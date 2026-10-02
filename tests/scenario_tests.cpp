@@ -86,6 +86,145 @@ int main() {
     state.interaction_index = 3;
     run_scenario(Bytes{4, 10, 23, 0, 3, 0, 55, 9, 0, 0}, state);
     ck(state.room_case == 9);
+    ScenarioState inventory;
+    inventory.equipped_weapon = 1;
+    run_scenario(Bytes{38, 1, 55, 4, 0, 0}, inventory);
+    ck(inventory.room_case == 4);
+    run_scenario(Bytes{38, 2, 55, 5, 0, 0}, inventory);
+    ck(inventory.room_case == 4);
+    inventory.player_id = 1;
+    inventory.inventory[16] = 31u << 16;
+    inventory.inventory[28] = 31u << 16;
+    run_scenario(Bytes{17, 31, 55, 6, 0, 0}, inventory);
+    ck(inventory.room_case == 4);
+    inventory.inventory[17] = 31u << 16;
+    run_scenario(Bytes{17, 31, 55, 6, 0, 0}, inventory);
+    ck(inventory.room_case == 6);
+    inventory.inventory[27] = 0x01480001;
+    run_scenario(Bytes{17, 72, 0, 0}, inventory);
+    ck(inventory.flags[4][0] & 0x10000);
+    inventory.player_health = 100;
+    run_scenario(Bytes{182, 7, 0, 0}, inventory);
+    ck(inventory.room_sound_case == 7);
+    run_scenario(Bytes{7, 0, 5, 2, 100, 0, 55, 7, 0, 0}, inventory);
+    ck(inventory.room_case == 7);
+    run_scenario(Bytes{7, 0, 5, 3, 100, 0, 55, 8, 0, 0}, inventory);
+    ck(inventory.room_case == 7);
+    Bytes loop_room(1300);
+    put(loop_room, 0, 0x41200000);
+    put(loop_room, 16, 128);
+    put(loop_room, 28, 1200);
+    put(loop_room, 32, 1240);
+    put(loop_room, 1200, 12);
+    put(loop_room, 1204, 14);
+    put(loop_room, 1208, 16);
+    Bytes for_code{250, 0, 3, 0, 55, 1, 254, 251, 0, 55, 2, 255, 0};
+    std::copy(for_code.begin(), for_code.end(), loop_room.begin() + 1216);
+    ScenarioState loops;
+    loops.scenario =
+        std::make_shared<RoomScenario>(decode_room_scenario(loop_room));
+    loops.flags[6][0] = 0x10;
+    start_scenario_event(loops, 0, 0);
+    tick_scenario_tasks(loops);
+    ck(loops.tasks[0].counts[0] == 3 && loops.tasks[0].count2 == 3 &&
+       loops.tasks[0].count3 == 3);
+    tick_scenario_tasks(loops);
+    ck(loops.tasks[0].counts[0] == 2 && loops.tasks[0].count2 == 2);
+    tick_scenario_tasks(loops);
+    ck(loops.tasks[0].counts[0] == 1 && loops.tasks[0].count2 == 1);
+    tick_scenario_tasks(loops);
+    ck(loops.room_case == 2 && loops.tasks[0].loop == -1 &&
+       !loops.tasks[0].active);
+    Bytes while_code{252, 4, 38, 1, 254, 253, 55, 9, 255, 0};
+    std::copy(while_code.begin(), while_code.end(), loop_room.begin() + 1216);
+    loops.scenario =
+        std::make_shared<RoomScenario>(decode_room_scenario(loop_room));
+    loops.tasks = {};
+    loops.equipped_weapon = 1;
+    loops.room_case = 0;
+    start_scenario_event(loops, 0, 0);
+    tick_scenario_tasks(loops);
+    ck(loops.tasks[0].pc == 5);
+    tick_scenario_tasks(loops);
+    ck(loops.tasks[0].pc == 5 && loops.room_case == 0);
+    loops.equipped_weapon = 0;
+    tick_scenario_tasks(loops);
+    ck(loops.tasks[0].pc == 6 && loops.tasks[0].loop == -1);
+    tick_scenario_tasks(loops);
+    ck(loops.room_case == 9 && !loops.tasks[0].active);
+    loops.tasks[0].counts[0] = 99;
+    loops.tasks[0].count2 = 77;
+    start_scenario_event(loops, 0, 0);
+    ck(loops.tasks[0].counts[0] == 99 && loops.tasks[0].count2 == 77);
+    loops.tasks[0].loop_bodies[0] = 1234;
+    loops.tasks[0].count3 = 88;
+    start_scenario_event(loops, 0, 0);
+    ck(loops.tasks[0].loop_bodies[0] == 1234 && loops.tasks[0].count3 == 88);
+    Bytes nested_for{250, 0, 2, 0, 248, 249, 1, 0, 251, 0, 55, 2, 255, 0};
+    std::copy(nested_for.begin(), nested_for.end(), loop_room.begin() + 1216);
+    loops.scenario =
+        std::make_shared<RoomScenario>(decode_room_scenario(loop_room));
+    loops.tasks = {};
+    start_scenario_event(loops, 0, 0);
+    tick_scenario_tasks(loops);
+    ck(loops.tasks[0].loop == 0 && loops.tasks[0].counts[0] == 2 &&
+       loops.tasks[0].pc == 8);
+    tick_scenario_tasks(loops);
+    ck(loops.tasks[0].counts[0] == 1 && loops.tasks[0].pc == 8);
+    tick_scenario_tasks(loops);
+    ck(!loops.tasks[0].active && loops.tasks[0].loop == -1);
+    for (uint16_t count : {uint16_t(0), uint16_t(65535)}) {
+      Bytes endless{250, 0, uint8_t(count), uint8_t(count >> 8), 55, 2, 251, 0,
+                    255, 0};
+      std::copy(endless.begin(), endless.end(), loop_room.begin() + 1216);
+      loops.scenario =
+          std::make_shared<RoomScenario>(decode_room_scenario(loop_room));
+      loops.tasks = {};
+      start_scenario_event(loops, 0, 0);
+      bad([&] { tick_scenario_tasks(loops); });
+      ck(loops.tasks[0].loop == 0 && loops.tasks[0].counts[0] < 0);
+    }
+    Bytes too_deep;
+    for (int i = 0; i < 7; ++i) {
+      too_deep.push_back(252);
+      too_deep.push_back(2);
+    }
+    too_deep.push_back(255);
+    too_deep.push_back(0);
+    std::copy(too_deep.begin(), too_deep.end(), loop_room.begin() + 1216);
+    loops.scenario =
+        std::make_shared<RoomScenario>(decode_room_scenario(loop_room));
+    loops.tasks = {};
+    start_scenario_event(loops, 0, 0);
+    bad([&] { tick_scenario_tasks(loops); });
+    ck(loops.tasks[0].loop == 5);
+    start_scenario_event(loops, 0, 0);
+    loops.tasks[0].loop = -2;
+    bad([&] { tick_scenario_tasks(loops); });
+    ck(loops.tasks[0].loop == -2);
+    inventory.player_health = 100;
+    for (uint8_t operation = 0; operation < 6; ++operation) {
+      inventory.room_case = 0;
+      run_scenario(Bytes{7, 0, 5, operation, 100, 0, 55, 9, 0, 0}, inventory);
+      ck(inventory.room_case ==
+         ((operation == 0 || operation == 2 || operation == 4) ? 9 : 0));
+    }
+    inventory.player_health = 32768;
+    run_scenario(Bytes{7, 0, 5, 0, 0, 128, 55, 8, 0, 0}, inventory);
+    ck(inventory.room_case == 8);
+    inventory.enemy_slots = {1};
+    inventory.enemies.resize(2);
+    inventory.enemies[1].health = 200;
+    run_scenario(Bytes{7, 0, 10, 0, 200, 0, 55, 7, 0, 0}, inventory);
+    ck(inventory.room_case == 7);
+    bad([&] { run_scenario(Bytes{7, 1, 10, 0, 200, 0, 0, 0}, inventory); });
+    inventory.player_id = 23;
+    inventory.inventory[369] = 72u << 16;
+    inventory.flags[4][0] = 0;
+    run_scenario(Bytes{17, 72, 55, 6, 0, 0}, inventory);
+    ck(inventory.room_case == 6 && inventory.flags[4][0] == 0);
+    inventory.player_id = 24;
+    bad([&] { run_scenario(Bytes{17, 72, 0, 0}, inventory); });
     Bytes scheduled(1300);
     put(scheduled, 0, 0x41200000);
     put(scheduled, 16, 128);

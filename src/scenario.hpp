@@ -39,6 +39,7 @@ struct ScenarioDoor {
 struct ScenarioEntity {
   uint32_t flags = 0, state_flags = 0;
   int32_t angular_speed = 0;
+  int32_t health = 0;
 };
 struct ScenarioTask {
   std::optional<ScenarioProgram> program;
@@ -46,11 +47,14 @@ struct ScenarioTask {
   size_t pc = 0;
   int loop = -1;
   std::array<int32_t, 4> counts{};
+  std::array<size_t, 6> loop_bodies{}, loop_conditions{};
+  int32_t count2 = 0, count3 = 0;
 };
 struct ScenarioState {
   std::array<std::array<uint32_t, 32>, 17> flags{};
   uint8_t room_case = 0, interaction_index = 0, floor_index = 0;
   uint8_t stage = 0, room = 0, player_sleep_ticks = 0;
+  int32_t room_sound_case = 0;
   std::optional<ScenarioDoor> door;
   // Caller binds current runtime entities, including the authored-enemy to
   // allocated-work-slot map produced during room loading.
@@ -62,6 +66,10 @@ struct ScenarioState {
   uint32_t event_timer = 0;
   int conditional_depth = 0;
   int64_t branch_cursor = 0;
+  std::array<uint32_t, 384> inventory{};
+  uint8_t player_id = 0;
+  int32_t equipped_weapon = 0, player_health = 0, message_selection = 0,
+          status_timer = 0;
 };
 // Native control and event scheduling subset. Unsupported instructions fail
 // explicitly; entity controllers and audiovisual instructions are pending.

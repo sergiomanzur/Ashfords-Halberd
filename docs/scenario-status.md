@@ -11,8 +11,9 @@ following outer-header section, allowing distinct entry points to share tails.
 All entries share one immutable event block. All 205 retail rooms passed native
 decoding, totaling 4,363 entry slots.
 
-The synchronous interpreter supports END, IF/ELSE/ENDIF, CK, SET, ItmCk,
-ItmSetCk, InitModelSet, EtcAtariSet2, ItmAspdSet, SetDoorCall and RoomCaseNo.
+The synchronous interpreter supports END, IF/ELSE/ENDIF, CK, SET, CmpW,
+PlItemCheck, ArmsItemCheck, ItmCk, ItmSetCk, InitModelSet, EtcAtariSet2,
+ItmAspdSet, SetDoorCall, RoomCaseNo and RoomSoundCase.
 CK/SET preserve MSB-first flags, bank capacities and SET's six
 single-bit/tail operations. CK also checks interaction/floor indices for the
 callback bank. IF handling preserves the source G_Sp target cursor rather than
@@ -29,8 +30,19 @@ increments once per enabled pass with at least one active task. A newly started
 higher slot executes in the same pass, while a lower slot waits for the next
 pass. Replacing the current slot retains its running instruction pointer as the
 original scheduler does. Sleep or yield inside a conditional continues through
-the shared branch cursor before returning. These behaviors have headless tests;
-FOR/WHILE loops and wider entity controllers are still pending.
+the shared branch cursor before returning. FOR/NEXT preserve signed 16-bit
+initial counts and cached count2/count3. WHILE/EWHILE retain six body/condition
+pointers, and EWHILE tests the condition at the loop tail. Supported loop
+conditions are CK, CmpW, PlItemCheck and ArmsItemCheck; others fail explicitly.
+Loop types share the nesting index, with four counter slots and six pointer
+slots. Event initialization retains existing counters and loop pointers, as in
+the reference. Wider entity controllers are still pending.
+
+Inventory conditions inspect the original player block's slots 1–11 in the
+384-word inventory and retain item 72's high-byte room-flag side effect. CmpW
+supports the original player/enemy health, message selection and status timer
+fields, its six comparison operators and unsigned 16-bit right-hand values.
+These are native state conditions; inventory management and UI are pending.
 
 Item commands update collected/availability flags, item visibility and pickup
 trigger activation. They preserve the different source masks for item lookup
@@ -46,14 +58,22 @@ complete retail RM_0010 initialization program without skipped commands. Four
 states cover map flag 34 clear/set and items 123/124 uncollected/collected.
 They verify both exit-trigger definitions and pickup persistence. The first
 path creates a direct door; the return path creates an examination trigger.
+Sixteen full idle control passes cover two ticks and two equipped-weapon values
+for those four persistence states. They verify the event starts once and item
+rotation speeds follow the equipped weapon and collected state. Eight scripted
+examination callbacks cover item flag 4 and event flag 120, verifying the room
+case, room sound case and destination request (stage 0, room 2, position 0,
+door type 1). These runs execute the full control program but do not tick its
+scheduled entity controller, which remains unsupported.
 
 SetDoorCall emits a decoded transition request. Applying `bhSetDoorDemo`'s
 player/input/fade state changes, selecting the archive room by stage/room/case,
 loading the destination, and preserving persistent progress are still pending.
-The current subset can execute corridor initialization, but cannot yet execute
-its full per-frame control or the graveyard scripts. Additional inventory checks,
-event loops, entity control and audiovisual commands must be ported before
-that is possible. Unsupported commands are not skipped.
+The current subset can execute corridor initialization and tested control paths.
+Other interaction branches, the scheduled common entity controller and the
+graveyard scripts still need additional commands. RoomSoundCase preserves the
+reference setter's state; native audio playback remains to implement.
+Unsupported commands are not skipped.
 
 The retail RM_0010 control script sets RoomCaseNo before SetDoorCall into
 stage 0, room 2, position 0. Persistent flags choose the first-visit or return

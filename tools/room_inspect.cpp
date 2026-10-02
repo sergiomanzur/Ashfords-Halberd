@@ -35,6 +35,8 @@ int wmain(int argc,wchar_t** argv) {
         std::string text="index\tcompressed_bytes\texpanded_bytes\tversion\tcameras\tenemies\tobjects\titems\twalls\tfloors\tmodel_objects\ttriangles\ttextures\tactive_wall_types\tentry_positions\tentries_with_camera\n";
         size_t scenario_entries=0;
         size_t corridor_initializations=0;
+        size_t corridor_controls=0;
+        size_t corridor_door_requests=0;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
@@ -63,6 +65,39 @@ int wmain(int argc,wchar_t** argv) {
                            bool(state.interactions[3].flags&1)==collected)
                             throw std::runtime_error("Retail corridor initialization mismatch");
                         ++corridor_initializations;
+                        for(int weapon:{0,1}) {
+                            auto controlled=state;
+                            controlled.scenario=std::make_shared<RoomScenario>(scenario);
+                            controlled.equipped_weapon=weapon;
+                            run_scenario(scenario.program(1),controlled);
+                            int expected_speed=!collected && weapon==1?100:0;
+                            if(!(controlled.flags[4][0]&0x80000000u) ||
+                               !(controlled.flags[6][0]&0x10) || !controlled.tasks[0].active ||
+                               controlled.items[0].angular_speed!=expected_speed ||
+                               controlled.items[1].angular_speed!=expected_speed)
+                                throw std::runtime_error("Retail corridor control mismatch");
+                            ++corridor_controls;
+                            controlled.tasks[0].pc=1;
+                            run_scenario(scenario.program(1),controlled);
+                            if(controlled.tasks[0].pc!=1 || controlled.event_timer!=0)
+                                throw std::runtime_error("Retail corridor event restarted unexpectedly");
+                            ++corridor_controls;
+                        }
+                        if(visited)for(bool acquired:{false,true})for(bool event_done:{false,true}) {
+                            auto controlled=state;
+                            controlled.scenario=std::make_shared<RoomScenario>(scenario);
+                            controlled.flags[10][0]=0x100;
+                            controlled.interaction_index=0;
+                            controlled.flags[7][0]=acquired?0x08000000u:0;
+                            controlled.flags[1][3]=event_done?0x80u:0;
+                            run_scenario(scenario.program(1),controlled);
+                            if(!controlled.door || controlled.door->stage!=0 || controlled.door->room!=2 ||
+                               controlled.door->position!=0 || controlled.door->type!=1 ||
+                               controlled.room_case!=(acquired?1:0) ||
+                               controlled.room_sound_case!=(acquired && event_done?1:0))
+                                throw std::runtime_error("Retail corridor scripted door mismatch");
+                            ++corridor_door_requests;
+                        }
                     }
                 }
                 auto cuts=decode_room_cuts(data);
@@ -108,6 +143,10 @@ int wmain(int argc,wchar_t** argv) {
         if(scenario_check) {
             if(corridor_initializations!=4)throw std::runtime_error("Missing retail corridor scenario check");
             std::cout<<"Executed four retail corridor initialization states\n";
+            if(corridor_controls!=16)throw std::runtime_error("Missing retail corridor control check");
+            std::cout<<"Executed sixteen retail corridor idle control passes\n";
+            if(corridor_door_requests!=8)throw std::runtime_error("Missing retail corridor door checks");
+            std::cout<<"Executed eight retail corridor scripted door requests\n";
         }
     } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
     return 0;

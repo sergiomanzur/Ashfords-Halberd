@@ -115,6 +115,112 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
     jump(size_t(branch_cursor - int64_t(origin)));
     return true;
   };
+  auto condition = [&]() -> bool {
+    extent(1);
+    switch (program[pc]) {
+    case 4: {
+      extent(6);
+      auto bank = program[pc + 1];
+      auto count = word(pc + 2);
+      bool value = (flag(bank, count) & (0x80000000u >> (count & 31))) != 0;
+      bool pass = bool(program[pc + 5] ^ uint8_t(value));
+      if (bank == 10 &&
+          ((program[pc + 2] == 23 &&
+            state.interaction_index != program[pc + 4]) ||
+           (program[pc + 2] == 22 && state.floor_index != program[pc + 4])))
+        pass = false;
+      pc += 6;
+      return pass;
+    }
+    case 7: {
+      extent(6);
+      int32_t value = 0;
+      switch (program[pc + 2]) {
+      case 5:
+        value = state.player_health;
+        break;
+      case 7:
+        value = state.message_selection;
+        break;
+      case 9:
+        value = state.status_timer;
+        break;
+      case 10:
+        value =
+            indexed(state.enemies, indexed(state.enemy_slots, program[pc + 1]))
+                .health;
+        break;
+      default:
+        throw std::runtime_error("Unsupported scenario word comparison field");
+      }
+      auto operation = program[pc + 3];
+      int32_t right = word(pc + 4);
+      pc += 6;
+      switch (operation) {
+      case 0:
+        return value == right;
+      case 1:
+        return value > right;
+      case 2:
+        return value >= right;
+      case 3:
+        return value < right;
+      case 4:
+        return value <= right;
+      case 5:
+        return value != right;
+      default:
+        throw std::runtime_error("Invalid scenario word comparison");
+      }
+    }
+    case 17: {
+      extent(2);
+      auto item = program[pc + 1];
+      pc += 2;
+      if (state.player_id >= state.inventory.size() / 16)
+        throw std::runtime_error("Scenario player inventory outside storage");
+      size_t base = size_t(state.player_id) * 16;
+      for (size_t i = base + 1; i < base + 12; ++i) {
+        uint32_t id = state.inventory[i] >> 16;
+        if (uint8_t(id) == item) {
+          if (uint8_t(id) == 72 && id != 72)
+            state.flags[4][0] |= 0x10000;
+          return true;
+        }
+      }
+      return false;
+    }
+    case 38: {
+      extent(2);
+      bool pass = state.equipped_weapon == program[pc + 1];
+      pc += 2;
+      return pass;
+    }
+    default:
+      throw std::runtime_error("Unsupported scenario loop condition");
+    }
+  };
+  auto decrement = [](int32_t &count) {
+    count = count == std::numeric_limits<int32_t>::min()
+                ? std::numeric_limits<int32_t>::max()
+                : count - 1;
+    return count;
+  };
+  auto loop_index = [&](size_t limit) -> size_t {
+    if (!task || task->loop < 0 || size_t(task->loop) >= limit)
+      throw std::runtime_error("Scenario invalid loop index");
+    return size_t(task->loop);
+  };
+  auto enter_loop = [&](size_t limit) -> size_t {
+    if (!task || task->loop < -1 || task->loop >= int(limit) - 1)
+      throw std::runtime_error("Scenario loop nesting exceeded");
+    return size_t(++task->loop);
+  };
+  auto jump_absolute = [&](size_t target) {
+    if (target < origin)
+      throw std::runtime_error("Scenario loop before program");
+    jump(target - origin);
+  };
   for (size_t steps = 0; steps < 100000; ++steps) {
     extent(1);
     switch (program[pc]) {
@@ -145,18 +251,11 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
       --depth;
       pc += 2;
       break;
-    case 4: {
-      extent(6);
-      auto bank = program[pc + 1];
-      auto count = word(pc + 2);
-      bool value = (flag(bank, count) & (0x80000000u >> (count & 31))) != 0;
-      bool pass = bool(program[pc + 5] ^ uint8_t(value));
-      if (bank == 10 &&
-          ((program[pc + 2] == 23 &&
-            state.interaction_index != program[pc + 4]) ||
-           (program[pc + 2] == 22 && state.floor_index != program[pc + 4])))
-        pass = false;
-      pc += 6;
+    case 4:
+    case 7:
+    case 17:
+    case 38: {
+      bool pass = condition();
       if (!pass) {
         if (!resume())
           return;
@@ -191,6 +290,11 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
       start_scenario_event(state, program[pc + 2], program[pc + 3]);
       pc += 4;
       break;
+    case 182:
+      extent(2);
+      state.room_sound_case = program[pc + 1];
+      pc += 2;
+      break;
     case 188:
       extent(2);
       indexed(state.tasks, program[pc + 1]).active = false;
@@ -202,25 +306,61 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
         throw std::runtime_error("Scenario sleep requires event task");
       if (program[pc] == 248) {
         extent(4);
-        if (task->loop >= 3)
-          throw std::runtime_error("Scenario loop nesting exceeded");
-        ++task->loop;
-        task->counts[size_t(task->loop)] = word(pc + 2);
+        auto index = enter_loop(4);
+        task->counts[index] = word(pc + 2);
         ++pc;
       } else
         extent(3);
-      if (task->loop < 0 || task->loop >= 4)
-        throw std::runtime_error("Scenario sleeping without loop");
-      auto &count = task->counts[size_t(task->loop)];
-      count = count == std::numeric_limits<int32_t>::min()
-                  ? std::numeric_limits<int32_t>::max()
-                  : count - 1;
-      if (count == 0) {
+      if (decrement(task->counts[loop_index(4)]) == 0) {
         pc += 3;
         --task->loop;
       }
       if (!resume())
         return;
+      break;
+    }
+    case 250: {
+      extent(4);
+      auto index = enter_loop(4);
+      uint16_t raw = word(pc + 2);
+      task->count3 = task->count2 = task->counts[index] =
+          raw < 32768 ? int32_t(raw) : int32_t(raw) - 65536;
+      pc += 4;
+      task->loop_bodies[index] = origin + pc;
+      break;
+    }
+    case 251: {
+      extent(2);
+      auto index = loop_index(4);
+      if (decrement(task->counts[index]) != 0) {
+        task->count2 = task->counts[index];
+        jump_absolute(task->loop_bodies[index]);
+      } else {
+        pc += 2;
+        --task->loop;
+      }
+      break;
+    }
+    case 252: {
+      extent(2);
+      auto index = enter_loop(6);
+      task->loop_conditions[index] = origin + pc + 2;
+      jump(pc + program[pc + 1]);
+      task->loop_bodies[index] = origin + pc;
+      break;
+    }
+    case 253: {
+      auto index = loop_index(6);
+      auto end = pc;
+      jump_absolute(task->loop_conditions[index]);
+      if (condition())
+        jump_absolute(task->loop_bodies[index]);
+      else {
+        pc = end + 1;
+        --task->loop;
+        if (!resume())
+          return;
+      }
       break;
     }
     case 254:
@@ -372,7 +512,9 @@ size_t start_scenario_event(ScenarioState &state, size_t level, size_t event) {
       ++level;
   }
   auto &task = state.tasks[level];
-  task = ScenarioTask{};
+  // Event_init leaves counters and loop pointer arrays unchanged.
+  task.pc = 0;
+  task.loop = -1;
   task.program = program;
   task.active = true;
   return level;
