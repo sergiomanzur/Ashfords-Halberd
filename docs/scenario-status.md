@@ -116,8 +116,8 @@ enemy state only after validation, preserving inventory and persistent flags.
 Synthetic tests cover compaction, signed yaw, ignored authored X/Z rotation,
 ID-dependent model flags and failure rollback. The retail probe binds enemies
 in all 205 rooms and uses the resulting corridor state for startup and its
-complete event. Object/item loading and application room lifecycle remain
-pending.
+complete event. Object/item asset loading and bindings now exist; their
+controllers and application room lifecycle remain pending.
 Player/effect bindings and sound commands remain unsupported.
 
 Native `initialize_scenario` follows `bhInitEvent`'s state/script ordering:
@@ -133,8 +133,16 @@ cover initialization command binding, a yielding task-0 event, counter
 retention, context 15 after scheduling and room-control cursor isolation.
 The headless retail probe runs all four corridor initialization states and a
 complete initialization/control/actor/event sequence through the 150-frame
-animation. Sound commands 3/4, object/item asset loading, system room-change
+animation. Sound commands 3/4, object/item controllers, system room-change
 flags and application integration still remain to implement.
+
+Native `bind_room_props` carries decoded room objects and pickups into the
+script-addressable vectors. Object slots 0–3 retain player attachments; room
+slots and pickups are rebuilt with authored metadata and immutable model
+ownership. Tests check signed transforms, type/parameter splitting, source
+flags, retained attachments and rollback on malformed assets. The retail
+corridor initialization probe now uses these bindings rather than placeholder
+pickup entries.
 
 The retail RM_0010 control script sets RoomCaseNo before SetDoorCall into
 stage 0, room 2, position 0. Persistent flags choose the first-visit or return

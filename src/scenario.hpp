@@ -52,6 +52,9 @@ struct ScenarioEntity {
   std::optional<Scene> rendered_model;
   uint16_t id = 0, type = 0;
   uint8_t model_version = 0;
+  uint8_t parameter = 0;
+  int8_t draw_type = 0;
+  std::array<int8_t, 4> hide{};
   std::array<uint8_t, 4> modes{};
   uint32_t motion_number = 0, motion_step = 65536;
   int32_t frame = 0, blend_count = 0, control1 = 0, control2 = 0;
@@ -117,4 +120,7 @@ void control_scenario(ScenarioState &state);
 // their authored work-number map after all assets validate successfully.
 void bind_room_enemies(const Bytes &data, const RoomCollision &collision,
                        ScenarioState &state);
+// Preserve attachment slots 0–3; replace authored objects/items only after
+// validating all room assets. Controllers run separately.
+void bind_room_props(const Bytes &data, ScenarioState &state);
 } // namespace ashford

@@ -55,13 +55,13 @@ int wmain(int argc,wchar_t** argv) {
                 auto scenario=decode_room_scenario(data);
                 scenario_entries+=scenario.entry_count();
                 if(scenario_check) {
-                    auto room_actors=decode_room_actor_models(data);
-                    for(const auto* models:{&room_actors.objects,&room_actors.items})
-                        for(const auto& model:*models)if(!model.model.empty()) {
-                            ++prop_models;if(!model.skin.empty())++prop_skins;
-                        }
                     ScenarioState bound_enemies;
                     bind_room_enemies(data,collision,bound_enemies);
+                    bind_room_props(data,bound_enemies);
+                    for(const auto* entities:{&bound_enemies.objects,&bound_enemies.items})
+                        for(const auto& entity:*entities)if(entity.model) {
+                            ++prop_models;if(!entity.model->skin.empty())++prop_skins;
+                        }
                     auto enemy_motion_banks=decode_room_enemy_motion_banks(data);
                     std::vector<const MotionBank*> checked_banks;
                     for(const auto& enemy_bank:enemy_motion_banks) {
@@ -145,12 +145,12 @@ int wmain(int argc,wchar_t** argv) {
                     for(bool visited:{false,true})for(bool collected:{false,true}) {
                         ScenarioState state;
                         bind_room_enemies(data,collision,state);
+                        bind_room_props(data,state);
                         state.scenario=std::make_shared<const RoomScenario>(scenario);
                         state.collision=collision;
                         state.room_motions=std::make_shared<const MotionBank>(decode_room_motion_bank(data));
                         state.flags[6][0]=2;
                         state.interactions=collision.miscellaneous;
-                        state.items.resize(records.items.size());
                         state.flags[8][1]=visited?0x20000000u:0;
                         state.flags[7][3]=collected?0x18u:0;
                         initialize_scenario(state);
@@ -188,12 +188,14 @@ int wmain(int argc,wchar_t** argv) {
                             controlled.scenario=std::make_shared<RoomScenario>(scenario);
                             controlled.equipped_weapon=weapon;
                             run_scenario(scenario.program(1),controlled);
-                            int expected_speed=!collected && weapon==1?100:0;
+                            // Collected pickups skip the speed command and
+                            // retain their authored value, rather than zero.
+                            int scripted_speed=weapon==1?100:0;
                             if(!(controlled.flags[4][0]&0x80000000u) ||
                                !(controlled.flags[6][0]&0x10) || !controlled.tasks[0].active ||
-                               controlled.items[0].angular_speed!=expected_speed ||
-                               controlled.items[1].angular_speed!=expected_speed)
-                                throw std::runtime_error("Retail corridor control mismatch");
+                               controlled.items[0].angular_speed!=(collected?state.items[0].angular_speed:scripted_speed) ||
+                               controlled.items[1].angular_speed!=(collected?state.items[1].angular_speed:scripted_speed))
+                                throw std::runtime_error("Retail corridor control mismatch: visited="+std::to_string(visited)+" collected="+std::to_string(collected)+" weapon="+std::to_string(weapon)+" speeds="+std::to_string(controlled.items[0].angular_speed)+","+std::to_string(controlled.items[1].angular_speed)+" initial="+std::to_string(state.items[0].angular_speed)+","+std::to_string(state.items[1].angular_speed));
                             ++corridor_controls;
                             controlled.tasks[0].pc=1;
                             run_scenario(scenario.program(1),controlled);

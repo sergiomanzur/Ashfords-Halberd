@@ -66,8 +66,12 @@ keyed by authored ID, with repeated IDs reusing a pack without advancing the
 texture-table cursor. Models without their own texture list do not inherit a
 different prop's textures. Synthetic tests cover both caches, repeated object
 and pickup IDs, reserved slots, skin prefixes and malformed bounds.
-This supplies assets; binding props to scenario state and running their native
-controllers remain pending.
+`bind_room_props` now binds these assets to scenario state, preserving player
+attachment slots 0–3 while replacing room objects and pickups. It follows
+`bhSetObject`/`bhSetItem`: low-byte type, high-byte parameter, authored floor,
+signed three-axis angles, drawing type, hide bytes and flag-derived model flags.
+Both replacement vectors are prepared before mutation, so malformed assets
+leave the old room bindings intact. Native prop controllers remain pending.
 The headless retail scenario probe decoded 1,914 object/pickup models across
 all 205 rooms, including nine skinned objects. The existing corridor lifecycle,
 150-frame actor animation and scripted door probes also passed.

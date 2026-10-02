@@ -3,6 +3,42 @@
 #include <limits>
 #include <stdexcept>
 namespace ashford {
+void bind_room_props(const Bytes &data, ScenarioState &state) {
+  auto records = decode_room_records(data);
+  auto models = decode_room_actor_models(data);
+  std::vector<ScenarioEntity> objects(
+      std::max(size_t(4), records.objects.size()));
+  for (size_t i = 0; i < std::min(size_t(4), state.objects.size()); ++i)
+    objects[i] = state.objects[i];
+  std::vector<ScenarioEntity> items(records.items.size());
+  auto bind = [](const RoomEntity &authored, ActorModel model) {
+    ScenarioEntity entity;
+    entity.flags = authored.flags;
+    if (entity.flags & 0x80000000u)
+      entity.model_flags |= 0x10;
+    if (entity.flags & 0x20000000u)
+      entity.model_flags |= 0x40;
+    entity.id = authored.id;
+    entity.type = uint8_t(authored.type);
+    entity.parameter = uint8_t(authored.type >> 8);
+    entity.floor = authored.floor;
+    entity.model_version = authored.model_version;
+    entity.draw_type = authored.parameter;
+    entity.position = authored.position;
+    entity.angles = {authored.rotation_x, authored.rotation_y,
+                     authored.rotation_z};
+    entity.angular_speed = authored.angular_speed;
+    entity.hide = authored.hide;
+    entity.model = std::make_shared<const ActorModel>(std::move(model));
+    return entity;
+  };
+  for (size_t i = 4; i < records.objects.size(); ++i)
+    objects[i] = bind(records.objects[i], std::move(models.objects.at(i)));
+  for (size_t i = 0; i < records.items.size(); ++i)
+    items[i] = bind(records.items[i], std::move(models.items.at(i)));
+  state.objects = std::move(objects);
+  state.items = std::move(items);
+}
 void bind_room_enemies(const Bytes &data, const RoomCollision &collision,
                        ScenarioState &state) {
   auto records = decode_room_records(data);

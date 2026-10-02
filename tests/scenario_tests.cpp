@@ -259,8 +259,8 @@ int main() {
     put(initialization_room, 32, 1280);
     put(initialization_room, 1204, 32);
     put(initialization_room, 1208, 40);
-    Bytes initialization_code{101, 2, 0, 0, 105, 11, 0, 90, 0, 0,
-                              20, 0, 0, 0, 0, 0};
+    Bytes initialization_code{101, 2, 0,  0, 105, 11, 0, 90,
+                              0,   0, 20, 0, 0,   0,  0, 0};
     std::copy(initialization_code.begin(), initialization_code.end(),
               initialization_room.begin() + 1212);
     Bytes initialization_event{55, 9, 254, 255, 0};
@@ -601,8 +601,10 @@ int main() {
     bind_room_enemies(binding_room, binding_collision, bound_room);
     ck(bound_room.enemies.size() == 128 &&
        bound_room.enemy_slots == std::vector<size_t>({7, 0, 1}));
-    ck(bound_room.enemies[0].id == 67 && bound_room.enemies[0].flags == 0x8001 &&
-       bound_room.enemies[0].type == 18 && bound_room.enemies[0].model_version == 3 &&
+    ck(bound_room.enemies[0].id == 67 &&
+       bound_room.enemies[0].flags == 0x8001 &&
+       bound_room.enemies[0].type == 18 &&
+       bound_room.enemies[0].model_version == 3 &&
        bound_room.enemies[0].model_flags == 0x20 &&
        bound_room.enemies[0].position.x == 10 &&
        bound_room.enemies[0].angles == std::array<int32_t, 3>{0, -128, 0} &&
@@ -615,11 +617,59 @@ int main() {
        bound_room.flags[1][0] == 0x12345678 && bound_room.inventory[0] == 99);
     auto malformed_binding = binding_room;
     put(malformed_binding, 1248, 1249);
-    bad([&] { bind_room_enemies(malformed_binding, binding_collision, bound_room); });
+    bad([&] {
+      bind_room_enemies(malformed_binding, binding_collision, bound_room);
+    });
     ck(bound_room.enemies[0].id == 67 && bound_room.enemy_slots[0] == 7);
     malformed_binding = binding_room;
     malformed_binding[1142] = 128;
-    bad([&] { bind_room_enemies(malformed_binding, binding_collision, bound_room); });
+    bad([&] {
+      bind_room_enemies(malformed_binding, binding_collision, bound_room);
+    });
+    auto prop_room = binding_room;
+    prop_room.resize(4000);
+    put(prop_room, 140, 2100);
+    put(prop_room, 268, 5);
+    put(prop_room, 144, 2300);
+    put(prop_room, 272, 1);
+    put(prop_room, 1252, 2500);
+    put(prop_room, 1256, 2700);
+    for (size_t p : {size_t(2500), size_t(2700)})
+      std::copy(empty_model.model.begin(), empty_model.model.end(),
+                prop_room.begin() + p);
+    for (size_t p : {size_t(2244), size_t(2300)}) {
+      put(prop_room, p, 0xa0000001);
+      put(prop_room, p + 4, 0xab12000a);
+      prop_room[p + 8] = 254;
+      prop_room[p + 9] = 3;
+      prop_room[p + 11] = 255;
+      put(prop_room, p + 12, 0x41200000);
+      prop_room[p + 24] = 255;
+      prop_room[p + 25] = 255;
+      prop_room[p + 26] = 2;
+      prop_room[p + 28] = 3;
+      prop_room[p + 30] = 254;
+      prop_room[p + 31] = 255;
+      prop_room[p + 32] = 255;
+    }
+    bound_room.objects.resize(8);
+    bound_room.objects[0].id = 77;
+    bind_room_props(prop_room, bound_room);
+    ck(bound_room.objects.size() == 5 && bound_room.objects[0].id == 77 &&
+       !bound_room.objects[0].model && bound_room.items.size() == 1);
+    for (const auto *entity : {&bound_room.objects[4], &bound_room.items[0]})
+      ck(entity->id == 10 && entity->type == 0x12 &&
+         entity->parameter == 0xab && entity->floor == -2 &&
+         entity->draw_type == -1 && entity->model_version == 3 &&
+         entity->model_flags == 0x50 && entity->flags == 0xa0000001 &&
+         entity->position.x == 10 &&
+         entity->angles == std::array<int32_t, 3>{-1, 3, 2} &&
+         entity->angular_speed == -2 && entity->hide[0] == -1 && entity->model);
+    auto invalid_props = prop_room;
+    put(invalid_props, 1256, 3999);
+    bad([&] { bind_room_props(invalid_props, bound_room); });
+    ck(bound_room.objects[0].id == 77 && bound_room.items[0].id == 10 &&
+       bound_room.flags[1][0] == 0x12345678 && bound_room.inventory[0] == 99);
     transformed.enemies[1].model =
         std::make_shared<const ActorModel>(empty_model);
     controller_case(Bytes{101, 1, 0, 99, 105, 47, 255, 0}, false);
