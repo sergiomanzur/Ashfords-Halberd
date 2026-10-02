@@ -15,6 +15,7 @@ struct RoomCollision {
 };
 RoomCollision decode_room_collision(const Bytes &data);
 int8_t player_floor_number(const RoomCollision &room, float height);
+bool player_in_water(const RoomCollision &room, Vec3 position);
 struct CollisionBody {
   Vec3 position;
   float radius = 3.5f, height = 16.5f;

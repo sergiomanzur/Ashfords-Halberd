@@ -2,6 +2,7 @@
 #include "scene.hpp"
 #include "camera.hpp"
 #include "collision.hpp"
+#include "room.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -29,12 +30,17 @@ int wmain(int argc,wchar_t** argv) {
         if(count>10000) throw std::runtime_error("Invalid archive count");
         auto entries=afs_index(read(file,0,8+size_t(count)*8),std::filesystem::file_size(archive));
         // Collect the complete report before touching the destination.
-        std::string text="index\tcompressed_bytes\texpanded_bytes\tversion\tcameras\tenemies\tobjects\titems\twalls\tfloors\tmodel_objects\ttriangles\ttextures\tactive_wall_types\n";
+        std::string text="index\tcompressed_bytes\texpanded_bytes\tversion\tcameras\tenemies\tobjects\titems\twalls\tfloors\tmodel_objects\ttriangles\ttextures\tactive_wall_types\tentry_positions\tentries_with_camera\n";
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
                 auto r=room_info(data);
                 auto collision=decode_room_collision(data);
+                auto records=decode_room_records(data);
+                auto cuts=decode_room_cuts(data);
+                size_t entries_with_camera=0;
+                for(size_t position=0;position<records.positions.size();++position)
+                    if(enter_room(records,position,collision,cuts).cut) ++entries_with_camera;
                 std::array<size_t,256> types{};
                 for(const auto& wall:collision.walls) if(wall.flags&1) ++types[wall.type];
                 std::string collision_column;
@@ -62,7 +68,7 @@ int wmain(int argc,wchar_t** argv) {
                     for(const auto& mesh:scene.meshes)triangles+=mesh.triangles.size();
                     scene_columns="\t"+std::to_string(triangles)+"\t"+std::to_string(scene.textures.size());
                 }
-                text+=std::to_string(i)+"\t"+std::to_string(entries[i].size)+"\t"+std::to_string(data.size())+"\t"+std::to_string(r.version)+"\t"+std::to_string(r.cameras)+"\t"+std::to_string(r.enemies)+"\t"+std::to_string(r.objects)+"\t"+std::to_string(r.items)+"\t"+std::to_string(r.walls)+"\t"+std::to_string(r.floors)+"\t"+std::to_string(r.model_objects)+scene_columns+"\t"+collision_column+"\n";
+                text+=std::to_string(i)+"\t"+std::to_string(entries[i].size)+"\t"+std::to_string(data.size())+"\t"+std::to_string(r.version)+"\t"+std::to_string(r.cameras)+"\t"+std::to_string(r.enemies)+"\t"+std::to_string(r.objects)+"\t"+std::to_string(r.items)+"\t"+std::to_string(r.walls)+"\t"+std::to_string(r.floors)+"\t"+std::to_string(r.model_objects)+scene_columns+"\t"+collision_column+"\t"+std::to_string(records.positions.size())+"\t"+std::to_string(entries_with_camera)+"\n";
             } catch(const std::exception& e) {
                 throw std::runtime_error("Room "+std::to_string(i)+": "+e.what());
             }

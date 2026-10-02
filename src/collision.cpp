@@ -69,6 +69,15 @@ RoomCollision decode_room_collision(const Bytes &data) {
   room.floors = records(8);
   return room;
 }
+bool player_in_water(const RoomCollision &room, Vec3 position) {
+  for (const auto &r : room.floors)
+    if ((r.flags & 1) && r.type == 3 && r.parameters[0] == 1 &&
+        r.position.x <= position.x && r.position.x + r.size.x >= position.x &&
+        r.position.y <= position.y && r.position.y + r.size.y >= position.y &&
+        r.position.z <= position.z && r.position.z + r.size.z >= position.z)
+      return true;
+  return false;
+}
 int8_t player_floor_number(const RoomCollision &room, float height) {
   if (!std::isfinite(height))
     throw std::runtime_error("Nonfinite player floor height");

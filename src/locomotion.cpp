@@ -230,16 +230,7 @@ PlayerWorldState advance_player_world(PlayerWorldState s,
   s.floor = lower_result.floor;
   s.front_anchor = upper_result.position;
   next.visual_anchor = s.front_anchor;
-  next.water = false;
-  for (const auto &r : room.floors)
-    if ((r.flags & 1) && r.type == 3 && r.parameters[0] == 1 &&
-        r.position.x <= next.position.x &&
-        r.position.x + r.size.x >= next.position.x &&
-        r.position.y <= next.position.y &&
-        r.position.y + r.size.y >= next.position.y &&
-        r.position.z <= next.position.z &&
-        r.position.z + r.size.z >= next.position.z)
-      next.water = true;
+  next.water = player_in_water(room, next.position);
   s.cut =
       select_camera_cut(cuts, s.cut, next.position.x, next.position.z, s.floor);
   s.wall_hits = upper_result.hits + lower_result.hits;

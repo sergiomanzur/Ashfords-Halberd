@@ -21,7 +21,7 @@ The reference `ps2_NaSystem.c::Ps2SwapDBuff` waits until `Ps2_vcount >= 2`;
 `vsync_func` increments that counter once per vertical-sync interrupt. Native
 simulation must preserve this two-field update cadence independently of rendering.
 
-Fourteen CTest suites pass headlessly, including new cut selection and movement
+Fifteen CTest suites pass headlessly, including room-entry, cut selection and movement
 primitive suites. Tests cover triangular boundaries, floor mismatch, cut
 hysteresis, malformed area records, auxiliary truncation/padding/nonfinite
 values, displacement indexing and cardinal/relative movement angles.
@@ -56,10 +56,31 @@ diagnostic renderer samples each selected motion without transition blending.
 `AshfordPlayerInspect SYSTEM.AFS 10 --movement-check RDX_LNK.AFS room-index`
 runs 660 ticks, poses the retail actor every tick and renders every 60th frame
 fully headlessly without writing images. It passed in retail rooms 0–2 (1,980
-ticks/poses and 33 rendered frames). Its seed is inside an authored cut area;
-it is not the original event-controlled spawn. These routes registered collision
-responses but no retail camera transitions. A traversing retail reference route
-and original-game comparison are still needed.
+ticks/poses and 33 rendered frames). It now starts at POS entry 0 with the authored
+yaw and original ground snapping. Room 1 and room 2 each registered two retail
+camera transitions; room 0 registered none. Collision hit totals were 360, 101
+and 70 respectively. These are scripted diagnostic inputs, not a reference-game
+playthrough. Original-game comparison remains pending.
+
+`room.cpp` decodes the explicit 16-byte POS and 36-byte ETTY_WORK layouts,
+preserving signed floor, parameter, rotations and hide bytes. Normal door entry
+initializes position, low-16-bit yaw, floor, snapped ground height, front anchor,
+water status and an authored camera candidate. Water affects the first movement
+step, as in `bhInitRoomChangePlayer`. Save restoration and cinematic entry are
+separate paths still to implement. Authored entity records are metadata; event
+scripts determine runtime activation and behavior.
+
+All 205 retail rooms passed native record decoding and all 600 authored position
+entries passed initialization. Of these, 554 immediately match active camera
+areas. The other 46 are not assigned invented cameras; script state, activation
+and initial camera handling require further investigation. Both entries in each
+of the first seven room records match authored camera areas.
+
+Two-way door metadata connects RM_0010 to RM_0020/RM_0021: the corridor's door
+targets stage 0, room 2, position 0, and the return door targets stage 0, room 1,
+position 1. The room case is selected by scenario state. This is a candidate
+connected encounter pair; transition events and encounter activation remain
+pending, so the pair is not yet a playable slice.
 
 `AshfordRoomInspect RDX_LNK.AFS report.tsv --collision-check` probes active wall
 records and reports active shape counts. `--scene` retains full scene validation.

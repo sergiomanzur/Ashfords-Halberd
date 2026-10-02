@@ -1,6 +1,7 @@
 #include "actor.hpp"
 #include "player.hpp"
 #include "locomotion.hpp"
+#include "room.hpp"
 #include "render.hpp"
 #include <filesystem>
 #include <fstream>
@@ -65,6 +66,7 @@ int wmain(int argc, wchar_t **argv) {
       Scene room_scene;
       std::vector<RoomCut> cuts;
       RoomCollision collision;
+      RoomRecords records;
       if (argc == 6) {
         const std::filesystem::path room_path(argv[4]);
         std::ifstream rf(room_path, std::ios::binary);
@@ -85,24 +87,13 @@ int wmain(int argc, wchar_t **argv) {
         room_scene = decode_room_scene(bytes);
         cuts = decode_room_cuts(bytes);
         collision=decode_room_collision(bytes);
+        records=decode_room_records(bytes);
         if (cuts.empty())
           throw std::runtime_error("Room has no authored camera");
       }
       if(movement_only) {
-        PlayerWorldState state;
-        bool placed=false;
-        // Diagnostic seed inside a authored cut area. Original room-entry
-        // spawn and progression events still require the event interpreter.
-        for(const auto& cut:cuts) for(const auto& area:cut.areas) {
-          if(placed || area.floor<-2 || area.floor>29) continue;
-          for(float x:{.25f,.5f,.75f})for(float z:{.25f,.5f,.75f}) {
-            if(placed)continue;
-            Vec3 p{area.min_x+x*(area.max_x-area.min_x),collision.ground[size_t(int(area.floor)+2)],area.min_z+z*(area.max_z-area.min_z)};
-            auto selected=find_camera_cut(cuts,p.x,p.z,area.floor);
-            if(selected) {state.player.position=p;state.player.visual_anchor=p;state.floor=area.floor;state.cut=selected;state.front_anchor={p.x,p.y+12.5f,p.z};placed=true;}
-          }
-        }
-        if(!placed)throw std::runtime_error("No diagnostic movement seed in camera areas");
+        auto state=enter_room(records,0,collision,cuts);
+        std::cout<<"entry_position=0 x="<<state.player.position.x<<" y="<<state.player.position.y<<" z="<<state.player.position.z<<" yaw="<<state.player.yaw<<'\n';
         size_t transitions=0,hits=0,poses=0,images=0;
         for(size_t tick=0;tick<660;++tick) {
           uint16_t pad=tick<60?1:tick<120?0x409:tick<180?2:tick<240?4:0;
