@@ -1,4 +1,5 @@
 #include "assets.hpp"
+#include "scene.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -14,7 +15,7 @@ Bytes read(std::ifstream& file, uint64_t offset, size_t size) {
 }
 int wmain(int argc,wchar_t** argv) {
     try {
-        if(argc!=3) throw std::runtime_error("Usage: AshfordRoomInspect RDX_LNK.AFS report.tsv");
+        if(argc!=3 && !(argc==4 && std::wstring(argv[3])==L"--scene")) throw std::runtime_error("Usage: AshfordRoomInspect RDX_LNK.AFS report.tsv [--scene]");
         const std::filesystem::path archive(argv[1]), report(argv[2]);
         if(std::filesystem::exists(report) && std::filesystem::equivalent(archive,report))
             throw std::runtime_error("Report cannot overwrite archive");
@@ -25,12 +26,18 @@ int wmain(int argc,wchar_t** argv) {
         if(count>10000) throw std::runtime_error("Invalid archive count");
         auto entries=afs_index(read(file,0,8+size_t(count)*8),std::filesystem::file_size(archive));
         // Collect the complete report before touching the destination.
-        std::string text="index\tcompressed_bytes\texpanded_bytes\tversion\tcameras\tenemies\tobjects\titems\twalls\tfloors\tmodel_objects\n";
+        std::string text="index\tcompressed_bytes\texpanded_bytes\tversion\tcameras\tenemies\tobjects\titems\twalls\tfloors\tmodel_objects\ttriangles\ttextures\n";
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
                 auto r=room_info(data);
-                text+=std::to_string(i)+"\t"+std::to_string(entries[i].size)+"\t"+std::to_string(data.size())+"\t"+std::to_string(r.version)+"\t"+std::to_string(r.cameras)+"\t"+std::to_string(r.enemies)+"\t"+std::to_string(r.objects)+"\t"+std::to_string(r.items)+"\t"+std::to_string(r.walls)+"\t"+std::to_string(r.floors)+"\t"+std::to_string(r.model_objects)+"\n";
+                std::string scene_columns="\t\t";
+                if(argc==4) {
+                    auto scene=decode_room_scene(data);size_t triangles=0;
+                    for(const auto& mesh:scene.meshes)triangles+=mesh.triangles.size();
+                    scene_columns="\t"+std::to_string(triangles)+"\t"+std::to_string(scene.textures.size());
+                }
+                text+=std::to_string(i)+"\t"+std::to_string(entries[i].size)+"\t"+std::to_string(data.size())+"\t"+std::to_string(r.version)+"\t"+std::to_string(r.cameras)+"\t"+std::to_string(r.enemies)+"\t"+std::to_string(r.objects)+"\t"+std::to_string(r.items)+"\t"+std::to_string(r.walls)+"\t"+std::to_string(r.floors)+"\t"+std::to_string(r.model_objects)+scene_columns+"\n";
             } catch(const std::exception& e) {
                 throw std::runtime_error("Room "+std::to_string(i)+": "+e.what());
             }

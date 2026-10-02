@@ -1,7 +1,8 @@
 # Ashford's Halberd: Windows scope and Step 1 design
 
-Status: scope revised from the user's instructions; Step 1 technical design
-awaiting review. This document does not claim a playable build exists.
+Status: scope revised from the user's instructions and authorized for
+implementation. The Windows foundation and native scene decoding checkpoints
+are implemented; the Step 1 playable slice remains in progress.
 
 ## Product intent
 

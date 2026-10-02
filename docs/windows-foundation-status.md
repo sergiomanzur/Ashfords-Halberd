@@ -21,7 +21,7 @@ remains incomplete: there is no room renderer or adapted gameplay yet.
 
 ## Verification
 
-`tools/build.ps1` compiles the executable, runs four CTest entries, and packages
+`tools/build.ps1` compiles the executable, runs six CTest entries, and packages
 the result. The checks cover core settings/disc boundaries, native SDL/text menu
 rendering, and standalone executable startup from another directory with only
 the Windows system directory on PATH. Malformed test inputs include wrong
@@ -82,7 +82,10 @@ It does not extract original assets into the distribution. The first room
 expands to 5,392,084 bytes and contains three camera cuts, two enemy entries,
 30 wall records and 67 main-model objects.
 
-Next, decode model vertex/primitive and texture formats, identify two connected rooms,
+Native model/texture decoding and a headless overview renderer are now implemented;
+see [native scene status](native-scene-status.md) for verified coverage and limits.
+
+Next, reproduce an authored camera, identify two connected rooms,
 implement a native rendering backend, and begin adapting the original game
 logic through explicit console-service replacements. The over-the-shoulder
 camera remains a required Step 2 enhancement, with no nonfunctional toggle

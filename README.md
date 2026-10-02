@@ -101,6 +101,9 @@ Its nested CRI, Katana, and CodeWarrior submodules are intentionally not initial
 by bootstrap. Sony SDK files are not included. Building the reference PS2 target
 is a separate setup and is not required by the native toolchain smoke check.
 
-The next porting work is to inventory platform calls, console data layouts,
-graphics command paths, and asset formats; then design their native replacements.
-A completed decompilation still requires this adaptation to execute on a PC.
+The native asset module now decodes every main-room scene in the supplied USA
+archive. Development tools can validate the scenes and produce textured
+overviews entirely headlessly; see [native scene status](docs/native-scene-status.md).
+The next work is authored camera/visibility behavior and a real-time renderer,
+followed by adapting player and event logic. A completed decompilation still
+requires these console-service replacements to execute on a PC.
