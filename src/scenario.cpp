@@ -337,10 +337,10 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
         pc += 6;
         break;
       }
-      if (operation != 7 && operation != 11)
+      if (operation != 7 && operation != 11 && operation != 47)
         throw std::runtime_error("Unsupported scenario common controller " +
                                  std::to_string(operation));
-      extent(operation == 7 ? 8 : 6);
+      extent(operation == 7 ? 8 : operation == 11 ? 6 : 2);
       if (!task->work_index)
         throw std::runtime_error(
             "Scenario common controller without bound work");
@@ -351,7 +351,17 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
               ? indexed(state.items, *task->work_index)
               : throw std::runtime_error(
                     "Unsupported bound scenario work group");
-      if (operation == 7) {
+      if (operation == 47) {
+        if (!entity.model)
+          throw std::runtime_error(
+              "Scenario model rebuild without bound primary model");
+        if (entity.flags & 0x1080)
+          throw std::runtime_error(
+              "Unsupported linked or retained scenario actor matrix");
+        entity.rendered_model = pose_actor_rotated(
+            *entity.model, entity.joint_pose, entity.position, entity.angles);
+        pc += 2;
+      } else if (operation == 7) {
         if (!state.collision)
           throw std::runtime_error(
               "Scenario position requires room floor data");

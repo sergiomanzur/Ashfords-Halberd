@@ -251,6 +251,13 @@ int main() {
             .position;
     ck(std::abs(p.x - 100) < 0.0001 && std::abs(p.y - 3) < 0.0001 &&
        std::abs(p.z + 12) < 0.0001);
+    auto rotated =
+        pose_actor_rotated(a, pose, {100, 200, 300}, {16384, 16384, 16384});
+    auto rotated_point = rotated.meshes[0].triangles[0].corners[0].position;
+    // (12,3,0) -> Rx(12,0,3) -> Ry(3,0,-12) -> Rz(0,3,-12).
+    ck(std::abs(rotated_point.x - 100) < 0.0001 &&
+       std::abs(rotated_point.y - 203) < 0.0001 &&
+       std::abs(rotated_point.z - 288) < 0.0001);
     auto moving = pose;
     moving[1].position = Vec3{0, 4, 0};
     p = pose_actor(fixture(), moving)

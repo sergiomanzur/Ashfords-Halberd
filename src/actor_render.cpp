@@ -75,6 +75,11 @@ void write(Bytes &b, size_t p, float f) {
 } // namespace
 Scene pose_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
                  Vec3 position, uint16_t yaw) {
+  return pose_actor_rotated(actor, pose, position, {0, int32_t(yaw), 0});
+}
+Scene pose_actor_rotated(const ActorModel &actor,
+                         const std::vector<JointPose> &pose, Vec3 position,
+                         std::array<int32_t, 3> angles) {
   if (actor.model.size() > 64 * 1024 * 1024)
     throw std::runtime_error("Actor model exceeds limit");
   if (!std::isfinite(position.x) || !std::isfinite(position.y) ||
@@ -101,7 +106,9 @@ Scene pose_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
       throw std::runtime_error("Invalid actor joint link");
     return (p - table) / 52;
   };
-  auto placement = multiply(translate(position), rotate(1, yaw));
+  auto placement = multiply(translate(position), rotate(2, angles[2]));
+  placement = multiply(placement, rotate(1, angles[1]));
+  placement = multiply(placement, rotate(0, angles[0]));
   std::function<void(size_t, const Matrix &, Vec3, size_t)> visit =
       [&](size_t i, const Matrix &parent, Vec3 origin, size_t depth) {
         if (depth > 256 || visited[i])

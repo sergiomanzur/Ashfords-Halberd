@@ -1,4 +1,5 @@
 #pragma once
+#include "actor.hpp"
 #include "assets.hpp"
 #include "collision.hpp"
 #include <array>
@@ -45,6 +46,9 @@ struct ScenarioEntity {
   int8_t floor = 0;
   uint32_t motion_mode = 0, model_flags = 0;
   float blend_rate = 0;
+  std::shared_ptr<const ActorModel> model;
+  std::vector<JointPose> joint_pose;
+  std::optional<Scene> rendered_model;
 };
 struct ScenarioTask {
   std::optional<ScenarioProgram> program;

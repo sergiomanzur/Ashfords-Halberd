@@ -41,6 +41,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t corridor_door_requests=0;
         size_t room_motions=0, room_motion_poses=0;
         size_t corridor_actor_poses=0;
+        size_t corridor_model_rebuilds=0;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
@@ -70,6 +71,26 @@ int wmain(int argc,wchar_t** argv) {
                                 throw std::runtime_error("Retail corridor actor pose missing geometry or textures");
                             ++corridor_actor_poses;
                         }
+                        ScenarioState controller;
+                        controller.scenario=std::make_shared<const RoomScenario>(scenario);
+                        controller.collision=collision;
+                        controller.enemies.resize(1);
+                        controller.enemy_slots={0};
+                        controller.enemies[0].model=std::make_shared<const ActorModel>(enemies[0].models[0]);
+                        controller.enemies[0].flags=records.enemies[0].flags;
+                        controller.flags[6][0]=0x10;
+                        start_scenario_event(controller,0,0);
+                        bool motion_pending=false;
+                        try {tick_scenario_tasks(controller);}
+                        catch(const std::runtime_error& error) {
+                            motion_pending=std::string(error.what())=="Unsupported scenario common controller 24";
+                        }
+                        if(!motion_pending || !controller.enemies[0].rendered_model ||
+                           controller.enemies[0].rendered_model->meshes.empty() ||
+                           controller.enemies[0].rendered_model->textures.empty() ||
+                           controller.enemies[0].position.x!=0 || controller.enemies[0].position.y!=0 || controller.enemies[0].position.z!=0)
+                            throw std::runtime_error("Retail corridor model-rebuild prefix mismatch");
+                        ++corridor_model_rebuilds;
                     }
                 }
                 if(scenario_check && i==1) {
@@ -170,6 +191,7 @@ int wmain(int argc,wchar_t** argv) {
         if(scenario_check) {
             std::cout<<"Decoded "<<room_motions<<" room motions and sampled "<<room_motion_poses<<" poses\n";
             std::cout<<"Posed "<<corridor_actor_poses<<" retail corridor actor frames\n";
+            std::cout<<"Executed "<<corridor_model_rebuilds<<" corridor model-rebuild prefixes; motion selection remains unsupported\n";
             if(corridor_initializations!=4)throw std::runtime_error("Missing retail corridor scenario check");
             std::cout<<"Executed four retail corridor initialization states\n";
             if(corridor_controls!=16)throw std::runtime_error("Missing retail corridor control check");

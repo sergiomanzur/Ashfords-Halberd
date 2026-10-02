@@ -26,6 +26,9 @@ ActorModelBank decode_actor_model_bank(const Bytes &data, size_t begin,
 std::vector<ActorModelBank> decode_room_enemy_models(const Bytes &data);
 Scene pose_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
                  Vec3 position = {}, uint16_t yaw = 0);
+Scene pose_actor_rotated(const ActorModel &actor,
+                         const std::vector<JointPose> &pose, Vec3 position,
+                         std::array<int32_t, 3> angles);
 struct PlayerPackage {
   std::vector<ActorModel> models;
   std::vector<std::optional<Motion>> motions;

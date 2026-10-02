@@ -49,6 +49,12 @@ by ID/version. The headless room probe posed the retail corridor actor for all
 loading and native skinning; event-driven playback and gameplay integration
 remain pending.
 
+Whole-actor rotation now supports all three signed angle components using
+`njRotateXYZ`'s Z–Y–X composition; the existing position/yaw API delegates to
+that path. A combined-axis test verifies transformed skinned vertices. The
+scheduled CommonCtr model-rebuild command uses this same renderer, rather than
+recording a request without calculating geometry.
+
 Step 1 is still incomplete: there is no playable application mode yet. Next is
 integrating the new [movement/collision and camera simulation](player-movement-status.md)
 into application input, original event-controlled room entry and animated

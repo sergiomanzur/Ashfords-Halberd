@@ -509,6 +509,63 @@ int main() {
     controller_case(Bytes{101, 3, 4, 0}, true);
     controller_case(Bytes{101, 4, 0, 0}, true);
     controller_case(Bytes{105, 47}, true);
+    ActorModel empty_model;
+    empty_model.model.resize(68);
+    empty_model.model[0] = 'M';
+    empty_model.model[1] = 'D';
+    empty_model.model[2] = 'L';
+    empty_model.model[3] = 128;
+    empty_model.model[4] = 16;
+    empty_model.model[6] = 1;
+    put(empty_model.model, 8, 0xffffffff);
+    put(empty_model.model, 16, 6);
+    put(empty_model.model, 20, 0xffffffff);
+    put(empty_model.model, 60, 0xffffffff);
+    put(empty_model.model, 64, 0xffffffff);
+    transformed.enemies[1].model =
+        std::make_shared<const ActorModel>(empty_model);
+    controller_case(Bytes{101, 1, 0, 99, 105, 47, 255, 0}, false);
+    ck(transformed.enemies[1].rendered_model.has_value());
+    transformed.enemies[1].joint_pose.resize(2);
+    controller_case(Bytes{101, 1, 0, 0, 105, 47, 255, 0}, true);
+    transformed.enemies[1].joint_pose.clear();
+    auto triangle_model = empty_model;
+    triangle_model.model.resize(400);
+    auto &triangle_bytes = triangle_model.model;
+    put(triangle_bytes, 20, 128);
+    put(triangle_bytes, 24, 0x41200000); // Root position x = 10.
+    put(triangle_bytes, 144, 152);
+    put(triangle_bytes, 148, 328);
+    triangle_bytes[168] = 51;
+    triangle_bytes[170] = 39;
+    triangle_bytes[174] = 3;
+    put(triangle_bytes, 232, 0x3f800000);
+    put(triangle_bytes, 268, 0x3f800000);
+    triangle_bytes[328] = 255;
+    triangle_bytes[344] = 66;
+    triangle_bytes[346] = 11;
+    triangle_bytes[348] = 1;
+    triangle_bytes[350] = 3;
+    triangle_bytes[358] = 1;
+    triangle_bytes[364] = 2;
+    triangle_bytes[370] = 255;
+    transformed.enemies[1].model =
+        std::make_shared<const ActorModel>(triangle_model);
+    transformed.enemies[1].position = {100, 200, 300};
+    transformed.enemies[1].angles = {0, 16384, 0};
+    controller_case(Bytes{101, 1, 0, 99, 105, 47, 255, 0}, false);
+    auto rebuilt_vertex = transformed.enemies[1]
+                              .rendered_model->meshes[0]
+                              .triangles[0]
+                              .corners[0]
+                              .position;
+    ck(rebuilt_vertex.x == 100 && rebuilt_vertex.y == 200 &&
+       rebuilt_vertex.z == 289);
+    for (uint32_t matrix_flag : {0x80u, 0x1000u}) {
+      transformed.enemies[1].flags = matrix_flag;
+      controller_case(Bytes{101, 1, 0, 0, 105, 47, 255, 0}, true);
+    }
+    transformed.enemies[1].flags = 0;
     transformed.tasks[1].work_index.reset();
     controller_case(Bytes{105, 11, 0, 0, 0, 0}, true);
     transformed.collision.reset();

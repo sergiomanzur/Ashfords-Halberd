@@ -84,8 +84,14 @@ coordinates and select the floor from the bound room ground table. Rotations
 retain signed integer angles from the original degree conversion and update
 backup angles. Bindings use stable indices and are checked again on access.
 Synthetic scheduled tests cover those transforms, allocation indirection,
-cached state, invalid bindings and missing floor data. Player/effect bindings,
-model rebuilding, motion selection and sound commands remain unsupported;
+cached state, invalid bindings and missing floor data. CommonCtr subcommand 47
+now rebuilds the bound primary actor model from its current joint pose and
+whole-actor transform, producing a native skinned, textured scene. The node
+index from LoadWork does not select another model. Linked actors and retained
+external matrices fail explicitly until their matrix ownership is implemented.
+The headless retail probe executes the unchanged corridor event through this
+rebuild and verifies it stops at the next unsupported motion-selection command.
+Player/effect bindings, motion selection and sound commands remain unsupported;
 the complete retail corridor event therefore still cannot execute.
 
 The retail RM_0010 control script sets RoomCaseNo before SetDoorCall into
