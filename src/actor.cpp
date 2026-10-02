@@ -5,7 +5,6 @@
 #include <map>
 #include <stdexcept>
 #include <string>
-#include <tuple>
 namespace ashford {
 namespace {
 struct Reader {
@@ -178,7 +177,7 @@ std::vector<ActorModelBank> decode_room_enemy_models(const Bytes &data) {
     }
     throw std::runtime_error("Actor texture record limit exceeded");
   };
-  std::map<std::tuple<uint16_t, uint8_t, int>, Bytes> cache;
+  std::map<size_t, Bytes> cache;
   size_t texture_slot = 1; // Room geometry consumes the first entry.
   for (size_t i = 0; i < banks.size(); ++i) {
     int version = -1;
@@ -189,10 +188,16 @@ std::vector<ActorModelBank> decode_room_enemy_models(const Bytes &data) {
         ++version;
       if (version < 0)
         continue;
-      if (enemy.id >= 100 || enemy.model_version >= 16 || version >= 16)
+      // PS2 uses a linear byte address into et_lp[100][16][16]. Retail
+      // model_version=32 aliases a later ID's slots within that allocation.
+      size_t key = size_t(enemy.id) * 256 + size_t(enemy.model_version) * 16 +
+                   size_t(version);
+      if (key >= 100 * 16 * 16 || version >= 16)
         throw std::runtime_error(
-            "Enemy texture cache index outside source limits");
-      auto key = std::make_tuple(enemy.id, enemy.model_version, version);
+            "Enemy texture cache index outside source limits: ID " +
+            std::to_string(enemy.id) + ", model version " +
+            std::to_string(enemy.model_version) + ", texture version " +
+            std::to_string(version));
       auto found = cache.find(key);
       if (own && found == cache.end()) {
         if (texture_slot >= textures.size())

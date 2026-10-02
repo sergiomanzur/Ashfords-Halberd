@@ -40,14 +40,17 @@ images. An optional fresh output directory saves previews; appending
 Room enemy model banks now decode natively from RDX section 20, preserving
 active-enemy pointer ordering, SKIN association and MASK bytes. Enemy texture
 packs are assigned from the separate section-32 table using the reference
-cache key (enemy ID, model version and textured-model ordinal); models without
+linear cache address (enemy ID, model version and textured-model ordinal); models without
 their own texture list inherit the preceding list. Bounds cover records,
 pointer tables, section extents and aggregate copied asset bytes. Tests cover
 inactive authored slots, multiple models, inherited lists and cache separation
-by ID/version. The headless room probe posed the retail corridor actor for all
+by ID/version. Retail graveyard model version 32 aliases a later ID's cache
+slot, as in PS2 array-address arithmetic; bounds apply to the entire cache
+allocation. An alias regression verifies shared textures without consuming
+another pack. The headless room probe posed the retail corridor actor for all
 150 frames of room motion 0 with its original textures. This verifies asset
-loading and native skinning; event-driven playback and gameplay integration
-remain pending.
+loading and native skinning. Native event-driven corridor playback now passes;
+application gameplay integration remains pending.
 
 Whole-actor rotation now supports all three signed angle components using
 `njRotateXYZ`'s Z–Y–X composition; the existing position/yaw API delegates to

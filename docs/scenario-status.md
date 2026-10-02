@@ -107,6 +107,17 @@ actor and verifies its empty-bank hold before script selection. Other actor
 controllers and their initialization,
 mirroring, linked matrices and joint overrides remain to port. The application
 gameplay loop is not yet connected to these native updates.
+`bind_room_enemies` now constructs the original 128 runtime slots from active
+authored records, retains complete immutable model banks, aliases the primary
+model, calculates floor and assigns the regular motion banks in runtime order.
+The script lookup map preserves ETTY `work_number` values, including inactive
+entries, rather than inventing a map from allocation order. Binding replaces
+enemy state only after validation, preserving inventory and persistent flags.
+Synthetic tests cover compaction, signed yaw, ignored authored X/Z rotation,
+ID-dependent model flags and failure rollback. The retail probe binds enemies
+in all 205 rooms and uses the resulting corridor state for startup and its
+complete event. Object/item loading and application room lifecycle remain
+pending.
 Player/effect bindings and sound commands remain unsupported.
 
 The retail RM_0010 control script sets RoomCaseNo before SetDoorCall into

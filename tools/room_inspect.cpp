@@ -53,6 +53,8 @@ int wmain(int argc,wchar_t** argv) {
                 auto scenario=decode_room_scenario(data);
                 scenario_entries+=scenario.entry_count();
                 if(scenario_check) {
+                    ScenarioState bound_enemies;
+                    bind_room_enemies(data,collision,bound_enemies);
                     auto enemy_motion_banks=decode_room_enemy_motion_banks(data);
                     std::vector<const MotionBank*> checked_banks;
                     for(const auto& enemy_bank:enemy_motion_banks) {
@@ -93,17 +95,9 @@ int wmain(int argc,wchar_t** argv) {
                         }
                         if(actor_frame!=0 || actor_direction!=0)
                             throw std::runtime_error("Retail corridor animation did not wrap");
-                        ScenarioState controller;
+                        ScenarioState controller=std::move(bound_enemies);
                         controller.scenario=std::make_shared<const RoomScenario>(scenario);
                         controller.collision=collision;
-                        controller.enemies.resize(1);
-                        controller.enemy_slots={0};
-                        controller.enemies[0].model=std::make_shared<const ActorModel>(enemies[0].models[0]);
-                        controller.enemies[0].flags=records.enemies[0].flags;
-                        controller.enemies[0].id=records.enemies[0].id;
-                        controller.enemies[0].motions=enemy_motion_banks[0];
-                        controller.enemies[0].position=records.enemies[0].position;
-                        controller.enemies[0].angles={0,records.enemies[0].rotation_y,0};
                         controller.room_motions=std::make_shared<const std::vector<std::optional<Motion>>>(bank);
                         controller.flags[6][0]=0x12;
                         controller.flags[4][0]=0x80000000;

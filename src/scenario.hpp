@@ -47,9 +47,11 @@ struct ScenarioEntity {
   uint32_t motion_mode = 0, model_flags = 0;
   int32_t blend_rate = 0;
   std::shared_ptr<const ActorModel> model;
+  std::shared_ptr<const ActorModelBank> model_bank;
   std::vector<JointPose> joint_pose;
   std::optional<Scene> rendered_model;
-  uint16_t id = 0;
+  uint16_t id = 0, type = 0;
+  uint8_t model_version = 0;
   std::array<uint8_t, 4> modes{};
   uint32_t motion_number = 0, motion_step = 65536;
   int32_t frame = 0, blend_count = 0, control1 = 0, control2 = 0;
@@ -104,4 +106,8 @@ void run_scenario(const ScenarioProgram &program, ScenarioState &state);
 size_t start_scenario_event(ScenarioState &state, size_t level, size_t event);
 void tick_scenario_tasks(ScenarioState &state);
 void tick_scenario_actors(ScenarioState &state);
+// bhSetRoom/bhSetEnemy/bhFinishRoom enemy bindings. Replaces only enemies and
+// their authored work-number map after all assets validate successfully.
+void bind_room_enemies(const Bytes &data, const RoomCollision &collision,
+                       ScenarioState &state);
 } // namespace ashford

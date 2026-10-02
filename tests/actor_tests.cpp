@@ -233,6 +233,19 @@ int main() {
     auto shared_banks = decode_room_enemy_models(multi_room);
     ck(shared_banks[2].models[0].textures[8] == 10 &&
        shared_banks[2].models[2].textures[8] == 20);
+    // Retail uses model versions beyond 15. PS2 cache addressing is linear:
+    // [1][32][0] aliases [3][0][0] inside the complete allocation.
+    auto aliased_room = multi_room;
+    put(aliased_room, 1136, 1);
+    aliased_room[1132 + 9] = 32;
+    put(aliased_room, 1136 + 2 * 36, 3);
+    put(aliased_room, 5000, 3); // Room + two packs; alias must consume none.
+    auto aliased_banks = decode_room_enemy_models(aliased_room);
+    ck(aliased_banks[2].models[0].textures == aliased_banks[0].models[0].textures &&
+       aliased_banks[2].models[2].textures == aliased_banks[0].models[2].textures);
+    put(aliased_room, 1136, 99);
+    aliased_room[1132 + 9] = 16;
+    bad([&] { decode_room_enemy_models(aliased_room); });
     std::vector<JointPose> pose(2);
     pose[1].angles = std::array<uint16_t, 3>{0, 0, 16384};
     auto scene = pose_actor(a, pose);

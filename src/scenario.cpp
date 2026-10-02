@@ -1,7 +1,50 @@
 #include "scenario.hpp"
+#include "room.hpp"
 #include <limits>
 #include <stdexcept>
 namespace ashford {
+void bind_room_enemies(const Bytes &data, const RoomCollision &collision,
+                       ScenarioState &state) {
+  auto records = decode_room_records(data);
+  auto models = decode_room_enemy_models(data);
+  auto motions = decode_room_enemy_motion_banks(data);
+  std::vector<ScenarioEntity> enemies(128);
+  std::vector<size_t> slots;
+  size_t active = 0;
+  for (size_t i = 0; i < records.enemies.size(); ++i) {
+    const auto &authored = records.enemies[i];
+    if (authored.work_number >= enemies.size())
+      throw std::runtime_error("Authored enemy work number outside runtime");
+    slots.push_back(authored.work_number);
+    if (!(authored.flags & 1))
+      continue;
+    auto &entity = enemies.at(active++);
+    entity.flags = authored.flags;
+    entity.id = authored.id;
+    entity.type = authored.type;
+    entity.model_version = authored.model_version;
+    if (entity.id > 40) {
+      entity.model_flags |= 0x20;
+      entity.flags |= 0x8000;
+    }
+    if (entity.id > 90)
+      entity.model_flags |= 0x100;
+    entity.position = authored.position;
+    entity.angles = {0, authored.rotation_y, 0};
+    entity.floor = player_floor_number(collision, entity.position.y);
+    entity.model_bank =
+        std::make_shared<const ActorModelBank>(std::move(models.at(i)));
+    if (!entity.model_bank->models.empty())
+      entity.model = std::shared_ptr<const ActorModel>(
+          entity.model_bank, &entity.model_bank->models[0]);
+  }
+  // Original finish-room loading visits authored-count runtime slots,
+  // including zeroed trailing slots, independently of model allocation.
+  for (size_t i = 0; i < motions.size(); ++i)
+    enemies.at(i).motions = motions[i];
+  state.enemies = std::move(enemies);
+  state.enemy_slots = std::move(slots);
+}
 namespace {
 uint32_t u32(const Bytes &b, size_t p) {
   if (p > b.size() || b.size() - p < 4)

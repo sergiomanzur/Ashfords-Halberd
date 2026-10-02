@@ -522,6 +522,66 @@ int main() {
     put(empty_model.model, 20, 0xffffffff);
     put(empty_model.model, 60, 0xffffffff);
     put(empty_model.model, 64, 0xffffffff);
+    Bytes binding_room(2000);
+    put(binding_room, 0, 0x41200000);
+    put(binding_room, 16, 128);
+    put(binding_room, 136, 1132);
+    put(binding_room, 264, 3);
+    for (size_t authored : {size_t(1), size_t(2)}) {
+      size_t p = 1132 + authored * 36;
+      put(binding_room, p, 1);
+      put(binding_room, p + 4, authored == 1 ? 0x120043 : 91);
+      binding_room[p + 9] = 3;
+      binding_room[p + 8] = 9; // Floor is recalculated from room ground.
+      binding_room[p + 10] = uint8_t(authored - 1);
+      put(binding_room, p + 12, 0x41200000); // x = 10.
+      binding_room[p + 24] = 7; // Authored x/z are ignored by bhSetEnemy.
+      binding_room[p + 28] = 128;
+      binding_room[p + 29] = 255; // Signed yaw = -128.
+    }
+    binding_room[1142] = 7; // Inactive entry retains its authored work mapping.
+    put(binding_room, 20, 1240);
+    put(binding_room, 1240, 1300);
+    put(binding_room, 1244, 1400);
+    put(binding_room, 1248, 1500);
+    std::copy(empty_model.model.begin(), empty_model.model.end(),
+              binding_room.begin() + 1300);
+    put(binding_room, 32, 1800);
+    put(binding_room, 1800, 1);
+    put(binding_room, 1804, 1900);
+    put(binding_room, 1900, 0xffffffff);
+    for (size_t p : {size_t(1400), size_t(1500)}) {
+      put(binding_room, p, uint32_t(empty_model.model.size()));
+      std::copy(empty_model.model.begin(), empty_model.model.end(),
+                binding_room.begin() + p + 4);
+      put(binding_room, p + 4 + empty_model.model.size(), 0xffffffff);
+    }
+    RoomCollision binding_collision;
+    ScenarioState bound_room;
+    bound_room.flags[1][0] = 0x12345678;
+    bound_room.inventory[0] = 99;
+    bind_room_enemies(binding_room, binding_collision, bound_room);
+    ck(bound_room.enemies.size() == 128 &&
+       bound_room.enemy_slots == std::vector<size_t>({7, 0, 1}));
+    ck(bound_room.enemies[0].id == 67 && bound_room.enemies[0].flags == 0x8001 &&
+       bound_room.enemies[0].type == 18 && bound_room.enemies[0].model_version == 3 &&
+       bound_room.enemies[0].model_flags == 0x20 &&
+       bound_room.enemies[0].position.x == 10 &&
+       bound_room.enemies[0].angles == std::array<int32_t, 3>{0, -128, 0} &&
+       bound_room.enemies[0].floor == 0 && bound_room.enemies[0].model &&
+       bound_room.enemies[0].model_bank->models.size() == 1 &&
+       bound_room.enemies[0].motions->size() == 512);
+    ck(bound_room.enemies[1].id == 91 &&
+       bound_room.enemies[1].model_flags == 0x120 &&
+       bound_room.enemies[2].flags == 0 && !bound_room.enemies[3].motions &&
+       bound_room.flags[1][0] == 0x12345678 && bound_room.inventory[0] == 99);
+    auto malformed_binding = binding_room;
+    put(malformed_binding, 1248, 1249);
+    bad([&] { bind_room_enemies(malformed_binding, binding_collision, bound_room); });
+    ck(bound_room.enemies[0].id == 67 && bound_room.enemy_slots[0] == 7);
+    malformed_binding = binding_room;
+    malformed_binding[1142] = 128;
+    bad([&] { bind_room_enemies(malformed_binding, binding_collision, bound_room); });
     transformed.enemies[1].model =
         std::make_shared<const ActorModel>(empty_model);
     controller_case(Bytes{101, 1, 0, 99, 105, 47, 255, 0}, false);
