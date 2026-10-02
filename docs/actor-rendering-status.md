@@ -58,6 +58,20 @@ that path. A combined-axis test verifies transformed skinned vertices. The
 scheduled CommonCtr model-rebuild command uses this same renderer, rather than
 recording a request without calculating geometry.
 
+Room objects and pickups now decode through `decode_room_actor_models`, using
+the original model-pointer ordering after enemy banks. Object slots 0–3 remain
+reserved for player attachments. Objects can carry a length-prefixed SKIN block;
+pickups carry raw MDL data. Object and pickup texture caches are separate and
+keyed by authored ID, with repeated IDs reusing a pack without advancing the
+texture-table cursor. Models without their own texture list do not inherit a
+different prop's textures. Synthetic tests cover both caches, repeated object
+and pickup IDs, reserved slots, skin prefixes and malformed bounds.
+This supplies assets; binding props to scenario state and running their native
+controllers remain pending.
+The headless retail scenario probe decoded 1,914 object/pickup models across
+all 205 rooms, including nine skinned objects. The existing corridor lifecycle,
+150-frame actor animation and scripted door probes also passed.
+
 Step 1 is still incomplete: there is no playable application mode yet. Next is
 integrating the new [movement/collision and camera simulation](player-movement-status.md)
 into application input, original event-controlled room entry and animated

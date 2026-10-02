@@ -241,11 +241,56 @@ int main() {
     put(aliased_room, 1136 + 2 * 36, 3);
     put(aliased_room, 5000, 3); // Room + two packs; alias must consume none.
     auto aliased_banks = decode_room_enemy_models(aliased_room);
-    ck(aliased_banks[2].models[0].textures == aliased_banks[0].models[0].textures &&
-       aliased_banks[2].models[2].textures == aliased_banks[0].models[2].textures);
+    ck(aliased_banks[2].models[0].textures ==
+           aliased_banks[0].models[0].textures &&
+       aliased_banks[2].models[2].textures ==
+           aliased_banks[0].models[2].textures);
     put(aliased_room, 1136, 99);
     aliased_room[1132 + 9] = 16;
     bad([&] { decode_room_enemy_models(aliased_room); });
+    auto populated = multi_room;
+    populated.resize(9000);
+    put(populated, 128 + 3 * 4, 6200);
+    put(populated, 128 + 0x80 + 3 * 4, 6);
+    put(populated, 128 + 4 * 4, 6400);
+    put(populated, 128 + 0x80 + 4 * 4, 2);
+    put(populated, 6200 + 4 * 36, 1);
+    put(populated, 6204 + 4 * 36, 10);
+    put(populated, 6200 + 5 * 36, 1);
+    put(populated, 6204 + 5 * 36, 10);
+    for (size_t i = 0; i < 2; ++i) {
+      put(populated, 6400 + i * 36, 1);
+      put(populated, 6404 + i * 36, 10);
+    }
+    put(populated, 1252, 6500);
+    put(populated, 1256, 7000);
+    put(populated, 1260, 7200);
+    put(populated, 1264, 8000);
+    put(populated, 6500, uint32_t(a.skin.size() - 4));
+    std::copy(a.skin.begin(), a.skin.end(), populated.begin() + 6504);
+    auto item_model = a.model;
+    put(item_model, 8, 0);
+    std::copy(item_model.begin(), item_model.end(),
+              populated.begin() + 6504 + a.skin.size());
+    std::copy(item_model.begin(), item_model.end(), populated.begin() + 7000);
+    std::copy(item_model.begin(), item_model.end(), populated.begin() + 7200);
+    std::copy(item_model.begin(), item_model.end(), populated.begin() + 8000);
+    auto complete = decode_room_actor_models(populated);
+    ck(complete.objects.size() == 6 && complete.objects[0].model.empty() &&
+       complete.objects[4].skin == a.skin &&
+       complete.objects[4].textures[8] == 30 &&
+       complete.objects[5].textures == complete.objects[4].textures &&
+       complete.items.size() == 2 && complete.items[0].textures[8] == 40 &&
+       complete.items[0].textures == complete.items[1].textures);
+    auto invalid_object = populated;
+    put(invalid_object, 6500, 0xffffffff);
+    bad([&] { decode_room_actor_models(invalid_object); });
+    invalid_object = populated;
+    put(invalid_object, 6204 + 4 * 36, 1300);
+    bad([&] { decode_room_actor_models(invalid_object); });
+    invalid_object = populated;
+    put(invalid_object, 6404, 200);
+    bad([&] { decode_room_actor_models(invalid_object); });
     std::vector<JointPose> pose(2);
     pose[1].angles = std::array<uint16_t, 3>{0, 0, 16384};
     auto scene = pose_actor(a, pose);

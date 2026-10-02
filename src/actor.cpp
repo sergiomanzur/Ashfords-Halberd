@@ -89,7 +89,8 @@ ActorModelBank decode_actor_model_bank(const Bytes &data, size_t begin,
   }
   throw std::runtime_error("Actor model bank record limit exceeded");
 }
-std::vector<ActorModelBank> decode_room_enemy_models(const Bytes &data) {
+static RoomActorModels decode_room_actor_models_impl(const Bytes &data,
+                                                     bool include_props) {
   if (data.size() > 64 * 1024 * 1024)
     throw std::runtime_error("Room enemy input exceeds limit");
   auto records = decode_room_records(data);
@@ -97,13 +98,20 @@ std::vector<ActorModelBank> decode_room_enemy_models(const Bytes &data) {
     throw std::runtime_error("Too many room enemy models");
   Reader r{data};
   size_t table = r.u32(20);
-  std::vector<ActorModelBank> banks(records.enemies.size());
+  RoomActorModels result;
+  result.enemies.resize(records.enemies.size());
+  auto &banks = result.enemies;
+  if (include_props) {
+    result.objects.resize(records.objects.size());
+    result.items.resize(records.items.size());
+  }
   size_t active = 0;
   for (const auto &enemy : records.enemies)
     if (enemy.flags & 1)
       ++active;
-  if (!active)
-    return banks;
+  if (!active && (!include_props ||
+                  (records.objects.size() <= 4 && records.items.empty())))
+    return result;
   if (!table)
     throw std::runtime_error("Missing room model pointer table");
   size_t pointer_count =
@@ -149,6 +157,42 @@ std::vector<ActorModelBank> decode_room_enemy_models(const Bytes &data) {
         charge(model.skin.size());
       }
     }
+  if (include_props) {
+    auto model_record = [&](size_t begin, bool skin_prefix) {
+      size_t end = boundary(begin, pointers);
+      if (begin < table + pointer_count * 4 || end - begin < 16)
+        throw std::runtime_error("Room prop model outside extent");
+      ActorModel model;
+      if (skin_prefix && !(data[begin] == 'M' && data[begin + 1] == 'D' &&
+                           data[begin + 2] == 'L')) {
+        size_t size = r.u32(begin);
+        if (size > end - begin - 8)
+          throw std::runtime_error("Room object skin outside extent");
+        model.skin = r.copy(begin + 4, size + 4);
+        if (model.skin.size() < 4 || model.skin[0] != 'S' ||
+            model.skin[1] != 'K' || model.skin[2] != 'I' ||
+            model.skin[3] != 'N')
+          throw std::runtime_error("Invalid room object skin signature");
+        charge(model.skin.size());
+        begin += size + 8;
+      }
+      if (end - begin < 16)
+        throw std::runtime_error("Truncated room prop model");
+      model.model = r.copy(begin, end - begin);
+      if (model.model[0] != 'M' || model.model[1] != 'D' ||
+          model.model[2] != 'L')
+        throw std::runtime_error("Invalid room prop model signature");
+      size_t header = uint16_t(model.model[4]) | uint16_t(model.model[5]) << 8;
+      if (header < 16 || header > model.model.size())
+        throw std::runtime_error("Invalid room prop model header");
+      charge(model.model.size());
+      return model;
+    };
+    for (size_t i = 4; i < result.objects.size(); ++i)
+      result.objects[i] = model_record(pointers.at(slot++), true);
+    for (auto &item : result.items)
+      item = model_record(pointers.at(slot++), false);
+  }
   size_t texture_table = r.u32(32);
   if (!texture_table)
     throw std::runtime_error("Missing room actor texture table");
@@ -212,7 +256,40 @@ std::vector<ActorModelBank> decode_room_enemy_models(const Bytes &data) {
       }
     }
   }
-  return banks;
+  if (include_props) {
+    auto assign = [&](std::vector<ActorModel> &models,
+                      const std::vector<RoomEntity> &entities, size_t first,
+                      size_t cache_limit) {
+      std::map<uint16_t, Bytes> cache;
+      for (size_t i = first; i < models.size(); ++i) {
+        auto &model = models[i];
+        if (Reader{model.model}.u32(8) == 0xffffffff)
+          continue;
+        auto id = entities[i].id;
+        if (id >= cache_limit)
+          throw std::runtime_error("Room prop texture ID outside source cache");
+        auto found = cache.find(id);
+        if (found == cache.end()) {
+          if (texture_slot >= textures.size())
+            throw std::runtime_error("Missing room prop texture pack");
+          auto pack = texture(textures[texture_slot++]);
+          charge(pack.size());
+          found = cache.emplace(id, std::move(pack)).first;
+        }
+        charge(found->second.size());
+        model.textures = found->second;
+      }
+    };
+    assign(result.objects, records.objects, 4, 1300);
+    assign(result.items, records.items, 0, 200);
+  }
+  return result;
+}
+RoomActorModels decode_room_actor_models(const Bytes &data) {
+  return decode_room_actor_models_impl(data, true);
+}
+std::vector<ActorModelBank> decode_room_enemy_models(const Bytes &data) {
+  return decode_room_actor_models_impl(data, false).enemies;
 }
 std::vector<SkinNode> decode_skin(const Bytes &data, size_t count) {
   // npSkinConvPreparation/npSkinConvSub and npCalcSkin use a ten-step

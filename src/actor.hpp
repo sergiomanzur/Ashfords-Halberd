@@ -20,6 +20,12 @@ struct ActorModelBank {
   std::vector<ActorModel> models;
   Bytes mask;
 };
+struct RoomActorModels {
+  std::vector<ActorModelBank> enemies;
+  // Object slots 0-3 belong to player attachments, not room asset pointers.
+  std::vector<ActorModel> objects, items;
+};
+RoomActorModels decode_room_actor_models(const Bytes &data);
 ActorModelBank decode_actor_model_bank(const Bytes &data, size_t begin,
                                        size_t end);
 // Authored enemy order, including empty banks for inactive enemies.

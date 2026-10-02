@@ -45,6 +45,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t corridor_actor_poses=0;
         size_t corridor_model_rebuilds=0;
         size_t corridor_lifecycles=0;
+        size_t prop_models=0, prop_skins=0;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
@@ -54,6 +55,11 @@ int wmain(int argc,wchar_t** argv) {
                 auto scenario=decode_room_scenario(data);
                 scenario_entries+=scenario.entry_count();
                 if(scenario_check) {
+                    auto room_actors=decode_room_actor_models(data);
+                    for(const auto* models:{&room_actors.objects,&room_actors.items})
+                        for(const auto& model:*models)if(!model.model.empty()) {
+                            ++prop_models;if(!model.skin.empty())++prop_skins;
+                        }
                     ScenarioState bound_enemies;
                     bind_room_enemies(data,collision,bound_enemies);
                     auto enemy_motion_banks=decode_room_enemy_motion_banks(data);
@@ -253,6 +259,7 @@ int wmain(int argc,wchar_t** argv) {
         if(!output) throw std::runtime_error("Could not write room report");
         std::cout<<"Validated "<<entries.size()<<" rooms and "<<scenario_entries<<" scenario entry slots\n";
         if(scenario_check) {
+            std::cout<<"Decoded "<<prop_models<<" room object/item models, including "<<prop_skins<<" skinned objects\n";
             std::cout<<"Decoded "<<enemy_motions<<" enemy motions and sampled "<<enemy_motion_poses<<" poses\n";
             std::cout<<"Decoded "<<room_motions<<" room motions and sampled "<<room_motion_poses<<" poses\n";
             std::cout<<"Posed "<<corridor_actor_poses<<" retail corridor actor frames\n";
