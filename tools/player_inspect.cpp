@@ -1,4 +1,5 @@
 #include "actor.hpp"
+#include "player.hpp"
 #include "render.hpp"
 #include <filesystem>
 #include <fstream>
@@ -37,6 +38,17 @@ int wmain(int argc, wchar_t **argv) {
       throw std::runtime_error("Player entry outside archive");
     auto entry = entries[index];
     auto package = decode_player_package(read(f, entry.offset, entry.size));
+    auto translations = decode_player_translation_tables(package.auxiliary);
+    // Healthy unarmed walk/run/back motions and their authored displacement
+    // tables. Validate every frame; this does not simulate the player state machine.
+    for (auto pair : {std::pair<size_t, size_t>{0, 0}, {4, 3}, {16, 6}}) {
+      if (pair.first >= package.motions.size() || !package.motions[pair.first])
+        throw std::runtime_error("Missing baseline locomotion motion");
+      for (size_t frame = 0; frame < package.motions[pair.first]->frames; ++frame)
+        player_translation_speed(translations, pair.second, frame);
+    }
+    std::cout << "Validated " << translations.size()
+              << " auxiliary tables and baseline locomotion frames\n";
     if (argc >= 4) {
       bool pose_only = argc == 4 && std::wstring(argv[3]) == L"--pose-check";
       const std::filesystem::path destination(argv[3]);

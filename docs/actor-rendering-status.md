@@ -38,6 +38,7 @@ images. An optional fresh output directory saves previews; appending
 `RDX_LNK.AFS room-index` also saves combined room/actor camera previews.
 
 Step 1 is still incomplete: there is no playable application mode yet. Next is
-integrating a fixed-tick player simulation, original movement/collision and
-camera-cut selection, followed by interactions, transitions, enemies, combat,
+integrating a fixed-tick player simulation and original movement/collision,
+using the new [movement and camera-area primitives](player-movement-status.md),
+followed by interactions, transitions, enemies, combat,
 inventory, decoded audio and versioned save/load across the selected room pair.

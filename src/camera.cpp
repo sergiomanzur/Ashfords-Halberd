@@ -40,6 +40,27 @@ std::vector<RoomCut> decode_room_cuts(const Bytes &data) {
   for (size_t i = 0; i < count; ++i) {
     size_t c = p + i * 680;
     RoomCut cut;
+    cut.flags = data[c];
+    size_t area_count = data[c + 3], area_table = r.u32(c + 4);
+    if (area_count && !area_table)
+      throw std::runtime_error("Missing camera area table");
+    r.range(area_table, area_count * 32);
+    for (size_t j = 0; j < area_count; ++j) {
+      size_t p = area_table + j * 32;
+      CutArea area;
+      area.attribute = r.u32(p);
+      area.floor = int8_t(data[p + 4]);
+      area.type = data[p + 7];
+      area.height = r.f(p + 8);
+      area.min_x = r.f(p + 16);
+      area.min_z = r.f(p + 20);
+      area.max_x = r.f(p + 24);
+      area.max_z = r.f(p + 28);
+      if (area.type > 4 || area.min_x > area.max_x || area.min_z > area.max_z ||
+          (area.type && (area.min_x == area.max_x || area.min_z == area.max_z)))
+        throw std::runtime_error("Invalid camera area geometry");
+      cut.areas.push_back(area);
+    }
     cut.origin = r.vec(c + 8);
     cut.size = r.vec(c + 20);
     for (size_t v = 0; v < 2; ++v) {
@@ -62,6 +83,55 @@ std::vector<RoomCut> decode_room_cuts(const Bytes &data) {
     cuts.push_back(cut);
   }
   return cuts;
+}
+std::optional<size_t> find_camera_cut(const std::vector<RoomCut> &cuts, float x,
+                                      float z, int8_t floor) {
+  // MIT recvx-decomp cut.c::bhCheckCutArea / bhCheckCutAreaInnerTriangle.
+  if (!std::isfinite(x) || !std::isfinite(z))
+    throw std::runtime_error("Non-finite cut position");
+  for (size_t i = 0; i < cuts.size(); ++i)
+    if (cuts[i].flags & 1)
+      for (const auto &a : cuts[i].areas) {
+        if (a.floor != floor)
+          continue;
+        if (!a.type) {
+          if (x >= a.min_x && x < a.max_x && z >= a.min_z && z < a.max_z)
+            return i;
+          continue;
+        }
+        if (a.type > 4 || a.min_x >= a.max_x || a.min_z >= a.max_z)
+          throw std::runtime_error("Invalid camera area geometry");
+        if (x < a.min_x || x > a.max_x || z < a.min_z || z > a.max_z)
+          continue;
+        float start_x = (a.type == 1 || a.type == 4) ? a.max_x : a.min_x;
+        float end_x = (a.type == 1 || a.type == 4) ? a.min_x : a.max_x;
+        float start_z = (a.type == 1 || a.type == 2) ? a.max_z : a.min_z;
+        float end_z = (a.type == 1 || a.type == 2) ? a.min_z : a.max_z;
+        float offset = x - start_x;
+        float projected =
+            offset == 0
+                ? 0
+                : std::fabs((end_z - start_z) / ((end_x - start_x) / offset));
+        if (std::fabs(end_z - z) > projected)
+          return i;
+      }
+  return std::nullopt;
+}
+std::optional<size_t> select_camera_cut(const std::vector<RoomCut> &cuts,
+                                        std::optional<size_t> current, float x,
+                                        float z, int8_t floor, bool force) {
+  if (current && *current >= cuts.size())
+    throw std::runtime_error("Current camera cut outside room");
+  auto candidate = find_camera_cut(cuts, x, z, floor);
+  if (!current || force)
+    return candidate ? candidate : current;
+  if (!candidate || candidate == current)
+    return current;
+  for (auto p : std::array<std::array<float, 2>, 4>{
+           {{x, z - 1}, {x, z + 1}, {x - 1, z}, {x + 1, z}}})
+    if (find_camera_cut(cuts, p[0], p[1], floor) == current)
+      return current;
+  return candidate;
 }
 Camera resolve_camera(const RoomCut &cut, size_t variant) {
   if (variant >= 2)
