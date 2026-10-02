@@ -1,4 +1,5 @@
 #include "room.hpp"
+#include "runtime.hpp"
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -80,6 +81,87 @@ int main() {
     ck(state.player.visual_anchor.y == 20 && state.player.entering &&
        !state.cut);
     ck(enter_room(room, 1, collision, cuts).player.yaw == 123);
+    auto runtime_data = b;
+    runtime_data.resize(2500);
+    put(runtime_data, 264, 0); // No authored enemies in this fixture.
+    put(runtime_data, 20, 1800);
+    put(runtime_data, 1800, 1850);
+    runtime_data[1850] = 'M';
+    runtime_data[1851] = 'D';
+    runtime_data[1852] = 'L';
+    runtime_data[1853] = 128;
+    runtime_data[1854] = 16;
+    runtime_data[1856] = 1;
+    put(runtime_data, 1858, 0xffffffff);
+    put(runtime_data, 1866, 6);
+    put(runtime_data, 1870, 0xffffffff);
+    put(runtime_data, 1910, 0xffffffff);
+    put(runtime_data, 1914, 0xffffffff);
+    put(runtime_data, 32, 1950);
+    put(runtime_data, 1950, 1);
+    put(runtime_data, 1954, 2000);
+    put(runtime_data, 2000, 0xffffffff);
+    put(runtime_data, 28, 2100);
+    put(runtime_data, 2100, 8);
+    put(runtime_data, 2104, 17);
+    Bytes frame_check{56, 0, 0, 1, 1, 0, 55, 7, 0};
+    std::copy(frame_check.begin(), frame_check.end(),
+              runtime_data.begin() + 2108);
+    PlayerPackage entry_player;
+    ActorModel entry_model;
+    entry_model.model =
+        Bytes(runtime_data.begin() + 1850, runtime_data.begin() + 1918);
+    entry_player.models.push_back(entry_model);
+    entry_player.motions.resize(43);
+    Motion entry_idle;
+    entry_idle.flags = 0x10;
+    entry_idle.frames = 2;
+    entry_idle.tracks.resize(1);
+    entry_idle.tracks[0].positions.resize(2);
+    entry_idle.tracks[0].angles.resize(2);
+    entry_player.motions[42] = entry_idle;
+    ScenarioState persistent;
+    persistent.flags[1][0] = 123;
+    persistent.inventory[0] = 99;
+    persistent.flags[4][0] = persistent.flags[5][0] = 0xffffffff;
+    persistent.flags[10][0] = 0xff7fffff;
+    persistent.flags[11][0] = 0xffffffff;
+    persistent.flags[6][0] = 0;
+    persistent.tasks[3].active = true;
+    persistent.tasks[3].counts[0] = 17;
+    persistent.objects.resize(4);
+    persistent.objects[0].id = 77;
+    persistent.door = ScenarioDoor{};
+    persistent.player_frame = 99;
+    auto runtime =
+        load_room_runtime(runtime_data, 0, 1, 1, persistent, entry_player);
+    ck(runtime.world.player.position.x == -10 &&
+       runtime.world.player.yaw == 123 && runtime.world.player.entering &&
+       runtime.scenario.stage == 0 && runtime.scenario.room == 1 &&
+       runtime.scenario.inventory[0] == 99 &&
+       runtime.scenario.flags[1][0] == 123 &&
+       runtime.scenario.flags[4][0] == 0 && runtime.scenario.flags[5][0] == 0 &&
+       runtime.scenario.flags[10][0] == 0xaf0000bb &&
+       runtime.scenario.flags[11][0] == 0x9b8c08c2 &&
+       runtime.scenario.flags[6][0] == 0xffffffef &&
+       (runtime.scenario.flags[12][0] & 0x180) == 0x180 &&
+       !runtime.scenario.door && runtime.scenario.objects[0].id == 77 &&
+       !runtime.scenario.tasks[3].active &&
+       runtime.scenario.tasks[3].counts[0] == 17 &&
+       runtime.scenario.player_frame == 65536 &&
+       runtime.world.player.frame == 65536 &&
+       runtime.world.player.sampled_frame == 0 &&
+       runtime.scenario.room_case == 7 && runtime.player_pose.size() == 1);
+    bad([&] {
+      load_room_runtime(runtime_data, 0, 1, 2, persistent, entry_player);
+    });
+    ck(persistent.door && persistent.tasks[3].active &&
+       persistent.flags[4][0] == 0xffffffff);
+    auto saved_entry = persistent;
+    saved_entry.flags[10][0] |= 0x800000;
+    bad([&] {
+      load_room_runtime(runtime_data, 0, 1, 0, saved_entry, entry_player);
+    });
     RoomCut cut;
     cut.flags = 1;
     CutArea area;

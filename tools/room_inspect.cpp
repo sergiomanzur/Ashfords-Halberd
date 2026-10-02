@@ -6,6 +6,7 @@
 #include "scenario.hpp"
 #include "motion.hpp"
 #include "actor.hpp"
+#include "runtime.hpp"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -23,8 +24,9 @@ Bytes read(std::ifstream& file, uint64_t offset, size_t size) {
 int wmain(int argc,wchar_t** argv) {
     try {
         bool collision_check=argc==4 && std::wstring(argv[3])==L"--collision-check";
-        bool scenario_check=argc==4 && std::wstring(argv[3])==L"--scenario-check";
-        if(argc!=3 && !(argc==4 && (std::wstring(argv[3])==L"--scene" || collision_check || scenario_check))) throw std::runtime_error("Usage: AshfordRoomInspect RDX_LNK.AFS report.tsv [--scene | --collision-check | --scenario-check]");
+        bool runtime_check=argc==5 && std::wstring(argv[3])==L"--runtime-check";
+        bool scenario_check=runtime_check || (argc==4 && std::wstring(argv[3])==L"--scenario-check");
+        if(argc!=3 && !runtime_check && !(argc==4 && (std::wstring(argv[3])==L"--scene" || collision_check || scenario_check))) throw std::runtime_error("Usage: AshfordRoomInspect RDX_LNK.AFS report.tsv [--scene | --collision-check | --scenario-check | --runtime-check SYSTEM.AFS]");
         const std::filesystem::path archive(argv[1]), report(argv[2]);
         if(std::filesystem::exists(report) && std::filesystem::equivalent(archive,report))
             throw std::runtime_error("Report cannot overwrite archive");
@@ -34,10 +36,25 @@ int wmain(int argc,wchar_t** argv) {
         uint32_t count=uint32_t(header[4])|uint32_t(header[5])<<8|uint32_t(header[6])<<16|uint32_t(header[7])<<24;
         if(count>10000) throw std::runtime_error("Invalid archive count");
         auto entries=afs_index(read(file,0,8+size_t(count)*8),std::filesystem::file_size(archive));
+        PlayerPackage player;
+        if(runtime_check) {
+            std::filesystem::path system_path(argv[4]);
+            if(std::filesystem::exists(report) && std::filesystem::equivalent(system_path,report))
+                throw std::runtime_error("Report cannot overwrite player archive");
+            std::ifstream system(system_path,std::ios::binary);
+            if(!system)throw std::runtime_error("Could not open player archive");
+            auto sh=read(system,0,8);
+            uint32_t n=uint32_t(sh[4])|uint32_t(sh[5])<<8|uint32_t(sh[6])<<16|uint32_t(sh[7])<<24;
+            if(n>10000)throw std::runtime_error("Invalid player archive count");
+            auto si=afs_index(read(system,0,8+size_t(n)*8),std::filesystem::file_size(system_path));
+            if(si.size()<=10)throw std::runtime_error("Missing Claire player package");
+            player=decode_player_package(read(system,si[10].offset,si[10].size));
+        }
         // Collect the complete report before touching the destination.
         std::string text="index\tcompressed_bytes\texpanded_bytes\tversion\tcameras\tenemies\tobjects\titems\twalls\tfloors\tmodel_objects\ttriangles\ttextures\tactive_wall_types\tentry_positions\tentries_with_camera\n";
         size_t scenario_entries=0;
         size_t corridor_initializations=0;
+        size_t runtime_entries=0;
         size_t corridor_controls=0;
         size_t corridor_door_requests=0;
         size_t room_motions=0, room_motion_poses=0;
@@ -153,7 +170,14 @@ int wmain(int argc,wchar_t** argv) {
                         state.interactions=collision.miscellaneous;
                         state.flags[8][1]=visited?0x20000000u:0;
                         state.flags[7][3]=collected?0x18u:0;
-                        initialize_scenario(state);
+                        if(runtime_check) {
+                            auto runtime=load_room_runtime(data,0,1,0,std::move(state),player);
+                            if(runtime.world.player.frame!=65536 || runtime.player_pose.empty() ||
+                               runtime.player_scene.meshes.empty() || runtime.scene.meshes.empty())
+                                throw std::runtime_error("Retail corridor runtime entry mismatch");
+                            ++runtime_entries;
+                            state=std::move(runtime.scenario);
+                        } else initialize_scenario(state);
                         if(state.interactions.size()<4 || state.items.size()<2 ||
                            state.interactions[0].type!=(visited?3:0) ||
                            state.interactions[0].attribute!=(visited?0u:0x80u) ||
@@ -262,6 +286,7 @@ int wmain(int argc,wchar_t** argv) {
         std::cout<<"Validated "<<entries.size()<<" rooms and "<<scenario_entries<<" scenario entry slots\n";
         if(scenario_check) {
             std::cout<<"Decoded "<<prop_models<<" room object/item models, including "<<prop_skins<<" skinned objects\n";
+            if(runtime_check)std::cout<<"Loaded "<<runtime_entries<<" native corridor runtime entries with Claire pose and initialized scenario state\n";
             std::cout<<"Decoded "<<enemy_motions<<" enemy motions and sampled "<<enemy_motion_poses<<" poses\n";
             std::cout<<"Decoded "<<room_motions<<" room motions and sampled "<<room_motion_poses<<" poses\n";
             std::cout<<"Posed "<<corridor_actor_poses<<" retail corridor actor frames\n";

@@ -144,6 +144,23 @@ flags, retained attachments and rollback on malformed assets. The retail
 corridor initialization probe now uses these bindings rather than placeholder
 pickup entries.
 
+`load_room_runtime` now assembles scene geometry, cameras, collision, authored
+player entry, player pose and scenario resources into one replacement runtime.
+It applies the represented system room-change masks, retains persistent
+inventory/event/map/item flags and attachment slots, then enables the original
+subsystem gates before initialization. The healthy unarmed player samples pose
+0 and advances its frame counter before scripts run, matching normal room
+entry. A synthetic initialization script checks frame 1; tests also verify
+flag masks, retained task counters and failure isolation. Armed entry, save
+restoration and the introduction require separate controller paths.
+
+`AshfordRoomInspect RDX_LNK.AFS report.tsv --runtime-check SYSTEM.AFS` loads
+Claire's original package and uses this shared runtime loader for all four
+corridor initialization cases. The existing scenario diagnostic remains
+available without a player archive. The application frame loop, prop
+controllers, player/event synchronization and playable menu entry are still
+pending; this loader alone does not make the game playable.
+
 The retail RM_0010 control script sets RoomCaseNo before SetDoorCall into
 stage 0, room 2, position 0. Persistent flags choose the first-visit or return
 case. RM_0020/RM_0021 contain the return door into room 1, position 1. These
