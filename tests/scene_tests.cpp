@@ -195,6 +195,10 @@ int main() {
     ck(decode_tim2(four, 0, four.size()).rgba[0] == 11);
     four[34] = 0x83;
     ck(decode_tim2(four, 0, four.size()).rgba[0] == 22);
+    Bytes pack(32);p32(pack,0,0x324d4954);p32(pack,4,uint32_t(four.size()));
+    pack.insert(pack.end(),four.begin(),four.end());
+    auto terminal=pack.size();pack.resize(terminal+4);p32(pack,terminal,0xffffffff);
+    ck(decode_texture_pack(pack,0).at(0).rgba==decode_tim2(four,0,four.size()).rgba);
     // Reproducible mutation smoke: malformed binary data must terminate safely.
     uint32_t random = 0x12345678;
     for (int trial = 0; trial < 1500; ++trial) {

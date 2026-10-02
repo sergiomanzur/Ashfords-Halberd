@@ -16,6 +16,8 @@ struct ActorModel {
   Bytes skin;
   Bytes textures;
 };
+Scene pose_actor(const ActorModel& actor,const std::vector<JointPose>& pose,
+                 Vec3 position={},uint16_t yaw=0);
 struct PlayerPackage {
   std::vector<ActorModel> models;
   std::vector<std::optional<Motion>> motions;

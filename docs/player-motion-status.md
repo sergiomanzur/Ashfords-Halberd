@@ -14,7 +14,8 @@ are not yet integrated.
 
 Skin records follow `njplus.c`: object/group associations, per-vertex joint
 indices, ten-step rotation weights, and the preserved auxiliary low word.
-This is binding data, not a claim that animated skin deformation is implemented.
+Skin deformation and textured actor rendering now use these bindings;
+see [actor rendering status](actor-rendering-status.md).
 The default skin algorithm blends a joint's unrotated and rotated transforms;
 the alternate FM mapping still needs separate implementation.
 
@@ -32,6 +33,6 @@ was sampled. Entries 11–14 also decoded and sampled successfully. Entries
 15–17 are 11-byte unavailable-asset records, not complete player packages.
 No retail data is included in source, tests or distribution.
 
-Step 1 remains incomplete. Next is joint transforms and skin deformation,
-followed by actor rendering, original movement/collision, room interactions
+Step 1 remains incomplete. Next is application integration and original
+movement/collision, room interactions
 and transitions, enemy combat, inventory, audio and versioned save/load.

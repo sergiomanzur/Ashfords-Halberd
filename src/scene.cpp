@@ -194,7 +194,8 @@ Mesh chunks(const Reader &r, size_t base, size_t model, const Matrix &world,
   return mesh;
 }
 } // namespace
-std::vector<Mesh> decode_model(const Bytes &data, size_t offset,bool include_hidden) {
+std::vector<Mesh> decode_model(const Bytes &data, size_t offset,bool include_hidden,
+                              const std::vector<ModelMatrix>* matrices) {
   Reader r{data};
   r.range(offset, 16);
   if (data[offset] != 'M' || data[offset + 1] != 'D' ||
@@ -206,6 +207,7 @@ std::vector<Mesh> decode_model(const Bytes &data, size_t offset,bool include_hid
   size_t base = offset + header, table = base + r.u32(offset + 12);
   r.range(offset, header);
   r.range(table, size_t(count) * 52);
+  if(matrices && matrices->size()!=count)throw std::runtime_error("Invalid native model matrices");
   if (!count)
     return {};
   std::vector<Mesh> meshes;
@@ -249,7 +251,7 @@ std::vector<Mesh> decode_model(const Bytes &data, size_t offset,bool include_hid
         auto world = multiply(parent, local);
         auto model = r.u32(o + 4);
         if ((include_hidden || !(flags & 8)) && model != 0xffffffff) {
-          auto mesh = chunks(r, base, base + model, world, uint32_t(i));
+          auto mesh = chunks(r, base, base + model, matrices?matrices->at(i):world, uint32_t(i));
           mesh.initially_hidden=bool(flags&8);
           total += mesh.triangles.size();
           if (total > 2000000)
@@ -257,7 +259,7 @@ std::vector<Mesh> decode_model(const Bytes &data, size_t offset,bool include_hid
           meshes.push_back(std::move(mesh));
         }
         auto child = r.u32(o + 44), sibling = r.u32(o + 48);
-        if (!(flags & 16) && child != 0xffffffff)
+        if ((matrices || !(flags & 16)) && child != 0xffffffff)
           visit(node(child), world, depth + 1);
         active[i] = false;
         if (sibling != 0xffffffff)
@@ -333,11 +335,12 @@ std::vector<Texture> decode_texture_pack(const Bytes &data, size_t offset) {
   std::vector<Texture> textures;
   size_t p = offset, total_pixels = 0;
   for (size_t n = 0; n < 4096; ++n) {
-    r.range(p, 32);
-    auto magic = r.u32(p), size = r.u32(p + 4);
-    r.range(p + 32, size);
+    auto magic = r.u32(p);
     if (magic == 0xffffffff)
       return textures;
+    r.range(p,32);
+    auto size = r.u32(p + 4);
+    r.range(p + 32, size);
     if (magic == 0x324d4954) {
       auto t = decode_tim2(data, p + 32, size);
       total_pixels += t.rgba.size() / 4;

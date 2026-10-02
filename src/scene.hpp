@@ -23,8 +23,11 @@ struct Texture {
   uint32_t width = 0, height = 0;
   Bytes rgba;
 };
+using ModelMatrix = std::array<double,16>;
+// Optional native matrices override disk transforms for posed actors.
 std::vector<Mesh> decode_model(const Bytes &data, size_t offset,
-                               bool include_hidden = false);
+                               bool include_hidden = false,
+                               const std::vector<ModelMatrix>* matrices = nullptr);
 Texture decode_tim2(const Bytes &data, size_t offset, size_t size);
 std::vector<Texture> decode_texture_pack(const Bytes &data, size_t offset);
 struct Scene {

@@ -109,6 +109,8 @@ The menu now offers a native Room Viewer with original camera snapshots and
 persistent selections; see [viewer status](docs/authored-camera-viewer-status.md).
 The native core also decodes player packages, motion keys and skin bindings;
 see [player dependency status](docs/player-motion-status.md).
-The next work is joint transforms, animated skin rendering, and player/event logic.
+Joint transforms and textured skin poses now render through the native core;
+see [actor rendering status](docs/actor-rendering-status.md).
+The next work is application integration and player/event logic.
 A completed decompilation still
 requires these console-service replacements to execute on a PC.

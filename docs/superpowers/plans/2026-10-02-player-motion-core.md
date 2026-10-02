@@ -22,4 +22,9 @@ package records and skin bindings. All nine suites passed headlessly; the
 decoder suite also passed with standard-library assertions enabled. Review
 prompted cumulative key budgets and exact mixed aligned/ordinary texture
 association tests. Retail entries 10–14 parsed and sampled successfully.
-Step 4 currently has skin binding data; deformation and actor rendering remain.
+
+Step 4 now includes joint transforms, default-path skin deformation and textured
+actor rendering. File-only native previews combine Claire with imported room
+geometry and its camera/depth buffer. Fixed-tick application gameplay and the
+remaining Step 1 requirements are still pending. Ten headless suites verify this
+dependency, including malformed skeletons, skin groups and matrix composition.
