@@ -76,7 +76,13 @@ int main() {
       ck(bool(find_camera_cut(cuts, 2, 1, 1)) != upper);
       ck(!find_camera_cut(cuts, 2, 2,
                           1)); // Diagonal belongs to neither triangular half.
+      // Off-centre probes distinguish the two orientations in each half.
+      ck(bool(find_camera_cut(cuts, 1, 2, 1)) == (type == 2 || type == 3));
+      ck(bool(find_camera_cut(cuts, 3, 2, 1)) == (type == 1 || type == 4));
     }
+    cuts = decode_room_cuts(bytes);
+    cuts[1].areas[0] = cuts[0].areas[0];
+    ck(find_camera_cut(cuts, 1, 1, 1) == 0); // First matching cut wins overlap.
     // Degenerate rectangles are empty; degenerate triangles reject on decode.
     auto broken = bytes;
     broken[2600 + 7] = 5;
