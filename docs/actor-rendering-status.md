@@ -37,6 +37,18 @@ player spawn. Retail bytes and previews remain excluded from Git/distributions.
 images. An optional fresh output directory saves previews; appending
 `RDX_LNK.AFS room-index` also saves combined room/actor camera previews.
 
+Room enemy model banks now decode natively from RDX section 20, preserving
+active-enemy pointer ordering, SKIN association and MASK bytes. Enemy texture
+packs are assigned from the separate section-32 table using the reference
+cache key (enemy ID, model version and textured-model ordinal); models without
+their own texture list inherit the preceding list. Bounds cover records,
+pointer tables, section extents and aggregate copied asset bytes. Tests cover
+inactive authored slots, multiple models, inherited lists and cache separation
+by ID/version. The headless room probe posed the retail corridor actor for all
+150 frames of room motion 0 with its original textures. This verifies asset
+loading and native skinning; event-driven playback and gameplay integration
+remain pending.
+
 Step 1 is still incomplete: there is no playable application mode yet. Next is
 integrating the new [movement/collision and camera simulation](player-movement-status.md)
 into application input, original event-controlled room entry and animated

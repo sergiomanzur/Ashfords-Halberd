@@ -5,6 +5,7 @@
 #include "room.hpp"
 #include "scenario.hpp"
 #include "motion.hpp"
+#include "actor.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -39,6 +40,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t corridor_controls=0;
         size_t corridor_door_requests=0;
         size_t room_motions=0, room_motion_poses=0;
+        size_t corridor_actor_poses=0;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
@@ -58,6 +60,17 @@ int wmain(int argc,wchar_t** argv) {
                     }
                     if(i==1 && !bank[0])
                         throw std::runtime_error("Retail corridor room motion 0 missing");
+                    if(i==1) {
+                        auto enemies=decode_room_enemy_models(data);
+                        if(enemies.empty() || enemies[0].models.empty())
+                            throw std::runtime_error("Retail corridor enemy model missing");
+                        for(uint32_t frame=0;frame<bank[0]->frames;++frame) {
+                            auto posed=pose_actor(enemies[0].models[0],sample_motion(*bank[0],int64_t(frame)*65536));
+                            if(posed.meshes.empty() || posed.textures.empty())
+                                throw std::runtime_error("Retail corridor actor pose missing geometry or textures");
+                            ++corridor_actor_poses;
+                        }
+                    }
                 }
                 if(scenario_check && i==1) {
                     // RM_0010 initialization, both map-flag paths and both
@@ -156,6 +169,7 @@ int wmain(int argc,wchar_t** argv) {
         std::cout<<"Validated "<<entries.size()<<" rooms and "<<scenario_entries<<" scenario entry slots\n";
         if(scenario_check) {
             std::cout<<"Decoded "<<room_motions<<" room motions and sampled "<<room_motion_poses<<" poses\n";
+            std::cout<<"Posed "<<corridor_actor_poses<<" retail corridor actor frames\n";
             if(corridor_initializations!=4)throw std::runtime_error("Missing retail corridor scenario check");
             std::cout<<"Executed four retail corridor initialization states\n";
             if(corridor_controls!=16)throw std::runtime_error("Missing retail corridor control check");

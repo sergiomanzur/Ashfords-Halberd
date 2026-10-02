@@ -126,6 +126,113 @@ ActorModel multiple_groups() {
 int main() {
   try {
     auto a = fixture();
+    Bytes model_bank;
+    auto record = [&](const Bytes &bytes) {
+      size_t p = model_bank.size();
+      model_bank.resize(p + 4);
+      put(model_bank, p, uint32_t(bytes.size()));
+      model_bank.insert(model_bank.end(), bytes.begin(), bytes.end());
+    };
+    record({});
+    record(a.skin);
+    record(Bytes{'M', 'A', 'S', 'K', 7, 8, 9, 10});
+    record(a.model);
+    size_t sentinel = model_bank.size();
+    model_bank.resize(sentinel + 4);
+    put(model_bank, sentinel, 0xffffffff);
+    auto bank = decode_actor_model_bank(model_bank, 0, model_bank.size());
+    ck(bank.models.size() == 1 && bank.models[0].skin == a.skin &&
+       bank.models[0].model == a.model && bank.mask[4] == 7);
+    bad([&] { decode_actor_model_bank(model_bank, 0, model_bank.size() - 1); });
+    bad([&] { decode_actor_model_bank(model_bank, 4, 3); });
+    auto invalid_bank = model_bank;
+    put(invalid_bank, 4, 0xfffffffe);
+    bad([&] { decode_actor_model_bank(invalid_bank, 0, invalid_bank.size()); });
+    Bytes dangling(4 + a.skin.size() + 4);
+    put(dangling, 0, uint32_t(a.skin.size()));
+    std::copy(a.skin.begin(), a.skin.end(), dangling.begin() + 4);
+    put(dangling, dangling.size() - 4, 0xffffffff);
+    bad([&] { decode_actor_model_bank(dangling, 0, dangling.size()); });
+    Bytes room(3000);
+    flt(room, 0, 10);
+    put(room, 16, 128);
+    put(room, 128 + 2 * 4, 1132);
+    put(room, 128 + 0x80 + 2 * 4, 3);
+    for (size_t index : {size_t(0), size_t(2)}) {
+      put(room, 1132 + index * 36, 1);
+      put(room, 1136 + index * 36, 67);
+    }
+    put(room, 20, 1240);
+    put(room, 1240, 1300);
+    put(room, 1244, 1700);
+    put(room, 1248, 2200);
+    std::copy(a.model.begin(), a.model.end(), room.begin() + 1300);
+    auto textured_bank = model_bank;
+    // Null + SKIN + MASK precede the MDL record; give it its own texture list.
+    size_t mdl = 4 + 4 + a.skin.size() + 4 + 8 + 4;
+    put(textured_bank, mdl + 8, 0);
+    std::copy(textured_bank.begin(), textured_bank.end(), room.begin() + 1700);
+    std::copy(textured_bank.begin(), textured_bank.end(), room.begin() + 2200);
+    put(room, 32, 2800);
+    put(room, 2800, 2);
+    put(room, 2804, 2850);
+    put(room, 2808, 2900);
+    put(room, 2850, 0xffffffff);
+    put(room, 2900, 0xffffffff);
+    auto enemies = decode_room_enemy_models(room);
+    ck(enemies.size() == 3 && enemies[1].models.empty());
+    ck(enemies[0].models[0].textures == Bytes({255, 255, 255, 255}) &&
+       enemies[2].models[0].textures == enemies[0].models[0].textures);
+    put(room, 2800, 1);
+    bad([&] { decode_room_enemy_models(room); });
+    put(room, 2800, 2);
+    put(room, 1244, 1248);
+    bad([&] { decode_room_enemy_models(room); });
+    put(room, 1244, 1700);
+    put(room, 2808, 2804);
+    bad([&] { decode_room_enemy_models(room); });
+    auto multi_room = room;
+    multi_room.resize(7000);
+    put(multi_room, 1248, 3000);
+    Bytes multi_bank;
+    for (bool own : {true, false, true}) {
+      auto model = a.model;
+      put(model, 8, own ? 0 : 0xffffffff);
+      size_t p = multi_bank.size();
+      multi_bank.resize(p + 4);
+      put(multi_bank, p, uint32_t(model.size()));
+      multi_bank.insert(multi_bank.end(), model.begin(), model.end());
+    }
+    multi_bank.resize(multi_bank.size() + 4);
+    put(multi_bank, multi_bank.size() - 4, 0xffffffff);
+    std::copy(multi_bank.begin(), multi_bank.end(), multi_room.begin() + 1700);
+    std::copy(multi_bank.begin(), multi_bank.end(), multi_room.begin() + 3000);
+    put(multi_room, 32, 5000);
+    put(multi_room, 5000, 5);
+    for (size_t i = 0; i < 5; ++i) {
+      size_t p = 5500 + i * 40;
+      put(multi_room, 5004 + i * 4, uint32_t(p));
+      put(multi_room, p, 0x00494c50);
+      put(multi_room, p + 4, 0);
+      put(multi_room, p + 8, uint32_t(i * 10));
+      put(multi_room, p + 32, 0xffffffff);
+    }
+    put(multi_room, 1136 + 2 * 36, 68);
+    auto distinct = decode_room_enemy_models(multi_room);
+    ck(distinct[0].models.size() == 3 && distinct[2].models.size() == 3);
+    ck(distinct[0].models[0].textures[8] == 10 &&
+       distinct[0].models[1].textures == distinct[0].models[0].textures &&
+       distinct[0].models[2].textures[8] == 20);
+    ck(distinct[2].models[0].textures[8] == 30 &&
+       distinct[2].models[1].textures == distinct[2].models[0].textures &&
+       distinct[2].models[2].textures[8] == 40);
+    put(multi_room, 1136 + 2 * 36, 67);
+    multi_room[1132 + 2 * 36 + 9] = 1;
+    ck(decode_room_enemy_models(multi_room)[2].models[0].textures[8] == 30);
+    multi_room[1132 + 2 * 36 + 9] = 0;
+    auto shared_banks = decode_room_enemy_models(multi_room);
+    ck(shared_banks[2].models[0].textures[8] == 10 &&
+       shared_banks[2].models[2].textures[8] == 20);
     std::vector<JointPose> pose(2);
     pose[1].angles = std::array<uint16_t, 3>{0, 0, 16384};
     auto scene = pose_actor(a, pose);

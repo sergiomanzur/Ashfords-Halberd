@@ -16,8 +16,16 @@ struct ActorModel {
   Bytes skin;
   Bytes textures;
 };
-Scene pose_actor(const ActorModel& actor,const std::vector<JointPose>& pose,
-                 Vec3 position={},uint16_t yaw=0);
+struct ActorModelBank {
+  std::vector<ActorModel> models;
+  Bytes mask;
+};
+ActorModelBank decode_actor_model_bank(const Bytes &data, size_t begin,
+                                       size_t end);
+// Authored enemy order, including empty banks for inactive enemies.
+std::vector<ActorModelBank> decode_room_enemy_models(const Bytes &data);
+Scene pose_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
+                 Vec3 position = {}, uint16_t yaw = 0);
 struct PlayerPackage {
   std::vector<ActorModel> models;
   std::vector<std::optional<Motion>> motions;
