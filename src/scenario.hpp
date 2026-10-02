@@ -49,6 +49,11 @@ struct ScenarioEntity {
   std::shared_ptr<const ActorModel> model;
   std::vector<JointPose> joint_pose;
   std::optional<Scene> rendered_model;
+  uint16_t id = 0;
+  std::array<uint8_t, 4> modes{};
+  uint32_t motion_number = 0, motion_step = 65536;
+  int32_t frame = 0, blend_count = 0, control1 = 0, control2 = 0;
+  std::shared_ptr<const std::vector<std::optional<Motion>>> motions;
 };
 struct ScenarioTask {
   std::optional<ScenarioProgram> program;
@@ -77,6 +82,7 @@ struct ScenarioState {
   std::vector<size_t> enemy_slots;
   std::vector<CollisionRecord> interactions;
   std::optional<RoomCollision> collision;
+  std::shared_ptr<const std::vector<std::optional<Motion>>> room_motions;
   std::shared_ptr<const RoomScenario> scenario;
   std::array<ScenarioTask, 16> tasks;
   uint32_t event_timer = 0;
@@ -86,6 +92,7 @@ struct ScenarioState {
   uint8_t player_id = 0;
   int32_t equipped_weapon = 0, player_health = 0, message_selection = 0,
           status_timer = 0;
+  int32_t player_frame = 0;
 };
 // Native control and event scheduling subset. Unsupported instructions fail
 // explicitly; entity controllers and audiovisual instructions are pending.

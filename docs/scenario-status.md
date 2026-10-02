@@ -89,10 +89,15 @@ now rebuilds the bound primary actor model from its current joint pose and
 whole-actor transform, producing a native skinned, textured scene. The node
 index from LoadWork does not select another model. Linked actors and retained
 external matrices fail explicitly until their matrix ownership is implemented.
-The headless retail probe executes the unchanged corridor event through this
-rebuild and verifies it stops at the next unsupported motion-selection command.
-Player/effect bindings, motion selection and sound commands remain unsupported;
-the complete retail corridor event therefore still cannot execute.
+CommonCtr motion selection supports mode 1 with calculation option 1, binding
+the room motion bank, preserving the high motion-number bytes, and setting
+source speed/mode/blend fields without immediately posing. Other selection
+modes, calculation options and companion updates remain unsupported. FrameCheck
+supports player, mapped enemy and object 16.16 frames, including the half-frame
+offset. The headless probe executes the unchanged corridor event through its
+frame wait and exit, supplying frame 149 explicitly after checking the wait.
+This proves script execution and state selection, not animation advancement.
+Player/effect bindings and sound commands remain unsupported.
 
 The retail RM_0010 control script sets RoomCaseNo before SetDoorCall into
 stage 0, room 2, position 0. Persistent flags choose the first-visit or return

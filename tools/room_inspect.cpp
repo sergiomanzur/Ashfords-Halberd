@@ -78,18 +78,26 @@ int wmain(int argc,wchar_t** argv) {
                         controller.enemy_slots={0};
                         controller.enemies[0].model=std::make_shared<const ActorModel>(enemies[0].models[0]);
                         controller.enemies[0].flags=records.enemies[0].flags;
+                        controller.enemies[0].id=records.enemies[0].id;
+                        controller.room_motions=std::make_shared<const std::vector<std::optional<Motion>>>(bank);
                         controller.flags[6][0]=0x10;
+                        controller.flags[4][0]=0x80000000;
                         start_scenario_event(controller,0,0);
-                        bool motion_pending=false;
-                        try {tick_scenario_tasks(controller);}
-                        catch(const std::runtime_error& error) {
-                            motion_pending=std::string(error.what())=="Unsupported scenario common controller 24";
-                        }
-                        if(!motion_pending || !controller.enemies[0].rendered_model ||
+                        tick_scenario_tasks(controller);
+                        auto hold_pc=controller.tasks[0].pc;
+                        tick_scenario_tasks(controller);
+                        if(!controller.tasks[0].active || controller.tasks[0].pc!=hold_pc ||
+                           controller.enemies[0].motion_mode!=0x20 || controller.enemies[0].blend_count!=16 ||
+                           controller.enemies[0].motions!=controller.room_motions || !controller.enemies[0].rendered_model ||
                            controller.enemies[0].rendered_model->meshes.empty() ||
                            controller.enemies[0].rendered_model->textures.empty() ||
                            controller.enemies[0].position.x!=0 || controller.enemies[0].position.y!=0 || controller.enemies[0].position.z!=0)
                             throw std::runtime_error("Retail corridor model-rebuild prefix mismatch");
+                        controller.enemies[0].frame=149*65536;
+                        tick_scenario_tasks(controller);
+                        tick_scenario_tasks(controller);
+                        if(controller.tasks[0].active || (controller.flags[4][0]&0x80000000))
+                            throw std::runtime_error("Retail corridor controller failed to finish");
                         ++corridor_model_rebuilds;
                     }
                 }
@@ -191,7 +199,7 @@ int wmain(int argc,wchar_t** argv) {
         if(scenario_check) {
             std::cout<<"Decoded "<<room_motions<<" room motions and sampled "<<room_motion_poses<<" poses\n";
             std::cout<<"Posed "<<corridor_actor_poses<<" retail corridor actor frames\n";
-            std::cout<<"Executed "<<corridor_model_rebuilds<<" corridor model-rebuild prefixes; motion selection remains unsupported\n";
+            std::cout<<"Executed "<<corridor_model_rebuilds<<" complete corridor events through supplied frame wait and exit; animation advancement remains pending\n";
             if(corridor_initializations!=4)throw std::runtime_error("Missing retail corridor scenario check");
             std::cout<<"Executed four retail corridor initialization states\n";
             if(corridor_controls!=16)throw std::runtime_error("Missing retail corridor control check");

@@ -566,6 +566,53 @@ int main() {
       controller_case(Bytes{101, 1, 0, 0, 105, 47, 255, 0}, true);
     }
     transformed.enemies[1].flags = 0;
+    transformed.room_motions =
+        std::make_shared<const std::vector<std::optional<Motion>>>(512);
+    transformed.enemies[1].motion_number = 0xab00;
+    controller_case(Bytes{101, 1, 0, 0, 105, 24, 1, 1, 7, 0, 1, 16, 255, 0},
+                    false);
+    ck(bound.motion_number == 0xab07 && bound.motion_mode == 0x20 &&
+       bound.motion_step == 65536 && bound.blend_count == 16 &&
+       bound.control2 == 10 && bound.modes[0] == 1 && bound.modes[1] == 7 &&
+       bound.motions == transformed.room_motions);
+    controller_case(Bytes{101, 1, 0, 0, 105, 24, 4, 1, 0, 1, 1, 6, 255, 0},
+                    false);
+    ck(bound.motion_step == 0x5555 && bound.motion_mode == 0x28 &&
+       bound.blend_count == 16 && bound.control2 == 6 && bound.modes[0] == 5);
+    ck(bound.rendered_model->meshes[0].triangles[0].corners[0].position.z ==
+       289);
+    controller_case(Bytes{101, 1, 0, 0, 105, 24, 25, 1, 0, 0, 1, 8, 255, 0},
+                    false);
+    ck(bound.motion_step == 0xaaa && bound.blend_count == 16 &&
+       bound.control2 == 8);
+    controller_case(Bytes{101, 1, 0, 0, 105, 24, 26, 1, 0, 0, 1, 0}, true);
+    controller_case(Bytes{101, 1, 0, 0, 105, 24, 1, 0, 0, 0, 1, 0}, true);
+    controller_case(Bytes{101, 1, 0, 0, 105, 24, 1, 1, 0, 0, 2, 0}, true);
+    bound.id = 1;
+    controller_case(Bytes{101, 1, 0, 0, 105, 24, 1, 1, 0, 0, 1, 0}, true);
+    bound.id = 0;
+    transformed.room_motions.reset();
+    controller_case(Bytes{101, 1, 0, 0, 105, 24, 1, 1, 0, 0, 1, 0}, true);
+    bound.frame = 149 * 65536 - 1;
+    run_scenario(Bytes{56, 1, 0, 0, 149, 0, 55, 4, 0}, transformed);
+    ck(transformed.room_case == 4);
+    bound.frame = 149 * 65536;
+    run_scenario(Bytes{56, 1, 0, 0, 149, 0, 55, 5, 0}, transformed);
+    ck(transformed.room_case == 4);
+    run_scenario(Bytes{56, 1, 0, 1, 149, 0, 55, 6, 0}, transformed);
+    ck(transformed.room_case == 6);
+    transformed.player_frame = -2147483647 - 1;
+    run_scenario(Bytes{56, 0, 0, 0, 0, 128, 55, 7, 0}, transformed);
+    ck(transformed.room_case == 6);
+    run_scenario(Bytes{56, 0, 0, 1, 0, 128, 55, 7, 0}, transformed);
+    ck(transformed.room_case == 7);
+    transformed.objects[1].frame = -65537;
+    run_scenario(Bytes{56, 2, 1, 0, 255, 255, 55, 8, 0}, transformed);
+    ck(transformed.room_case == 8);
+    bad([&] { run_scenario(Bytes{56, 3, 0, 0, 0, 0}, transformed); });
+    bad([&] { run_scenario(Bytes{56, 1, 9, 0, 0, 0}, transformed); });
+    bad([&] { run_scenario(Bytes{56, 2, 9, 0, 0, 0}, transformed); });
+    bad([&] { run_scenario(Bytes{56, 0, 0, 0, 0}, transformed); });
     transformed.tasks[1].work_index.reset();
     controller_case(Bytes{105, 11, 0, 0, 0, 0}, true);
     transformed.collision.reset();

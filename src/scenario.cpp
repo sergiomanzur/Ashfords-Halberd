@@ -196,6 +196,33 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
       pc += 2;
       return pass;
     }
+    case 56: {
+      extent(6);
+      int32_t frame;
+      switch (program[pc + 1]) {
+      case 0:
+        frame = state.player_frame;
+        break;
+      case 1:
+        frame =
+            indexed(state.enemies, indexed(state.enemy_slots, program[pc + 2]))
+                .frame;
+        break;
+      case 2:
+        frame = indexed(state.objects, program[pc + 2]).frame;
+        break;
+      default:
+        throw std::runtime_error("Unsupported scenario frame-check group");
+      }
+      uint32_t bits = uint32_t(word(pc + 4)) << 16;
+      if (program[pc + 3])
+        bits += 32768;
+      int32_t target = bits < 0x80000000u
+                           ? int32_t(bits)
+                           : int32_t(int64_t(bits) - 0x100000000ll);
+      pc += 6;
+      return frame < target;
+    }
     default:
       throw std::runtime_error("Unsupported scenario loop condition");
     }
@@ -254,6 +281,7 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
     case 4:
     case 7:
     case 17:
+    case 56:
     case 38: {
       bool pass = condition();
       if (!pass) {
@@ -337,10 +365,11 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
         pc += 6;
         break;
       }
-      if (operation != 7 && operation != 11 && operation != 47)
+      if (operation != 7 && operation != 11 && operation != 47 &&
+          operation != 24)
         throw std::runtime_error("Unsupported scenario common controller " +
                                  std::to_string(operation));
-      extent(operation == 7 ? 8 : operation == 11 ? 6 : 2);
+      extent(operation == 7 || operation == 24 ? 8 : operation == 11 ? 6 : 2);
       if (!task->work_index)
         throw std::runtime_error(
             "Scenario common controller without bound work");
@@ -351,7 +380,37 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
               ? indexed(state.items, *task->work_index)
               : throw std::runtime_error(
                     "Unsupported bound scenario work group");
-      if (operation == 47) {
+      if (operation == 24) {
+        if (program[pc + 3] != 1 || program[pc + 6] != 1 || entity.id == 1)
+          throw std::runtime_error(
+              "Unsupported scenario motion selection mode or companion");
+        if (!state.room_motions || state.room_motions->size() != 512)
+          throw std::runtime_error(
+              "Scenario motion selection without room bank");
+        static constexpr uint32_t steps[] = {
+            0x8000, 0x10000, 0x10000, 0x8000, 0x5555, 0x4000, 0x3333,
+            0x2aaa, 0x8000,  0x4000,  0x2aaa, 0x2000, 0x1999, 0x1555,
+            0x2492, 0x2000,  0x1c71,  0x1999, 0x1745, 0x1555, 0x1249,
+            0x1000, 0xe38,   0xccc,   0xba2,  0xaaa};
+        auto speed = program[pc + 2];
+        if (speed >= std::size(steps))
+          throw std::runtime_error("Unsupported scenario motion speed");
+        auto motion = program[pc + 4], blend = program[pc + 7];
+        entity.motions = state.room_motions;
+        entity.motion_step = steps[speed];
+        entity.modes = {uint8_t(program[pc + 5] ? 5 : 1), motion, 0, 0};
+        entity.motion_number = (entity.motion_number & ~0xffu) | motion;
+        entity.motion_mode = speed == 1 || speed == 2 ? 0x20 : 0x28;
+        entity.blend_rate = 0;
+        entity.control1 = 1;
+        entity.control2 = blend > 8 ? 10 : blend;
+        if (blend == 6)
+          entity.motion_mode |= 8;
+        else if (blend > 8)
+          entity.blend_count = blend;
+        entity.frame = 0;
+        pc += 8;
+      } else if (operation == 47) {
         if (!entity.model)
           throw std::runtime_error(
               "Scenario model rebuild without bound primary model");
