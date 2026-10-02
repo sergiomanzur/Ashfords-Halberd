@@ -1,5 +1,6 @@
 #include "motion.hpp"
 #include "room.hpp"
+#include "ninja_math.hpp"
 // Adapted from MIT recvx-decomp binfunc.c::bhMnbBinRealize and
 // Motion.c::SetMtnNormal/SetMtnFast/SetMtnSlow. Disk pointers stay offsets.
 #include <cmath>
@@ -30,13 +31,35 @@ struct Reader {
     return f;
   }
 };
+// Motion.c::AngZyxToYzx/AngYzxToZyx. Angles remain integer Ninja units.
+std::array<int, 3> convert_angles(std::array<int, 3> a, bool to_yzx) {
+  auto x = ninja_sin_cos(uint16_t(a[0]));
+  auto y = ninja_sin_cos(uint16_t(a[1]));
+  auto z = ninja_sin_cos(uint16_t(a[2]));
+  if (to_yzx) {
+    float b = z[0] * y[0];
+    return {int(10430.381f * std::atan2(z[1] * x[0] - b * x[1],
+                                       z[1] * x[1] + b * x[0])),
+            int(10430.381f * std::atan2(y[0], z[1] * y[1])),
+            int(10430.381f * std::asin(z[0] * y[1]))};
+  }
+  float b = y[0] * z[0];
+  return {int(10430.381f * std::atan2(y[1] * x[0] + b * x[1],
+                                     y[1] * x[1] - b * x[0])),
+          int(10430.381f * std::asin(y[0] * z[1])),
+          int(10430.381f * std::atan2(z[0], y[1] * z[1]))};
+}
 } // namespace
 std::vector<JointPose> blend_motion_pose(const std::vector<JointPose> &current,
                                          const std::vector<JointPose> &target,
-                                         float rate, bool direct_translation) {
+                                         float rate, bool direct_translation,
+                                         const std::vector<uint8_t> &joint_flags) {
   if (!std::isfinite(rate) || target.size() > current.size() ||
-      current.size() > 4096)
+      current.size() > 4096 || joint_flags.size() > current.size())
     throw std::runtime_error("Invalid motion blend input");
+  for (auto flags : joint_flags)
+    if (flags & ~8u)
+      throw std::runtime_error("Unsupported motion blend joint flags");
   auto result = current;
   auto short_word = [](int value) {
     int bits = value & 65535;
@@ -83,6 +106,18 @@ std::vector<JointPose> blend_motion_pose(const std::vector<JointPose> &current,
       std::array<int, 3> source{int(a[0]), int(a[1]), int(a[2])};
       if (sum > 0)
         source = {32768 + source[0], 32768 - source[1], 32768 + source[2]};
+      if (i < joint_flags.size() && (joint_flags[i] & 8)) {
+        source = convert_angles(source, true);
+        auto destination = convert_angles({int(b[0]), int(b[1]), int(b[2])}, true);
+        for (size_t axis = 0; axis < 3; ++axis)
+          source[axis] = uint16_t(int64_t(source[axis]) +
+                                 weighted(short_word(destination[axis] - source[axis])));
+        source = convert_angles(source, false);
+        result[i].angles = std::array<uint16_t, 3>{uint16_t(source[0]),
+                                                   uint16_t(source[1]),
+                                                   uint16_t(source[2])};
+        continue;
+      }
       std::array<uint16_t, 3> out{};
       for (size_t axis = 0; axis < 3; ++axis)
         out[axis] = uint16_t(int64_t(source[axis]) +

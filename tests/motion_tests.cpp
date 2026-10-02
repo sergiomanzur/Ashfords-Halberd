@@ -67,6 +67,25 @@ int main() {
   try {
     auto b = fixture();
     auto m = decode_motion(b);
+    std::vector<JointPose> angle_start(1), angle_end(1);
+    angle_start[0].angles = std::array<uint16_t, 3>{};
+    angle_end[0].angles = std::array<uint16_t, 3>{8192, 8192, 8192};
+    auto ordinary = blend_motion_pose(angle_start, angle_end, .5f);
+    auto shoulder = blend_motion_pose(angle_start, angle_end, .5f, false, {8});
+    ck(shoulder[0].angles != ordinary[0].angles);
+    auto endpoint = blend_motion_pose(angle_start, angle_end, 1.f, false, {8});
+    for(size_t axis=0;axis<3;++axis)
+      ck(std::abs(int((*endpoint[0].angles)[axis])-8192)<8);
+    bad([&] { blend_motion_pose(angle_start, angle_end, .5f, false, {4}); });
+    bad([&] { blend_motion_pose(angle_start, angle_end, .5f, false, {8,8}); });
+    angle_start[0].angles=std::array<uint16_t,3>{12000,64000,3000};
+    angle_end[0].angles=std::array<uint16_t,3>{50000,9000,62000};
+    shoulder=blend_motion_pose(angle_start,angle_end,.35f,false,{8});
+    // Independent evaluation of the source's conversion equations and
+    // quarter-wave lookup; tolerate a few integer units of libm rounding.
+    std::array<int,3> expected_shoulder{3856,2201,1158};
+    for(size_t axis=0;axis<3;++axis)
+      ck(std::abs(int((*shoulder[0].angles)[axis])-expected_shoulder[axis])<=2);
     std::vector<JointPose> current(1), target(1);
     current[0].position = Vec3{2, 4, 6};
     target[0].position = Vec3{10, 12, 14};

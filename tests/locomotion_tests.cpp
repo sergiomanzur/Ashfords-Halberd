@@ -32,6 +32,55 @@ int main() {
       package.motions[pair.first] = m;
     }
     PlayerTranslationTables tables(11, std::vector<float>(37, .25f));
+    PlayerPackage posed_package;
+    ActorModel posed_model;
+    posed_model.model.resize(16 + 22 * 52);
+    auto write = [&](size_t p, uint32_t value) {
+      for(size_t i=0;i<4;++i)posed_model.model[p+i]=uint8_t(value>>(8*i));
+    };
+    posed_model.model[0]='M';posed_model.model[1]='D';posed_model.model[2]='L';
+    posed_model.model[3]=128;posed_model.model[4]=16;posed_model.model[6]=22;
+    write(24,0x41200000); // Root bind x=10.
+    write(16+52+12,0x40000000); // Child bind y=2.
+    posed_package.models.push_back(posed_model);
+    Motion posed_motion;
+    posed_motion.frames=2;posed_motion.flags=0x80;posed_motion.tracks.resize(22);
+    for(auto& track:posed_motion.tracks)track.angles.assign(2,std::array<uint16_t,3>{});
+    posed_motion.tracks[0].positions={Vec3{26,0,0},Vec3{34,0,0}};
+    posed_motion.tracks[1].positions={Vec3{0,10,0},Vec3{0,14,0}};
+    posed_package.motions.push_back(posed_motion);
+    PlayerLocomotion posed_state;
+    posed_state.motion=0;posed_state.sampled_frame=0;
+    posed_state.sampled_blend_count=8;posed_state.blend_rate=42598;
+    auto player_pose=sample_player_locomotion_pose(posed_package,posed_state);
+    ck(std::fabs(player_pose[0].position->x-15.6f)<.001f &&
+       player_pose[1].position->y==2);
+    posed_state.sampled_blend_count=0;
+    player_pose=sample_player_locomotion_pose(posed_package,posed_state,player_pose);
+    ck(player_pose[0].position->x==26 && player_pose[1].position->y==2);
+    posed_package.motions[0]->flags=0x90;
+    player_pose=sample_player_locomotion_pose(posed_package,posed_state);
+    ck(player_pose[1].position->y==10);
+    posed_package.motions[0]->flags=0xa0;
+    posed_state.sampled_frame=32768;
+    player_pose=sample_player_locomotion_pose(posed_package,posed_state);
+    ck(player_pose[0].position->x==30 && player_pose[1].position->y==12);
+    posed_state.sampled_frame=-1;
+    bad([&]{sample_player_locomotion_pose(posed_package,posed_state);});
+    posed_state.sampled_frame=0;posed_state.sampled_blend_count=8;
+    posed_package.motions[0]->flags=0x80;
+    for(size_t joint:{6u,7u,11u}) {
+      player_pose[joint].angles=std::array<uint16_t,3>{12000,64000,3000};
+      posed_package.motions[0]->tracks[joint].angles.assign(
+          2,std::array<uint16_t,3>{50000,9000,62000});
+    }
+    player_pose=sample_player_locomotion_pose(posed_package,posed_state,player_pose);
+    for(size_t joint:{7u,11u}) {
+      std::array<int,3> expected{3856,2201,1158};
+      for(size_t axis=0;axis<3;++axis)
+        ck(std::abs(int((*player_pose[joint].angles)[axis])-expected[axis])<=4);
+    }
+    ck(player_pose[6].angles!=player_pose[7].angles);
     tables[3].assign(21, 1);
     tables[6].assign(37, -.2f);
     PlayerLocomotion state;

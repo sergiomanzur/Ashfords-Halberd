@@ -95,12 +95,13 @@ int wmain(int argc, wchar_t **argv) {
         auto state=enter_room(records,0,collision,cuts);
         std::cout<<"entry_position=0 x="<<state.player.position.x<<" y="<<state.player.position.y<<" z="<<state.player.position.z<<" yaw="<<state.player.yaw<<'\n';
         size_t transitions=0,hits=0,poses=0,images=0;
+        auto pose=sample_player_locomotion_pose(package,state.player);
         for(size_t tick=0;tick<660;++tick) {
           uint16_t pad=tick<60?1:tick<120?0x409:tick<180?2:tick<240?4:0;
           auto old=state.cut;
           state=advance_player_world(state,package,translations,collision,cuts,pad);
           if(state.cut!=old)++transitions;hits+=state.wall_hits;
-          auto pose=sample_motion(*package.motions.at(state.player.motion),state.player.sampled_frame);
+          pose=sample_player_locomotion_pose(package,state.player,pose);
           auto actor=pose_actor(package.models[0],pose,state.player.position,state.player.yaw);++poses;
           if(tick%60==0 && state.cut) {
             auto combined=room_scene;size_t offset=combined.textures.size();

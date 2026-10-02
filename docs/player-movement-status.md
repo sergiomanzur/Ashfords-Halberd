@@ -49,14 +49,22 @@ upper/body collision passes, grounded height, water speed state and cut selectio
 Tests verify water speed changes on the next tick, stop drift, an actual wall
 response and corrected front anchor, and a continuous camera boundary crossing.
 The core remains limited to baseline locomotion: injury/weapon variants,
-quick turning, stairs, pushing, enemy collision and animation-transition posing
-still require their player states. Blend parameters are recorded but the current
-diagnostic renderer samples each selected motion without transition blending.
+quick turning, stairs, pushing and enemy collision still require their player
+states. Healthy unarmed transition posing now retains the current joint pose
+between ticks, samples the pre-advancement frame, uses the original fixed
+blend rate while the blend count is nonzero, and preserves Fast root-only
+translation versus Normal/Slow per-joint translation. Fast transitions use
+the original alternate angle interpolation on shoulder joints 7/11, including
+ZYX/YZX conversion and integer truncation. Shared quarter-wave math retains
+the PS2 sine table's 16383 reflection. Synthetic tests cover a coupled-angle
+wrap crossing, the shoulder-index selection, fractional Slow positions and
+invalid sampled frames.
 
 `AshfordPlayerInspect SYSTEM.AFS 10 --movement-check RDX_LNK.AFS room-index`
 runs 660 ticks, poses the retail actor every tick and renders every 60th frame
 fully headlessly without writing images. It passed in retail rooms 0–2 (1,980
-ticks/poses and 33 rendered frames). It now starts at POS entry 0 with the authored
+ticks/poses and 33 rendered frames), now with persistent transition-blended
+poses seeded from the original idle frame. It starts at POS entry 0 with the authored
 yaw and original ground snapping. Room 1 and room 2 each registered two retail
 camera transitions; room 0 registered none. Collision hit totals were 360, 101
 and 70 respectively. These are scripted diagnostic inputs, not a reference-game

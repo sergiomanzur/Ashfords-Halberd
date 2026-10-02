@@ -18,7 +18,9 @@ now uses the reference Euler-equivalence choice and signed short deltas,
 truncation toward zero and optional direct translation. The corridor actor
 controller initializes a native bind pose, samples motion, decreases the blend
 count, samples attributes, advances the frame and rebuilds geometry. Its retail
-event completes naturally at the authored frame wait. Mirroring, alternate
+event completes naturally at the authored frame wait. Healthy unarmed player
+posing now uses persistent transition blending and FastHokan's alternate
+ZYX/YZX interpolation for shoulder joints 7/11. Mirroring, other
 joint controls, other actor controllers and application integration remain
 pending.
 

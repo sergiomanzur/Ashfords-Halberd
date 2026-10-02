@@ -1,4 +1,5 @@
 #include "player.hpp"
+#include "ninja_math.hpp"
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -54,22 +55,10 @@ Vec3 player_add_speed(Vec3 position, uint16_t yaw, float speed,
   if (!std::isfinite(position.x) || !std::isfinite(position.y) ||
       !std::isfinite(position.z) || !std::isfinite(speed))
     throw std::runtime_error("Nonfinite player movement");
-  static const auto table = [] {
-    std::array<float, 16384> values{};
-    for (size_t i = 0; i < values.size(); ++i)
-      values[i] = std::sin(0.0000958738f * float(i));
-    return values;
-  }();
   uint16_t angle = uint16_t(yaw + relative_angle);
-  size_t index = angle & 16383;
-  float sine = table[(angle & 0x4000) ? 16383 - index : index];
-  if (angle & 0x8000)
-    sine = -sine;
-  float cosine = table[(angle & 0x4000) ? index : 16383 - index];
-  if (bool(angle & 0x4000) != bool(angle & 0x8000))
-    cosine = -cosine;
-  position.x -= speed * sine;
-  position.z -= speed * cosine;
+  auto trig = ninja_sin_cos(angle);
+  position.x -= speed * trig[0];
+  position.z -= speed * trig[1];
   if (!std::isfinite(position.x) || !std::isfinite(position.z))
     throw std::runtime_error("Player movement overflow");
   return position;
