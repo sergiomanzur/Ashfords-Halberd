@@ -461,7 +461,7 @@ int main() {
     transformed.collision = RoomCollision{};
     transformed.enemies[1].motion_mode = 123;
     transformed.enemies[1].model_flags = 456;
-    transformed.enemies[1].blend_rate = 0.25f;
+    transformed.enemies[1].blend_rate = 16777217;
     transformed.flags[6][0] = 0x10;
     start_scenario_event(transformed, 0, 0);
     tick_scenario_tasks(transformed);
@@ -477,7 +477,7 @@ int main() {
        transformed.tasks[0].model_index == 3);
     ck(transformed.tasks[0].motion_mode == 123 &&
        transformed.tasks[0].model_flags == 456 &&
-       transformed.tasks[0].blend_rate == 0.25f);
+       transformed.tasks[0].blend_rate == 16777217);
     tick_scenario_tasks(transformed);
     ck(!transformed.tasks[0].active);
     auto controller_case = [&](Bytes instructions, bool rejected) {
@@ -613,6 +613,89 @@ int main() {
     bad([&] { run_scenario(Bytes{56, 1, 9, 0, 0, 0}, transformed); });
     bad([&] { run_scenario(Bytes{56, 2, 9, 0, 0, 0}, transformed); });
     bad([&] { run_scenario(Bytes{56, 0, 0, 0, 0}, transformed); });
+    auto animated_bank =
+        std::make_shared<std::vector<std::optional<Motion>>>(512);
+    Motion animation;
+    animation.flags = 0x80;
+    animation.frames = 150;
+    animation.tracks.resize(1);
+    animation.tracks[0].positions.assign(150, Vec3{26, 0, 0});
+    animation.tracks[0].angles.assign(150, std::array<uint16_t, 3>{});
+    animation.attributes.assign(150, 0x1234);
+    (*animated_bank)[0] = animation;
+    bound.motions = animated_bank;
+    bound.id = 67;
+    bound.flags = 1;
+    bound.modes = {1, 0, 0, 0};
+    bound.control2 = 10;
+    bound.frame = 0;
+    bound.motion_mode = 0x20;
+    bound.motion_step = 65536;
+    bound.blend_count = 16;
+    bound.joint_pose.clear();
+    transformed.flags[6][0] = 0;
+    tick_scenario_actors(transformed);
+    ck(bound.frame == 0);
+    transformed.flags[6][0] = 2;
+    tick_scenario_actors(transformed);
+    ck(bound.frame == 65536 && bound.blend_count == 15 &&
+       bound.motion_number == 0 && bound.motion_attribute == 0x1234);
+    ck(bound.rendered_model->meshes[0].triangles[0].corners[0].position.z ==
+       288);
+    for (int tick = 1; tick < 16; ++tick)
+      tick_scenario_actors(transformed);
+    ck(bound.blend_count == 0 && bound.frame == 16 * 65536 &&
+       bound.joint_pose[0].position->x == 26);
+    bound.state_flags = 0x40000000;
+    tick_scenario_actors(transformed);
+    ck(bound.frame == 16 * 65536);
+    auto two_joint_model = triangle_model;
+    two_joint_model.model[6] = 2;
+    put(two_joint_model.model, 60, 52);
+    put(two_joint_model.model, 68, 6);
+    put(two_joint_model.model, 72, 0xffffffff);
+    put(two_joint_model.model, 80, 0x40000000);
+    put(two_joint_model.model, 112, 0xffffffff);
+    put(two_joint_model.model, 116, 0xffffffff);
+    bound.model = std::make_shared<const ActorModel>(two_joint_model);
+    bound.state_flags = 0;
+    bound.flags = 1;
+    bound.frame = 0;
+    bound.modes[3] = 0;
+    bound.joint_pose.clear();
+    bound.blend_count = 2;
+    animation.tracks.resize(2);
+    animation.tracks[1].positions.assign(150, Vec3{0, 10, 0});
+    animation.tracks[1].angles.assign(150, std::array<uint16_t, 3>{});
+    (*animated_bank)[0] = animation;
+    tick_scenario_actors(transformed);
+    ck(bound.joint_pose[1].position->y == 2);
+    animation.flags = 0x90;
+    (*animated_bank)[0] = animation;
+    bound.frame = 0;
+    bound.modes[3] = 0;
+    bound.joint_pose.clear();
+    bound.blend_count = 2;
+    tick_scenario_actors(transformed);
+    ck(bound.joint_pose[1].position->y == 6);
+    animation.flags = 0xa0;
+    animation.frames = 2;
+    for (auto &track : animation.tracks) {
+      track.positions.resize(2);
+      track.angles.resize(2);
+    }
+    animation.tracks[0].positions = {Vec3{26, 0, 0}, Vec3{34, 0, 0}};
+    animation.tracks[1].positions = {Vec3{0, 10, 0}, Vec3{0, 14, 0}};
+    animation.attributes.resize(2);
+    (*animated_bank)[0] = animation;
+    bound.frame = 32768;
+    bound.motion_step = 32768;
+    bound.joint_pose.clear();
+    bound.blend_count = 2;
+    tick_scenario_actors(transformed);
+    ck(bound.joint_pose[0].position->x == 20 &&
+       bound.joint_pose[1].position->y == 7 && bound.frame == 65536);
+    transformed.flags[6][0] = 0x10;
     transformed.tasks[1].work_index.reset();
     controller_case(Bytes{105, 11, 0, 0, 0, 0}, true);
     transformed.collision.reset();

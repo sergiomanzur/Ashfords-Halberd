@@ -45,7 +45,7 @@ struct ScenarioEntity {
   std::array<int32_t, 3> angles{}, previous_angles{};
   int8_t floor = 0;
   uint32_t motion_mode = 0, model_flags = 0;
-  float blend_rate = 0;
+  int32_t blend_rate = 0;
   std::shared_ptr<const ActorModel> model;
   std::vector<JointPose> joint_pose;
   std::optional<Scene> rendered_model;
@@ -53,6 +53,9 @@ struct ScenarioEntity {
   std::array<uint8_t, 4> modes{};
   uint32_t motion_number = 0, motion_step = 65536;
   int32_t frame = 0, blend_count = 0, control1 = 0, control2 = 0;
+  uint32_t frame_direction = 0;
+  uint16_t motion_attribute = 0;
+  int motion_boundary = 0;
   std::shared_ptr<const std::vector<std::optional<Motion>>> motions;
 };
 struct ScenarioTask {
@@ -68,7 +71,7 @@ struct ScenarioTask {
   std::optional<size_t> work_index;
   std::array<uint8_t, 3> position_signs{}, angle_signs{};
   uint32_t motion_mode = 0, model_flags = 0;
-  float blend_rate = 0;
+  int32_t blend_rate = 0;
 };
 struct ScenarioState {
   std::array<std::array<uint32_t, 32>, 17> flags{};
@@ -100,4 +103,5 @@ void run_scenario(const Bytes &program, ScenarioState &state);
 void run_scenario(const ScenarioProgram &program, ScenarioState &state);
 size_t start_scenario_event(ScenarioState &state, size_t level, size_t event);
 void tick_scenario_tasks(ScenarioState &state);
+void tick_scenario_actors(ScenarioState &state);
 } // namespace ashford

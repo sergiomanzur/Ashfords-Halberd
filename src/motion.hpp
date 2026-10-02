@@ -16,6 +16,10 @@ struct JointPose {
   std::optional<Vec3> position;
   std::optional<std::array<uint16_t, 3>> angles;
 };
+std::vector<JointPose> blend_motion_pose(const std::vector<JointPose> &current,
+                                         const std::vector<JointPose> &target,
+                                         float rate,
+                                         bool direct_translation = false);
 Motion decode_motion(const Bytes &data, size_t key_limit = 2000000);
 // bhSetMotion's post-sampling 16.16 counter update. Return -1/1 on loop
 // underflow/overflow, zero otherwise. Ping-pong direction is a complemented

@@ -3,6 +3,7 @@
 // Motion.c::SetMtnNormal/SetMtnFast/SetMtnSlow. Disk pointers stay offsets.
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 namespace ashford {
 namespace {
@@ -29,6 +30,67 @@ struct Reader {
   }
 };
 } // namespace
+std::vector<JointPose> blend_motion_pose(const std::vector<JointPose> &current,
+                                         const std::vector<JointPose> &target,
+                                         float rate, bool direct_translation) {
+  if (!std::isfinite(rate) || target.size() > current.size() ||
+      current.size() > 4096)
+    throw std::runtime_error("Invalid motion blend input");
+  auto result = current;
+  auto short_word = [](int value) {
+    int bits = value & 65535;
+    return bits >= 32768 ? bits - 65536 : bits;
+  };
+  auto weighted = [&](int delta) {
+    float value = rate * delta;
+    if (!std::isfinite(value) ||
+        double(value) < std::numeric_limits<int32_t>::min() ||
+        double(value) > std::numeric_limits<int32_t>::max())
+      throw std::runtime_error("Motion blend angle overflow");
+    return int32_t(value);
+  };
+  for (size_t i = 0; i < target.size(); ++i) {
+    if (target[i].position) {
+      if (!current[i].position)
+        throw std::runtime_error("Motion blend missing current position");
+      auto a = *current[i].position, b = *target[i].position;
+      if (!std::isfinite(a.x) || !std::isfinite(a.y) || !std::isfinite(a.z) ||
+          !std::isfinite(b.x) || !std::isfinite(b.y) || !std::isfinite(b.z))
+        throw std::runtime_error("Non-finite motion blend position");
+      Vec3 out = direct_translation
+                     ? b
+                     : Vec3{a.x + rate * (b.x - a.x), a.y + rate * (b.y - a.y),
+                            a.z + rate * (b.z - a.z)};
+      if (!std::isfinite(out.x) || !std::isfinite(out.y) ||
+          !std::isfinite(out.z))
+        throw std::runtime_error("Motion blend position overflow");
+      result[i].position = out;
+    }
+    if (target[i].angles) {
+      if (!current[i].angles)
+        throw std::runtime_error("Motion blend missing current angles");
+      auto a = *current[i].angles, b = *target[i].angles;
+      int dx = short_word(int(b[0]) - a[0]);
+      int dy = short_word(int(b[1]) - a[1]);
+      int alternate_y = short_word(int(b[1]) - (32768 - int(a[1])));
+      int dz = short_word(int(b[2]) - a[2]);
+      int sum = (dx < 0 ? -(dx + short_word(dx + 32768))
+                        : dx + short_word(dx + 32768)) +
+                std::abs(dy) - std::abs(alternate_y) +
+                (dz < 0 ? -(dz + short_word(dz + 32768))
+                        : dz + short_word(dz + 32768));
+      std::array<int, 3> source{int(a[0]), int(a[1]), int(a[2])};
+      if (sum > 0)
+        source = {32768 + source[0], 32768 - source[1], 32768 + source[2]};
+      std::array<uint16_t, 3> out{};
+      for (size_t axis = 0; axis < 3; ++axis)
+        out[axis] = uint16_t(int64_t(source[axis]) +
+                             weighted(short_word(int(b[axis]) - source[axis])));
+      result[i].angles = out;
+    }
+  }
+  return result;
+}
 int advance_motion_frame(uint32_t frames, int32_t step, uint32_t mode,
                          int32_t &frame, uint32_t &direction) {
   if (!frames || frames > 65535)

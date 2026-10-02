@@ -692,4 +692,82 @@ void tick_scenario_tasks(ScenarioState &state) {
       task.program = std::move(program);
     }
 }
+void tick_scenario_actors(ScenarioState &state) {
+  if (!(state.flags[6][0] & 2))
+    return;
+  for (auto &entity : state.enemies) {
+    if (!(entity.flags & 1) || (entity.state_flags & 0x41000000))
+      continue;
+    if (entity.id != 67 || entity.modes[0] != 1 || entity.modes[2] != 0 ||
+        entity.control2 != 10 || entity.modes[3] > 1)
+      throw std::runtime_error("Unsupported scenario actor controller");
+    if (!entity.model || !entity.motions || (entity.flags & 0x1080) ||
+        (entity.motion_mode & 2) || entity.blend_count < 0)
+      throw std::runtime_error("Unsupported scenario actor motion binding");
+    entity.previous_position = entity.position;
+    entity.previous_angles = entity.angles;
+    entity.flags = (entity.flags | 0x8100) & ~2u;
+    if (!entity.modes[3]) {
+      entity.modes[3] = 1;
+      entity.motion_number = entity.modes[1];
+      entity.blend_rate = 0;
+      entity.motion_mode &= ~0x100u;
+      entity.frame_direction = 0;
+    }
+    if (entity.motion_number >= entity.motions->size())
+      throw std::runtime_error("Scenario actor motion outside bank");
+    const auto &slot = (*entity.motions)[entity.motion_number];
+    entity.motion_boundary = 0;
+    if (slot) {
+      const auto &motion = *slot;
+      if (entity.frame < 0 ||
+          uint64_t(entity.frame) >= uint64_t(motion.frames) * 65536)
+        throw std::runtime_error("Scenario actor frame outside motion");
+      if (entity.joint_pose.empty())
+        entity.joint_pose = actor_bind_pose(*entity.model);
+      bool slow = (entity.motion_mode & 8) || (motion.flags & 0x20);
+      auto target = sample_motion(motion, entity.frame, slow);
+      if (target.size() > 64 || (!slow && !(motion.flags & 0x10) &&
+                                 (target.empty() || !target[0].position)))
+        throw std::runtime_error("Unsupported scenario actor channel mapping");
+      if (target.size() > entity.joint_pose.size())
+        throw std::runtime_error("Scenario actor tracks outside skeleton");
+      for (size_t i = 0; i < target.size(); ++i) {
+        if (!slow && !(motion.flags & 0x10) && i)
+          target[i].position.reset();
+        if (!target[i].angles)
+          target[i].angles = std::array<uint16_t, 3>{};
+      }
+      if (entity.blend_count) {
+        uint32_t remaining_bits = 65536u - uint32_t(entity.blend_rate);
+        int32_t remaining_rate =
+            remaining_bits < 0x80000000u
+                ? int32_t(remaining_bits)
+                : int32_t(int64_t(remaining_bits) - 0x100000000ll);
+        float rate =
+            entity.motion_mode & 0x20
+                ? 1.f / entity.blend_count - 0.000015258789f * entity.blend_rate
+                : 0.000015258789f * remaining_rate;
+        entity.joint_pose = blend_motion_pose(entity.joint_pose, target, rate,
+                                              entity.motion_mode & 0x100);
+        --entity.blend_count;
+      } else {
+        for (size_t i = 0; i < target.size(); ++i) {
+          if (target[i].position)
+            entity.joint_pose[i].position = target[i].position;
+          if (target[i].angles)
+            entity.joint_pose[i].angles = target[i].angles;
+        }
+      }
+      if (!motion.attributes.empty())
+        entity.motion_attribute =
+            motion.attributes.at(size_t(entity.frame) >> 16);
+      entity.motion_boundary = advance_motion_frame(
+          motion.frames, int32_t(entity.motion_step), entity.motion_mode,
+          entity.frame, entity.frame_direction);
+    }
+    entity.rendered_model = pose_actor_rotated(*entity.model, entity.joint_pose,
+                                               entity.position, entity.angles);
+  }
+}
 } // namespace ashford

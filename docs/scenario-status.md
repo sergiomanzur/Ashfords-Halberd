@@ -94,9 +94,15 @@ the room motion bank, preserving the high motion-number bytes, and setting
 source speed/mode/blend fields without immediately posing. Other selection
 modes, calculation options and companion updates remain unsupported. FrameCheck
 supports player, mapped enemy and object 16.16 frames, including the half-frame
-offset. The headless probe executes the unchanged corridor event through its
-frame wait and exit, supplying frame 149 explicitly after checking the wait.
-This proves script execution and state selection, not animation advancement.
+offset. The native actor update now implements the corridor's `bhSubpl` path
+(ID 67, mode 1, controller 10), including startup, motion-number replacement,
+16-step pose blending, attributes sampled before frame advancement and model
+rebuilding. It runs before the event update, as in the original game loop.
+The headless probe executes the unchanged corridor event through frame 149
+and exit using this actor update, with no assigned completion frame, then
+verifies the 150-frame loop wraps. Other actor controllers, initialization,
+mirroring, linked matrices and joint overrides remain to port. The application
+gameplay loop is not yet connected to these native updates.
 Player/effect bindings and sound commands remain unsupported.
 
 The retail RM_0010 control script sets RoomCaseNo before SetDoorCall into

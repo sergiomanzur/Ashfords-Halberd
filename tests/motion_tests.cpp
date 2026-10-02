@@ -67,6 +67,21 @@ int main() {
   try {
     auto b = fixture();
     auto m = decode_motion(b);
+    std::vector<JointPose> current(1), target(1);
+    current[0].position = Vec3{2, 4, 6};
+    target[0].position = Vec3{10, 12, 14};
+    current[0].angles = std::array<uint16_t, 3>{65530, 0, 0};
+    target[0].angles = std::array<uint16_t, 3>{6, 2000, 0};
+    auto blended = blend_motion_pose(current, target, 0.5f);
+    ck(blended[0].position->x == 6 && (*blended[0].angles)[0] == 0 &&
+       (*blended[0].angles)[1] == 1000);
+    ck(blend_motion_pose(current, target, 0.5f, true)[0].position->x == 10);
+    current[0].angles = std::array<uint16_t, 3>{32768, 32768, 32768};
+    target[0].angles = std::array<uint16_t, 3>{0, 0, 0};
+    ck(*blend_motion_pose(current, target, 0.25f)[0].angles ==
+       std::array<uint16_t, 3>{0, 0, 0});
+    bad([&] { blend_motion_pose(current, target, NAN); });
+    bad([&] { blend_motion_pose({}, target, 0.5f); });
     int32_t counter = 0;
     uint32_t direction = 0;
     ck(advance_motion_frame(3, 65536, 0, counter, direction) == 0 &&

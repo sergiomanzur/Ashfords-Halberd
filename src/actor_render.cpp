@@ -73,6 +73,27 @@ void write(Bytes &b, size_t p, float f) {
     b.at(p + i) = uint8_t(v >> (i * 8));
 }
 } // namespace
+std::vector<JointPose> actor_bind_pose(const ActorModel &actor) {
+  Reader r{actor.model};
+  r.range(0, 16);
+  if (actor.model[0] != 'M' || actor.model[1] != 'D' || actor.model[2] != 'L' ||
+      !(actor.model[3] & 128))
+    throw std::runtime_error("Unsupported actor bind model");
+  size_t base = r.u16(4), count = r.u16(6);
+  if (base < 16 || count > 4096)
+    throw std::runtime_error("Invalid actor bind skeleton");
+  size_t table = base + size_t(r.u32(12));
+  r.range(table, count * 52);
+  std::vector<JointPose> pose(count);
+  for (size_t i = 0; i < count; ++i) {
+    size_t p = table + i * 52;
+    pose[i].position = r.vec(p + 8);
+    pose[i].angles = std::array<uint16_t, 3>{uint16_t(r.u32(p + 20)),
+                                             uint16_t(r.u32(p + 24)),
+                                             uint16_t(r.u32(p + 28))};
+  }
+  return pose;
+}
 Scene pose_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
                  Vec3 position, uint16_t yaw) {
   return pose_actor_rotated(actor, pose, position, {0, int32_t(yaw), 0});

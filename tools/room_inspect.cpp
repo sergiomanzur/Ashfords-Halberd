@@ -87,7 +87,7 @@ int wmain(int argc,wchar_t** argv) {
                         controller.enemies[0].flags=records.enemies[0].flags;
                         controller.enemies[0].id=records.enemies[0].id;
                         controller.room_motions=std::make_shared<const std::vector<std::optional<Motion>>>(bank);
-                        controller.flags[6][0]=0x10;
+                        controller.flags[6][0]=0x12;
                         controller.flags[4][0]=0x80000000;
                         start_scenario_event(controller,0,0);
                         tick_scenario_tasks(controller);
@@ -100,10 +100,15 @@ int wmain(int argc,wchar_t** argv) {
                            controller.enemies[0].rendered_model->textures.empty() ||
                            controller.enemies[0].position.x!=0 || controller.enemies[0].position.y!=0 || controller.enemies[0].position.z!=0)
                             throw std::runtime_error("Retail corridor model-rebuild prefix mismatch");
-                        controller.enemies[0].frame=149*65536;
+                        for(size_t tick=0;tick<149;++tick) {
+                            tick_scenario_actors(controller);
+                            tick_scenario_tasks(controller);
+                        }
+                        if(controller.enemies[0].frame!=149*65536 || controller.enemies[0].blend_count!=0 || controller.enemies[0].joint_pose.empty())
+                            throw std::runtime_error("Retail corridor native actor advancement mismatch");
+                        tick_scenario_actors(controller);
                         tick_scenario_tasks(controller);
-                        tick_scenario_tasks(controller);
-                        if(controller.tasks[0].active || (controller.flags[4][0]&0x80000000))
+                        if(controller.tasks[0].active || (controller.flags[4][0]&0x80000000) || controller.enemies[0].frame!=0 || controller.enemies[0].motion_boundary!=1)
                             throw std::runtime_error("Retail corridor controller failed to finish");
                         ++corridor_model_rebuilds;
                     }
@@ -206,7 +211,7 @@ int wmain(int argc,wchar_t** argv) {
         if(scenario_check) {
             std::cout<<"Decoded "<<room_motions<<" room motions and sampled "<<room_motion_poses<<" poses\n";
             std::cout<<"Posed "<<corridor_actor_poses<<" retail corridor actor frames\n";
-            std::cout<<"Executed "<<corridor_model_rebuilds<<" complete corridor events through supplied frame wait and exit; animation advancement remains pending\n";
+            std::cout<<"Executed "<<corridor_model_rebuilds<<" complete corridor events with native blended actor advancement through frame 149\n";
             if(corridor_initializations!=4)throw std::runtime_error("Missing retail corridor scenario check");
             std::cout<<"Executed four retail corridor initialization states\n";
             if(corridor_controls!=16)throw std::runtime_error("Missing retail corridor control check");

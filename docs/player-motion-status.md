@@ -13,9 +13,14 @@ frame advancement preserves `bhSetMotion`'s post-sampling order, single loop
 adjustment, fractional frames, boundary return codes and complemented
 ping-pong direction. Arithmetic explicitly retains signed 32-bit wrap behavior
 without C++ signed-overflow assumptions. The corridor pose probe uses this
-counter through all 150 frames and verifies its final wrap. Transition
-blending, mirroring, actor-controller integration and player-specific joint
-mapping remain pending; this counter alone is not runtime actor playback.
+counter through all 150 frames and verifies its final wrap. Transition blending
+now uses the reference Euler-equivalence choice and signed short deltas,
+truncation toward zero and optional direct translation. The corridor actor
+controller initializes a native bind pose, samples motion, decreases the blend
+count, samples attributes, advances the frame and rebuilds geometry. Its retail
+event completes naturally at the authored frame wait. Mirroring, alternate
+joint controls, other actor controllers and application integration remain
+pending.
 
 Skin records follow `njplus.c`: object/group associations, per-vertex joint
 indices, ten-step rotation weights, and the preserved auxiliary low word.
