@@ -1,0 +1,10 @@
+/.venv/
+/build/
+/local/
+/tools/local-toolchain.json
+*.iso
+*.ISO
+*.bin
+*.BIN
+__pycache__/
+.pytest_cache/
