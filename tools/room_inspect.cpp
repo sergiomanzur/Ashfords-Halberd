@@ -3,6 +3,7 @@
 #include "camera.hpp"
 #include "collision.hpp"
 #include "room.hpp"
+#include "scenario.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -31,12 +32,15 @@ int wmain(int argc,wchar_t** argv) {
         auto entries=afs_index(read(file,0,8+size_t(count)*8),std::filesystem::file_size(archive));
         // Collect the complete report before touching the destination.
         std::string text="index\tcompressed_bytes\texpanded_bytes\tversion\tcameras\tenemies\tobjects\titems\twalls\tfloors\tmodel_objects\ttriangles\ttextures\tactive_wall_types\tentry_positions\tentries_with_camera\n";
+        size_t scenario_entries=0;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
                 auto r=room_info(data);
                 auto collision=decode_room_collision(data);
                 auto records=decode_room_records(data);
+                auto scenario=decode_room_scenario(data);
+                scenario_entries+=scenario.entry_count();
                 auto cuts=decode_room_cuts(data);
                 size_t entries_with_camera=0;
                 for(size_t position=0;position<records.positions.size();++position)
@@ -76,7 +80,7 @@ int wmain(int argc,wchar_t** argv) {
         std::ofstream output(report,std::ios::binary|std::ios::trunc);
         output<<text;output.flush();
         if(!output) throw std::runtime_error("Could not write room report");
-        std::cout<<"Validated "<<entries.size()<<" rooms\n";
+        std::cout<<"Validated "<<entries.size()<<" rooms and "<<scenario_entries<<" scenario entry slots\n";
     } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
     return 0;
 }

@@ -21,7 +21,7 @@ The reference `ps2_NaSystem.c::Ps2SwapDBuff` waits until `Ps2_vcount >= 2`;
 `vsync_func` increments that counter once per vertical-sync interrupt. Native
 simulation must preserve this two-field update cadence independently of rendering.
 
-Fifteen CTest suites pass headlessly, including room-entry, cut selection and movement
+Sixteen CTest suites pass headlessly, including scenario, room-entry, cut selection and movement
 primitive suites. Tests cover triangular boundaries, floor mismatch, cut
 hysteresis, malformed area records, auxiliary truncation/padding/nonfinite
 values, displacement indexing and cardinal/relative movement angles.
