@@ -440,6 +440,80 @@ int main() {
     state.interaction_index = 2;
     run_scenario(Bytes{4, 10, 23, 0, 3, 0, 55, 8, 0, 0}, state);
     ck(state.room_case == 9);
+    Bytes transform_room(1400);
+    put(transform_room, 0, 0x41200000);
+    put(transform_room, 16, 128);
+    put(transform_room, 28, 1200);
+    put(transform_room, 32, 1390);
+    put(transform_room, 1200, 12);
+    put(transform_room, 1204, 14);
+    put(transform_room, 1208, 16);
+    Bytes transforms{101,  1,    0,   3,  105, 12,  1,   0,   2,   0,   105,
+                     13,   0,    2,   1,  0,   105, 7,   123, 0,   200, 0,
+                     0xff, 0xff, 105, 11, 90,  180, 255, 0,   254, 255, 0};
+    std::copy(transforms.begin(), transforms.end(),
+              transform_room.begin() + 1216);
+    ScenarioState transformed;
+    transformed.scenario =
+        std::make_shared<RoomScenario>(decode_room_scenario(transform_room));
+    transformed.enemies.resize(2);
+    transformed.enemy_slots = {1};
+    transformed.collision = RoomCollision{};
+    transformed.enemies[1].motion_mode = 123;
+    transformed.enemies[1].model_flags = 456;
+    transformed.enemies[1].blend_rate = 0.25f;
+    transformed.flags[6][0] = 0x10;
+    start_scenario_event(transformed, 0, 0);
+    tick_scenario_tasks(transformed);
+    auto &bound = transformed.enemies[1];
+    ck(bound.position.x == -1.23f && bound.position.y == 2.0f &&
+       bound.position.z == -655.35f);
+    ck(bound.previous_position.z == bound.position.z &&
+       bound.floor == player_floor_number(*transformed.collision, 2));
+    ck(bound.angles[0] == int32_t(90 * 182.04445f) &&
+       bound.angles[1] == int32_t(-180 * 182.04445f) &&
+       bound.previous_angles == bound.angles);
+    ck(transformed.enemies[0].position.x == 0 &&
+       transformed.tasks[0].model_index == 3);
+    ck(transformed.tasks[0].motion_mode == 123 &&
+       transformed.tasks[0].model_flags == 456 &&
+       transformed.tasks[0].blend_rate == 0.25f);
+    tick_scenario_tasks(transformed);
+    ck(!transformed.tasks[0].active);
+    auto controller_case = [&](Bytes instructions, bool rejected) {
+      std::fill(transform_room.begin() + 1216, transform_room.begin() + 1390,
+                0);
+      std::copy(instructions.begin(), instructions.end(),
+                transform_room.begin() + 1216);
+      transformed.scenario =
+          std::make_shared<RoomScenario>(decode_room_scenario(transform_room));
+      start_scenario_event(transformed, 1, 0);
+      if (rejected)
+        bad([&] { tick_scenario_tasks(transformed); });
+      else
+        tick_scenario_tasks(transformed);
+      transformed.tasks[1].active = false;
+    };
+    transformed.objects.resize(2);
+    transformed.items.resize(2);
+    controller_case(Bytes{101, 2, 1, 7, 105, 11, 0, 180, 0, 0, 255, 0}, false);
+    ck(transformed.objects[1].angles[1] == int32_t(180 * 182.04445f) &&
+       transformed.tasks[1].model_index == 7);
+    // Object/item bindings retain the task's cached enemy motion state.
+    transformed.tasks[1].motion_mode = 789;
+    controller_case(Bytes{101, 3, 1, 7, 255, 0}, false);
+    ck(transformed.tasks[1].model_index == 0 &&
+       transformed.tasks[1].motion_mode == 789);
+    controller_case(Bytes{101, 1, 4, 0}, true);
+    controller_case(Bytes{101, 2, 4, 0}, true);
+    controller_case(Bytes{101, 3, 4, 0}, true);
+    controller_case(Bytes{101, 4, 0, 0}, true);
+    controller_case(Bytes{105, 47}, true);
+    transformed.tasks[1].work_index.reset();
+    controller_case(Bytes{105, 11, 0, 0, 0, 0}, true);
+    transformed.collision.reset();
+    controller_case(Bytes{101, 1, 0, 0, 105, 7, 0, 0, 0, 0, 0, 0}, true);
+    bad([&] { run_scenario(Bytes{101, 1, 0, 0, 0}, transformed); });
     std::cout << "Scenario entry boundaries passed\n";
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';

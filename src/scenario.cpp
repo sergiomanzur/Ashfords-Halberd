@@ -290,6 +290,91 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
       start_scenario_event(state, program[pc + 2], program[pc + 3]);
       pc += 4;
       break;
+    case 101: {
+      extent(4);
+      if (!task)
+        throw std::runtime_error("Scenario work binding requires event task");
+      uint8_t group = program[pc + 1];
+      size_t index = program[pc + 2];
+      ScenarioEntity *entity = nullptr;
+      switch (group) {
+      case 1:
+        index = indexed(state.enemy_slots, index);
+        entity = &indexed(state.enemies, index);
+        break;
+      case 2:
+        entity = &indexed(state.objects, index);
+        break;
+      case 3:
+        entity = &indexed(state.items, index);
+        break;
+      default:
+        throw std::runtime_error("Unsupported scenario work binding group");
+      }
+      task->work_group = group;
+      task->work_index = index;
+      task->model_index = group == 3 ? 0 : program[pc + 3];
+      if (group == 1) {
+        task->motion_mode = entity->motion_mode;
+        task->model_flags = entity->model_flags;
+        task->blend_rate = entity->blend_rate;
+      }
+      pc += 4;
+      break;
+    }
+    case 105: {
+      extent(2);
+      if (!task)
+        throw std::runtime_error(
+            "Scenario common controller requires event task");
+      auto operation = program[pc + 1];
+      if (operation == 12 || operation == 13) {
+        extent(6);
+        auto &signs =
+            operation == 12 ? task->position_signs : task->angle_signs;
+        for (size_t i = 0; i < 3; ++i)
+          signs[i] = program[pc + 2 + i];
+        pc += 6;
+        break;
+      }
+      if (operation != 7 && operation != 11)
+        throw std::runtime_error("Unsupported scenario common controller " +
+                                 std::to_string(operation));
+      extent(operation == 7 ? 8 : 6);
+      if (!task->work_index)
+        throw std::runtime_error(
+            "Scenario common controller without bound work");
+      auto &entity =
+          task->work_group == 1   ? indexed(state.enemies, *task->work_index)
+          : task->work_group == 2 ? indexed(state.objects, *task->work_index)
+          : task->work_group == 3
+              ? indexed(state.items, *task->work_index)
+              : throw std::runtime_error(
+                    "Unsupported bound scenario work group");
+      if (operation == 7) {
+        if (!state.collision)
+          throw std::runtime_error(
+              "Scenario position requires room floor data");
+        auto component = [&](size_t i) {
+          float value = word(pc + 2 + i * 2) / 100.0f;
+          return task->position_signs[i] ? value * -1.0f : value;
+        };
+        entity.position = {component(0), component(1), component(2)};
+        entity.previous_position = entity.position;
+        entity.floor = player_floor_number(*state.collision, entity.position.y);
+        pc += 8;
+      } else {
+        for (size_t i = 0; i < 3; ++i) {
+          int value = program[pc + 2 + i];
+          if (task->angle_signs[i])
+            value = -value;
+          entity.angles[i] = int32_t(value * 182.04445f);
+        }
+        entity.previous_angles = entity.angles;
+        pc += 6;
+      }
+      break;
+    }
     case 182:
       extent(2);
       state.room_sound_case = program[pc + 1];

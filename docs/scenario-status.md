@@ -75,6 +75,19 @@ graveyard scripts still need additional commands. RoomSoundCase preserves the
 reference setter's state; native audio playback remains to implement.
 Unsupported commands are not skipped.
 
+Scheduled LoadWork now binds authored enemies through their allocated-work-slot
+map, or binds objects/items directly, retaining the original model index and
+enemy motion-state cache rules. CommonCtr sign selectors and whole-actor
+position/rotation assignments (subcommands 7, 11, 12 and 13) are native.
+Positions use unsigned hundredths with independent sign bytes, update backup
+coordinates and select the floor from the bound room ground table. Rotations
+retain signed integer angles from the original degree conversion and update
+backup angles. Bindings use stable indices and are checked again on access.
+Synthetic scheduled tests cover those transforms, allocation indirection,
+cached state, invalid bindings and missing floor data. Player/effect bindings,
+model rebuilding, motion selection and sound commands remain unsupported;
+the complete retail corridor event therefore still cannot execute.
+
 The retail RM_0010 control script sets RoomCaseNo before SetDoorCall into
 stage 0, room 2, position 0. Persistent flags choose the first-visit or return
 case. RM_0020/RM_0021 contain the return door into room 1, position 1. These
