@@ -16,16 +16,53 @@ by the baseline speed helper.
 `player_add_speed` follows `pwksub.c::bhAddSpeed` and the original
 `ps2_NaMath.c` quarter-wave `njSin`/`njCos` lookup convention, including its
 endpoint asymmetry. It preserves height and rejects nonfinite inputs and
-overflow. Motion transitions, input state changes, simulation cadence, floor
-height and wall collision remain to be integrated before this is playable.
+overflow.
 The reference `ps2_NaSystem.c::Ps2SwapDBuff` waits until `Ps2_vcount >= 2`;
 `vsync_func` increments that counter once per vertical-sync interrupt. Native
 simulation must preserve this two-field update cadence independently of rendering.
 
-Twelve CTest suites pass headlessly, including new cut selection and movement
+Fourteen CTest suites pass headlessly, including new cut selection and movement
 primitive suites. Tests cover triangular boundaries, floor mismatch, cut
 hysteresis, malformed area records, auxiliary truncation/padding/nonfinite
 values, displacement indexing and cardinal/relative movement angles.
+
+The collision decoder reads the explicit 36-byte `ATR_WORK` layout, room height
+and 32 ground heights. Geometry response adapts `hitchk.c::bhCheckWall` for
+rectangles, circles, all triangle orientations, slopes and ledges. Signed
+dimensions are preserved: retail room 0 includes ledges with negative height.
+`bhCheckWallEx` uses prior positions for rectangle face selection and rectangle/
+ledge quadrants, keeps raw heights and excludes slopes, as in the reference.
+The no-hit grounded floor snap is included. Ordered responses and special wall
+damage failures are explicit; dynamic walls, push-state changes and generated
+step limits remain pending. Collision records and both response paths passed
+100,860 native sampled probes across all 205 retail rooms. The collision suite also
+passes 600 deterministic mutations with GCC library assertions enabled.
+
+`locomotion.cpp` adapts healthy unarmed standing, turning, walking, running,
+backward movement and idle variation. It retains original entry frames, turn
+increments, input transitions, frame sampling/advance order and blend metadata.
+The unusual raw-count clamp in `bhGetFrameNum` was confirmed against the user's
+USA ELF instructions at `0x14e550`–`0x14e56c`; it is preserved deliberately.
+
+`advance_player_world` connects displacement, smoothed front-probe offset,
+upper/body collision passes, grounded height, water speed state and cut selection.
+Tests verify water speed changes on the next tick, stop drift, an actual wall
+response and corrected front anchor, and a continuous camera boundary crossing.
+The core remains limited to baseline locomotion: injury/weapon variants,
+quick turning, stairs, pushing, enemy collision and animation-transition posing
+still require their player states. Blend parameters are recorded but the current
+diagnostic renderer samples each selected motion without transition blending.
+
+`AshfordPlayerInspect SYSTEM.AFS 10 --movement-check RDX_LNK.AFS room-index`
+runs 660 ticks, poses the retail actor every tick and renders every 60th frame
+fully headlessly without writing images. It passed in retail rooms 0–2 (1,980
+ticks/poses and 33 rendered frames). Its seed is inside an authored cut area;
+it is not the original event-controlled spawn. These routes registered collision
+responses but no retail camera transitions. A traversing retail reference route
+and original-game comparison are still needed.
+
+`AshfordRoomInspect RDX_LNK.AFS report.tsv --collision-check` probes active wall
+records and reports active shape counts. `--scene` retains full scene validation.
 
 Step 1 remains incomplete. These changes provide core primitives and offline
 validation; New Game remains disabled until the playable mode is integrated.

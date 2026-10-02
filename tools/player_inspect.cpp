@@ -1,5 +1,6 @@
 #include "actor.hpp"
 #include "player.hpp"
+#include "locomotion.hpp"
 #include "render.hpp"
 #include <filesystem>
 #include <fstream>
@@ -21,7 +22,11 @@ int wmain(int argc, wchar_t **argv) {
       throw std::runtime_error(
           "Usage: AshfordPlayerInspect SYSTEM.AFS "
           "entry-index [--pose-check | new-preview-directory [RDX_LNK.AFS "
-          "room-index]]");
+          "room-index] | --movement-check RDX_LNK.AFS room-index]");
+    if(argc>=4 && std::wstring(argv[3]).rfind(L"--",0)==0 &&
+       !((argc==4 && std::wstring(argv[3])==L"--pose-check") ||
+         (argc==6 && std::wstring(argv[3])==L"--movement-check")))
+      throw std::runtime_error("Invalid player inspection option or argument count");
     const std::filesystem::path path(argv[1]);
     std::ifstream f(path, std::ios::binary);
     if (!f)
@@ -50,7 +55,8 @@ int wmain(int argc, wchar_t **argv) {
     std::cout << "Validated " << translations.size()
               << " auxiliary tables and baseline locomotion frames\n";
     if (argc >= 4) {
-      bool pose_only = argc == 4 && std::wstring(argv[3]) == L"--pose-check";
+      bool movement_only=argc==6 && std::wstring(argv[3])==L"--movement-check";
+      bool pose_only = movement_only || (argc == 4 && std::wstring(argv[3]) == L"--pose-check");
       const std::filesystem::path destination(argv[3]);
       if (!pose_only && std::filesystem::exists(destination))
         throw std::runtime_error("Player preview directory must not exist");
@@ -58,6 +64,7 @@ int wmain(int argc, wchar_t **argv) {
         throw std::runtime_error("No player model to preview");
       Scene room_scene;
       std::vector<RoomCut> cuts;
+      RoomCollision collision;
       if (argc == 6) {
         const std::filesystem::path room_path(argv[4]);
         std::ifstream rf(room_path, std::ios::binary);
@@ -77,8 +84,46 @@ int wmain(int argc, wchar_t **argv) {
         auto bytes = expand(read(rf, entry.offset, entry.size));
         room_scene = decode_room_scene(bytes);
         cuts = decode_room_cuts(bytes);
+        collision=decode_room_collision(bytes);
         if (cuts.empty())
           throw std::runtime_error("Room has no authored camera");
+      }
+      if(movement_only) {
+        PlayerWorldState state;
+        bool placed=false;
+        // Diagnostic seed inside a authored cut area. Original room-entry
+        // spawn and progression events still require the event interpreter.
+        for(const auto& cut:cuts) for(const auto& area:cut.areas) {
+          if(placed || area.floor<-2 || area.floor>29) continue;
+          for(float x:{.25f,.5f,.75f})for(float z:{.25f,.5f,.75f}) {
+            if(placed)continue;
+            Vec3 p{area.min_x+x*(area.max_x-area.min_x),collision.ground[size_t(int(area.floor)+2)],area.min_z+z*(area.max_z-area.min_z)};
+            auto selected=find_camera_cut(cuts,p.x,p.z,area.floor);
+            if(selected) {state.player.position=p;state.player.visual_anchor=p;state.floor=area.floor;state.cut=selected;state.front_anchor={p.x,p.y+12.5f,p.z};placed=true;}
+          }
+        }
+        if(!placed)throw std::runtime_error("No diagnostic movement seed in camera areas");
+        size_t transitions=0,hits=0,poses=0,images=0;
+        for(size_t tick=0;tick<660;++tick) {
+          uint16_t pad=tick<60?1:tick<120?0x409:tick<180?2:tick<240?4:0;
+          auto old=state.cut;
+          state=advance_player_world(state,package,translations,collision,cuts,pad);
+          if(state.cut!=old)++transitions;hits+=state.wall_hits;
+          auto pose=sample_motion(*package.motions.at(state.player.motion),state.player.sampled_frame);
+          auto actor=pose_actor(package.models[0],pose,state.player.position,state.player.yaw);++poses;
+          if(tick%60==0 && state.cut) {
+            auto combined=room_scene;size_t offset=combined.textures.size();
+            if(offset+actor.textures.size()>65535)throw std::runtime_error("Combined texture limit exceeded");
+            combined.textures.insert(combined.textures.end(),actor.textures.begin(),actor.textures.end());
+            for(auto& mesh:actor.meshes) {
+              for(auto& triangle:mesh.triangles)if(triangle.texture!=0xffff)triangle.texture=uint16_t(triangle.texture+offset);
+              combined.meshes.push_back(std::move(mesh));
+            }
+            render_camera(combined,resolve_camera(cuts[*state.cut],0),320,240);++images;
+          }
+        }
+        std::cout<<"movement_ticks=660 actor_poses="<<poses<<" camera_transitions="<<transitions<<" collision_hits="<<hits<<" rendered_frames="<<images<<'\n';
+        return 0;
       }
       if (!pose_only)
         std::filesystem::create_directories(destination);
