@@ -65,12 +65,19 @@ int wmain(int argc,wchar_t** argv) {
                         auto enemies=decode_room_enemy_models(data);
                         if(enemies.empty() || enemies[0].models.empty())
                             throw std::runtime_error("Retail corridor enemy model missing");
-                        for(uint32_t frame=0;frame<bank[0]->frames;++frame) {
-                            auto posed=pose_actor(enemies[0].models[0],sample_motion(*bank[0],int64_t(frame)*65536));
+                        int32_t actor_frame=0;
+                        uint32_t actor_direction=0;
+                        for(uint32_t tick=0;tick<bank[0]->frames;++tick) {
+                            auto posed=pose_actor(enemies[0].models[0],sample_motion(*bank[0],actor_frame));
                             if(posed.meshes.empty() || posed.textures.empty())
                                 throw std::runtime_error("Retail corridor actor pose missing geometry or textures");
                             ++corridor_actor_poses;
+                            int boundary=advance_motion_frame(bank[0]->frames,65536,0x20,actor_frame,actor_direction);
+                            if(boundary!=(tick+1==bank[0]->frames?1:0))
+                                throw std::runtime_error("Retail corridor animation boundary mismatch");
                         }
+                        if(actor_frame!=0 || actor_direction!=0)
+                            throw std::runtime_error("Retail corridor animation did not wrap");
                         ScenarioState controller;
                         controller.scenario=std::make_shared<const RoomScenario>(scenario);
                         controller.collision=collision;

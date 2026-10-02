@@ -17,6 +17,11 @@ struct JointPose {
   std::optional<std::array<uint16_t, 3>> angles;
 };
 Motion decode_motion(const Bytes &data, size_t key_limit = 2000000);
+// bhSetMotion's post-sampling 16.16 counter update. Return -1/1 on loop
+// underflow/overflow, zero otherwise. Ping-pong direction is a complemented
+// word, not a boolean, and its boundary does not clamp the frame.
+int advance_motion_frame(uint32_t frames, int32_t step, uint32_t mode,
+                         int32_t &frame, uint32_t &direction);
 // A bounded length-prefixed motion stream, terminated by 0xffffffff.
 // Empty records preserve authored motion indices. Padding after the sentinel
 // belongs to the containing file and is not interpreted as another record.

@@ -29,6 +29,33 @@ struct Reader {
   }
 };
 } // namespace
+int advance_motion_frame(uint32_t frames, int32_t step, uint32_t mode,
+                         int32_t &frame, uint32_t &direction) {
+  if (!frames || frames > 65535)
+    throw std::runtime_error("Invalid motion frame count");
+  auto signed_word = [](uint32_t bits) {
+    return bits < 0x80000000u ? int32_t(bits)
+                              : int32_t(int64_t(bits) - 0x100000000ll);
+  };
+  uint32_t extent = frames << 16;
+  uint32_t delta = uint32_t(step);
+  frame = signed_word((mode & 1) && direction ? uint32_t(frame) - delta
+                                              : uint32_t(frame) + delta);
+  if (mode & 1) {
+    if (frame <= 0 || frame >= signed_word(extent - 65536))
+      direction = ~direction;
+  } else {
+    if (frame < 0) {
+      frame = signed_word(uint32_t(frame) + extent);
+      return -1;
+    }
+    if (frame >= signed_word(extent)) {
+      frame = signed_word(uint32_t(frame) - extent);
+      return 1;
+    }
+  }
+  return 0;
+}
 std::vector<std::optional<Motion>> decode_motion_bank(const Bytes &data,
                                                       size_t begin, size_t end,
                                                       size_t key_limit) {

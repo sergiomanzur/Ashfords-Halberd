@@ -8,9 +8,14 @@ alignment. Model and texture bytes remain owned data pending actor rendering.
 MTN decoding follows `binfunc.c::bhMnbBinRealize`. Dense translation floats,
 packed 16-bit angle keys and optional frame attributes are decoded explicitly.
 Sampling follows `Motion.c` at original 16.16 frame positions, including
-`SetMtnSlow` signed-angle interpolation and truncation toward zero. Frame
-advancement, transition blending, mirroring and player-specific joint mapping
-are not yet integrated.
+`SetMtnSlow` signed-angle interpolation and truncation toward zero. Native
+frame advancement preserves `bhSetMotion`'s post-sampling order, single loop
+adjustment, fractional frames, boundary return codes and complemented
+ping-pong direction. Arithmetic explicitly retains signed 32-bit wrap behavior
+without C++ signed-overflow assumptions. The corridor pose probe uses this
+counter through all 150 frames and verifies its final wrap. Transition
+blending, mirroring, actor-controller integration and player-specific joint
+mapping remain pending; this counter alone is not runtime actor playback.
 
 Skin records follow `njplus.c`: object/group associations, per-vertex joint
 indices, ten-step rotation weights, and the preserved auxiliary low word.

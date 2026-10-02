@@ -67,6 +67,55 @@ int main() {
   try {
     auto b = fixture();
     auto m = decode_motion(b);
+    int32_t counter = 0;
+    uint32_t direction = 0;
+    ck(advance_motion_frame(3, 65536, 0, counter, direction) == 0 &&
+       counter == 65536);
+    counter = 2 * 65536 + 32768;
+    ck(advance_motion_frame(3, 65536, 0, counter, direction) == 1 &&
+       counter == 32768);
+    counter = 0;
+    ck(advance_motion_frame(3, -65536, 0, counter, direction) == -1 &&
+       counter == 2 * 65536);
+    counter = 0;
+    ck(advance_motion_frame(3, 65536, 1, counter, direction) == 0 &&
+       counter == 65536 && direction == 0);
+    ck(advance_motion_frame(3, 65536, 1, counter, direction) == 0 &&
+       counter == 2 * 65536 && direction == 0xffffffff);
+    advance_motion_frame(3, 65536, 1, counter, direction);
+    ck(counter == 65536 && direction == 0xffffffff);
+    advance_motion_frame(3, 65536, 1, counter, direction);
+    ck(counter == 0 && direction == 0);
+    counter = 2 * 65536;
+    advance_motion_frame(3, 32768, 1, counter, direction);
+    ck(counter == 2 * 65536 + 32768 && direction == 0xffffffff);
+    bad([&] { advance_motion_frame(0, 65536, 0, counter, direction); });
+    bad([&] { advance_motion_frame(65536, 65536, 0, counter, direction); });
+    counter = 0;
+    direction = 0;
+    ck(advance_motion_frame(1, 65536, 0, counter, direction) == 1 &&
+       counter == 0);
+    counter = 0;
+    ck(advance_motion_frame(3, -32768, 0, counter, direction) == -1 &&
+       counter == 2 * 65536 + 32768);
+    // Source uses a signed extent after its 16-bit shift, including wrap.
+    counter = 0;
+    ck(advance_motion_frame(65535, 0, 0, counter, direction) == 1 &&
+       counter == 65536);
+    counter = 0;
+    ck(advance_motion_frame(3, 7 * 65536, 0, counter, direction) == 1 &&
+       counter == 4 * 65536);
+    counter = 2147483647;
+    ck(advance_motion_frame(3, 1, 0, counter, direction) == -1 &&
+       counter == -2147287040);
+    counter = 65536;
+    direction = 7;
+    ck(advance_motion_frame(3, 65536, 1, counter, direction) == 0 &&
+       counter == 0 && direction == 0xfffffff8);
+    counter = 0;
+    direction = 0;
+    ck(advance_motion_frame(1, 65536, 1, counter, direction) == 0 &&
+       counter == 65536 && direction == 0xffffffff);
     Bytes bank(8);
     put(bank, 0, 0);
     put(bank, 4, uint32_t(b.size()));
