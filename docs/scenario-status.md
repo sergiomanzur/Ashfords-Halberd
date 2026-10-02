@@ -11,21 +11,37 @@ following outer-header section, allowing distinct entry points to share tails.
 All entries share one immutable event block. All 205 retail rooms passed native
 decoding, totaling 4,363 entry slots.
 
-The synchronous interpreter supports END, IF/ELSE/ENDIF, CK, SET, SetDoorCall
-and RoomCaseNo. CK/SET preserve MSB-first flags, bank capacities and SET's six
+The synchronous interpreter supports END, IF/ELSE/ENDIF, CK, SET, ItmCk,
+ItmSetCk, InitModelSet, EtcAtariSet2, ItmAspdSet, SetDoorCall and RoomCaseNo.
+CK/SET preserve MSB-first flags, bank capacities and SET's six
 single-bit/tail operations. CK also checks interaction/floor indices for the
 callback bank. IF handling preserves the source G_Sp target cursor rather than
 substituting a conventional stack. Truncated instructions, invalid branches,
 invalid flag accesses and unsupported opcodes fail explicitly. An instruction
 budget prevents a malformed loop from hanging the process.
 
+Item commands update collected/availability flags, item visibility and pickup
+trigger activation. They preserve the different source masks for item lookup
+and IC clearing. Model visibility commands resolve authored enemy indices
+through the runtime allocation map and preserve dead-enemy disabled flags.
+The stage-9/room-30/case-2 player-hide sleep request is retained. Interaction
+rewrites preserve geometry and flags, and decode all four parameters and type.
+The caller still binds runtime entity state; these commands do not instantiate
+models, simulate enemies or implement inventory UI.
+
+`AshfordRoomInspect RDX_LNK.AFS report.tsv --scenario-check` executes the
+complete retail RM_0010 initialization program without skipped commands. Four
+states cover map flag 34 clear/set and items 123/124 uncollected/collected.
+They verify both exit-trigger definitions and pickup persistence. The first
+path creates a direct door; the return path creates an examination trigger.
+
 SetDoorCall emits a decoded transition request. Applying `bhSetDoorDemo`'s
 player/input/fade state changes, selecting the archive room by stage/room/case,
 loading the destination, and preserving persistent progress are still pending.
-The current subset cannot execute the complete corridor or graveyard scripts:
-item checks, model/interaction activation, task scheduling, entity control and
-audiovisual commands must be ported before that is possible. Unsupported
-commands are not skipped.
+The current subset can execute corridor initialization, but cannot yet execute
+its full per-frame control or the graveyard scripts. Task scheduling, additional
+inventory checks, entity control and audiovisual commands must be ported before
+that is possible. Unsupported commands are not skipped.
 
 The retail RM_0010 control script sets RoomCaseNo before SetDoorCall into
 stage 0, room 2, position 0. Persistent flags choose the first-visit or return

@@ -20,7 +20,8 @@ Bytes read(std::ifstream& file, uint64_t offset, size_t size) {
 int wmain(int argc,wchar_t** argv) {
     try {
         bool collision_check=argc==4 && std::wstring(argv[3])==L"--collision-check";
-        if(argc!=3 && !(argc==4 && (std::wstring(argv[3])==L"--scene" || collision_check))) throw std::runtime_error("Usage: AshfordRoomInspect RDX_LNK.AFS report.tsv [--scene | --collision-check]");
+        bool scenario_check=argc==4 && std::wstring(argv[3])==L"--scenario-check";
+        if(argc!=3 && !(argc==4 && (std::wstring(argv[3])==L"--scene" || collision_check || scenario_check))) throw std::runtime_error("Usage: AshfordRoomInspect RDX_LNK.AFS report.tsv [--scene | --collision-check | --scenario-check]");
         const std::filesystem::path archive(argv[1]), report(argv[2]);
         if(std::filesystem::exists(report) && std::filesystem::equivalent(archive,report))
             throw std::runtime_error("Report cannot overwrite archive");
@@ -33,6 +34,7 @@ int wmain(int argc,wchar_t** argv) {
         // Collect the complete report before touching the destination.
         std::string text="index\tcompressed_bytes\texpanded_bytes\tversion\tcameras\tenemies\tobjects\titems\twalls\tfloors\tmodel_objects\ttriangles\ttextures\tactive_wall_types\tentry_positions\tentries_with_camera\n";
         size_t scenario_entries=0;
+        size_t corridor_initializations=0;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
@@ -41,6 +43,28 @@ int wmain(int argc,wchar_t** argv) {
                 auto records=decode_room_records(data);
                 auto scenario=decode_room_scenario(data);
                 scenario_entries+=scenario.entry_count();
+                if(scenario_check && i==1) {
+                    // RM_0010 initialization, both map-flag paths and both
+                    // item-persistence states. No event commands are skipped.
+                    for(bool visited:{false,true})for(bool collected:{false,true}) {
+                        ScenarioState state;
+                        state.interactions=collision.miscellaneous;
+                        state.items.resize(records.items.size());
+                        state.flags[8][1]=visited?0x20000000u:0;
+                        state.flags[7][3]=collected?0x18u:0;
+                        run_scenario(scenario.program(0),state);
+                        if(state.interactions.size()<4 || state.items.size()<2 ||
+                           state.interactions[0].type!=(visited?3:0) ||
+                           state.interactions[0].attribute!=(visited?0u:0x80u) ||
+                           state.interactions[0].parameters[1]!=(visited?0:2) ||
+                           bool(state.items[0].state_flags&0x1000000)!=collected ||
+                           bool(state.items[1].state_flags&0x1000000)!=collected ||
+                           bool(state.interactions[2].flags&1)==collected ||
+                           bool(state.interactions[3].flags&1)==collected)
+                            throw std::runtime_error("Retail corridor initialization mismatch");
+                        ++corridor_initializations;
+                    }
+                }
                 auto cuts=decode_room_cuts(data);
                 size_t entries_with_camera=0;
                 for(size_t position=0;position<records.positions.size();++position)
@@ -66,7 +90,7 @@ int wmain(int argc,wchar_t** argv) {
                         }
                     }
                 }
-                if(argc==4 && !collision_check) {
+                if(argc==4 && !collision_check && !scenario_check) {
                     auto scene=decode_room_scene(data);size_t triangles=0;
                     decode_room_cuts(data);
                     for(const auto& mesh:scene.meshes)triangles+=mesh.triangles.size();
@@ -81,6 +105,10 @@ int wmain(int argc,wchar_t** argv) {
         output<<text;output.flush();
         if(!output) throw std::runtime_error("Could not write room report");
         std::cout<<"Validated "<<entries.size()<<" rooms and "<<scenario_entries<<" scenario entry slots\n";
+        if(scenario_check) {
+            if(corridor_initializations!=4)throw std::runtime_error("Missing retail corridor scenario check");
+            std::cout<<"Executed four retail corridor initialization states\n";
+        }
     } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
     return 0;
 }

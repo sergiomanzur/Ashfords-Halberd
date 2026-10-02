@@ -87,6 +87,11 @@ void run_scenario_impl(const Program &program, ScenarioState &state) {
       throw std::runtime_error("Scenario flag outside bank");
     return state.flags[bank][index];
   };
+  auto indexed = [](auto &values, size_t index) -> auto & {
+    if (index >= values.size())
+      throw std::runtime_error("Scenario entity index outside room");
+    return values[index];
+  };
   for (size_t steps = 0; steps < 100000; ++steps) {
     extent(1);
     switch (program[pc]) {
@@ -161,6 +166,100 @@ void run_scenario_impl(const Program &program, ScenarioState &state) {
       pc += 6;
       break;
     }
+    case 14: {
+      extent(6);
+      auto count = word(pc + 2);
+      auto interaction = program[pc + 4];
+      auto keep_trigger = program[pc + 5];
+      pc += 6;
+      if (state.interaction_index != interaction)
+        break;
+      auto &item_flags = flag(7, count);
+      uint32_t mask = 0x80000000u >> (count & 31);
+      if (state.flags[10][0] & 0x800) {
+        if (!(item_flags & mask)) {
+          auto &trigger = indexed(state.interactions, interaction);
+          auto &item = indexed(state.items, trigger.parameters[0]);
+          if (!keep_trigger)
+            trigger.flags &= uint8_t(~1u);
+          item.state_flags |= 0x1000000;
+          item_flags |= mask;
+          flag(9, count & 0x1ff) &= ~mask;
+        }
+      } else if (!(item_flags & mask)) {
+        flag(9, count) |= mask;
+      }
+      state.flags[10][0] &= ~0x800u;
+      break;
+    }
+    case 35: {
+      extent(6);
+      auto item_index = program[pc + 1];
+      auto count = word(pc + 2);
+      auto &trigger = indexed(state.interactions, program[pc + 4]);
+      if (flag(7, count & 0x1ff) & (0x80000000u >> (count & 31))) {
+        auto &item = indexed(state.items, item_index);
+        if (program[pc + 5] == 0)
+          trigger.flags &= uint8_t(~1u);
+        item.state_flags |= 0x1000000;
+      } else
+        trigger.flags |= 1;
+      pc += 6;
+      break;
+    }
+    case 36: {
+      extent(4);
+      auto group = program[pc + 1], index = program[pc + 2],
+           enabled = program[pc + 3];
+      uint32_t *status = nullptr;
+      ScenarioEntity *enemy = nullptr;
+      switch (group) {
+      case 0:
+        status = &state.flags[14][0];
+        break;
+      case 1:
+        enemy = &indexed(state.enemies, indexed(state.enemy_slots, index));
+        status = &enemy->state_flags;
+        break;
+      case 2:
+        status = &indexed(state.objects, index).state_flags;
+        break;
+      case 3:
+        status = &indexed(state.items, index).state_flags;
+        break;
+      default:
+        throw std::runtime_error("Unsupported scenario entity group");
+      }
+      if (!enabled) {
+        *status |= 0x1000000;
+        if (group == 0 && state.stage == 9 && state.room == 30 &&
+            state.room_case == 2)
+          state.player_sleep_ticks = 2;
+        if (enemy)
+          enemy->flags |= 0x8000;
+      } else {
+        *status &= ~0x1000000u;
+        if (enemy && !(enemy->flags & 0x80000000))
+          enemy->flags &= ~0x8000u;
+      }
+      pc += 4;
+      break;
+    }
+    case 37: {
+      extent(10);
+      auto &trigger = indexed(state.interactions, program[pc + 1]);
+      trigger.attribute = word(pc + 2);
+      for (size_t i = 0; i < 4; ++i)
+        trigger.parameters[i] = program[pc + 4 + i];
+      trigger.type = program[pc + 8];
+      pc += 10;
+      break;
+    }
+    case 66:
+      extent(4);
+      indexed(state.items, program[pc + 1]).angular_speed = program[pc + 2];
+      pc += 4;
+      break;
     case 51:
       extent(8);
       state.door = ScenarioDoor{word(pc + 2), program[pc + 4], program[pc + 5],

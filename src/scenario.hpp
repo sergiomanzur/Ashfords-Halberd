@@ -1,5 +1,6 @@
 #pragma once
 #include "assets.hpp"
+#include "collision.hpp"
 #include <array>
 #include <memory>
 #include <optional>
@@ -34,10 +35,20 @@ struct ScenarioDoor {
   uint16_t attribute = 0;
   uint8_t stage = 0, room = 0, position = 0, type = 0;
 };
+struct ScenarioEntity {
+  uint32_t flags = 0, state_flags = 0;
+  int32_t angular_speed = 0;
+};
 struct ScenarioState {
   std::array<std::array<uint32_t, 32>, 17> flags{};
   uint8_t room_case = 0, interaction_index = 0, floor_index = 0;
+  uint8_t stage = 0, room = 0, player_sleep_ticks = 0;
   std::optional<ScenarioDoor> door;
+  // Caller binds current runtime entities, including the authored-enemy to
+  // allocated-work-slot map produced during room loading.
+  std::vector<ScenarioEntity> enemies, objects, items;
+  std::vector<size_t> enemy_slots;
+  std::vector<CollisionRecord> interactions;
 };
 // Native synchronous control subset. Unsupported instructions fail explicitly;
 // task scheduling, entity controllers and audiovisual instructions are pending.

@@ -109,6 +109,88 @@ int main() {
                        1, 0,  0, 0, 0, 55, 8, 0, 0, 55, 7,  0, 0},
                  nested_state);
     ck(nested_state.room_case == 0);
+    ScenarioState entities;
+    entities.interactions.resize(2);
+    entities.items.resize(2);
+    entities.objects.resize(5);
+    entities.enemies.resize(2);
+    entities.enemy_slots = {1};
+    entities.interactions[0].flags = 1;
+    entities.interactions[0].parameters[0] = 1;
+    entities.flags[7][0] = 0x80000000;
+    run_scenario(Bytes{35, 1, 0, 0, 0, 0, 0, 0}, entities);
+    ck(!(entities.interactions[0].flags & 1) &&
+       (entities.items[1].state_flags & 0x1000000));
+    entities.flags[7][0] = 0;
+    run_scenario(Bytes{35, 1, 0, 0, 0, 0, 0, 0}, entities);
+    ck(entities.interactions[0].flags & 1);
+    run_scenario(
+        Bytes{36, 1, 0, 0, 36, 2, 4, 0, 36, 3, 0, 0, 36, 0, 0, 0, 0, 0},
+        entities);
+    ck((entities.enemies[1].flags & 0x8000) &&
+       (entities.enemies[1].state_flags & 0x1000000));
+    ck((entities.objects[4].state_flags & 0x1000000) &&
+       (entities.items[0].state_flags & 0x1000000) &&
+       (entities.flags[14][0] & 0x1000000));
+    entities.enemies[1].flags |= 0x80000000;
+    run_scenario(Bytes{36, 1, 0, 1, 0, 0}, entities);
+    ck(!(entities.enemies[1].state_flags & 0x1000000) &&
+       (entities.enemies[1].flags & 0x8000));
+    entities.enemies[1].flags &= ~0x80000000u;
+    run_scenario(Bytes{36, 1, 0, 1, 37, 1, 0x34, 0x12, 1, 2,
+                       3,  4, 4, 0, 66, 1, 100,  0,    0, 0},
+                 entities);
+    ck(!(entities.enemies[1].flags & 0x8000) &&
+       entities.items[1].angular_speed == 100);
+    ck(entities.interactions[1].attribute == 0x1234 &&
+       entities.interactions[1].type == 4 &&
+       entities.interactions[1].parameters[3] == 4);
+    entities.interaction_index = 0;
+    entities.flags[10][0] = 0x800;
+    entities.flags[9][0] = 0xffffffff;
+    run_scenario(Bytes{14, 0, 31, 0, 0, 0, 0, 0}, entities);
+    ck((entities.flags[7][0] & 1) && !(entities.flags[9][0] & 1) &&
+       !(entities.flags[10][0] & 0x800));
+    entities.flags[7][0] = 0;
+    run_scenario(Bytes{14, 0, 30, 0, 0, 0, 0, 0}, entities);
+    ck(entities.flags[9][0] & 2);
+    bad([&] { run_scenario(Bytes{36, 1, 1, 0, 0, 0}, entities); });
+    bad([&] {
+      run_scenario(Bytes{37, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, entities);
+    });
+    entities.stage = 9;
+    entities.room = 30;
+    entities.room_case = 2;
+    run_scenario(Bytes{36, 0, 0, 0, 0, 0}, entities);
+    ck(entities.player_sleep_ticks == 2);
+    entities.flags[10][0] = 0x800;
+    entities.interaction_index = 1;
+    run_scenario(Bytes{14, 0, 5, 0, 0, 0, 0, 0}, entities);
+    ck(entities.flags[10][0] & 0x800);
+    entities.interaction_index = 0;
+    entities.interactions[0].flags = 1;
+    entities.items[1].state_flags = 0;
+    entities.flags[7][0] = 0x80000000;
+    run_scenario(Bytes{14, 0, 0, 0, 0, 0, 0, 0}, entities);
+    ck((entities.interactions[0].flags & 1) &&
+       entities.items[1].state_flags == 0 && !(entities.flags[10][0] & 0x800));
+    entities.flags[10][0] = 0x800;
+    entities.flags[7][0] = 0;
+    run_scenario(Bytes{14, 0, 0, 0, 0, 1, 0, 0}, entities);
+    ck((entities.interactions[0].flags & 1) &&
+       (entities.items[1].state_flags & 0x1000000));
+    entities.interactions[1].flags = 0x81;
+    entities.interactions[1].position = {1, 2, 3};
+    run_scenario(Bytes{37, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, entities);
+    ck(entities.interactions[1].flags == 0x81 &&
+       entities.interactions[1].position.z == 3);
+    for (auto opcode : {14, 35, 36, 37, 66})
+      bad([&] { run_scenario(Bytes{uint8_t(opcode)}, entities); });
+    bad([&] { run_scenario(Bytes{66, 3, 0, 0, 0, 0}, entities); });
+    entities.flags[7][0] = 0x80000000;
+    entities.interactions[0].flags = 1;
+    run_scenario(Bytes{35, 1, 0, 2, 0, 0, 0, 0}, entities);
+    ck(!(entities.interactions[0].flags & 1));
     state.interaction_index = 2;
     run_scenario(Bytes{4, 10, 23, 0, 3, 0, 55, 8, 0, 0}, state);
     ck(state.room_case == 9);
