@@ -44,6 +44,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t enemy_motions=0, enemy_motion_poses=0;
         size_t corridor_actor_poses=0;
         size_t corridor_model_rebuilds=0;
+        size_t corridor_lifecycles=0;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
@@ -137,11 +138,16 @@ int wmain(int argc,wchar_t** argv) {
                     // item-persistence states. No event commands are skipped.
                     for(bool visited:{false,true})for(bool collected:{false,true}) {
                         ScenarioState state;
+                        bind_room_enemies(data,collision,state);
+                        state.scenario=std::make_shared<const RoomScenario>(scenario);
+                        state.collision=collision;
+                        state.room_motions=std::make_shared<const MotionBank>(decode_room_motion_bank(data));
+                        state.flags[6][0]=2;
                         state.interactions=collision.miscellaneous;
                         state.items.resize(records.items.size());
                         state.flags[8][1]=visited?0x20000000u:0;
                         state.flags[7][3]=collected?0x18u:0;
-                        run_scenario(scenario.program(0),state);
+                        initialize_scenario(state);
                         if(state.interactions.size()<4 || state.items.size()<2 ||
                            state.interactions[0].type!=(visited?3:0) ||
                            state.interactions[0].attribute!=(visited?0u:0x80u) ||
@@ -152,6 +158,25 @@ int wmain(int argc,wchar_t** argv) {
                            bool(state.interactions[3].flags&1)==collected)
                             throw std::runtime_error("Retail corridor initialization mismatch");
                         ++corridor_initializations;
+                        if(!visited && !collected) {
+                            auto lifecycle=state;
+                            control_scenario(lifecycle);
+                            if(!lifecycle.tasks[0].active || lifecycle.event_timer!=1 ||
+                               lifecycle.enemies[0].motions!=lifecycle.room_motions)
+                                throw std::runtime_error("Retail corridor lifecycle did not start event");
+                            auto wait_pc=lifecycle.tasks[0].pc;
+                            control_scenario(lifecycle);
+                            if(lifecycle.tasks[0].pc!=wait_pc || lifecycle.event_timer!=2)
+                                throw std::runtime_error("Retail corridor lifecycle did not retain wait");
+                            for(size_t tick=0;tick<150;++tick) {
+                                tick_scenario_actors(lifecycle);
+                                control_scenario(lifecycle);
+                            }
+                            if(lifecycle.tasks[0].active || lifecycle.enemies[0].frame!=0 ||
+                               lifecycle.enemies[0].motion_boundary!=1)
+                                throw std::runtime_error("Retail corridor lifecycle did not finish event");
+                            ++corridor_lifecycles;
+                        }
                         for(int weapon:{0,1}) {
                             auto controlled=state;
                             controlled.scenario=std::make_shared<RoomScenario>(scenario);
@@ -234,6 +259,8 @@ int wmain(int argc,wchar_t** argv) {
             std::cout<<"Executed "<<corridor_model_rebuilds<<" complete corridor events with native blended actor advancement through frame 149\n";
             if(corridor_initializations!=4)throw std::runtime_error("Missing retail corridor scenario check");
             std::cout<<"Executed four retail corridor initialization states\n";
+            if(corridor_lifecycles!=1)throw std::runtime_error("Missing retail corridor lifecycle check");
+            std::cout<<"Executed one complete native corridor initialization/control/actor/event sequence\n";
             if(corridor_controls!=16)throw std::runtime_error("Missing retail corridor control check");
             std::cout<<"Executed sixteen retail corridor idle control passes\n";
             if(corridor_door_requests!=8)throw std::runtime_error("Missing retail corridor door checks");

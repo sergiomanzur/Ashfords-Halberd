@@ -90,6 +90,7 @@ struct ScenarioState {
   std::shared_ptr<const std::vector<std::optional<Motion>>> room_motions;
   std::shared_ptr<const RoomScenario> scenario;
   std::array<ScenarioTask, 16> tasks;
+  size_t current_task = 0;
   uint32_t event_timer = 0;
   int conditional_depth = 0;
   int64_t branch_cursor = 0;
@@ -106,6 +107,12 @@ void run_scenario(const ScenarioProgram &program, ScenarioState &state);
 size_t start_scenario_event(ScenarioState &state, size_t level, size_t event);
 void tick_scenario_tasks(ScenarioState &state);
 void tick_scenario_actors(ScenarioState &state);
+// bhInitEvent's native state/script ordering. Sound commands 3/4 are pending
+// the audio backend. All room resources must already be bound.
+void initialize_scenario(ScenarioState &state);
+// bhControlEvent: room control uses the current command context, then runs
+// the event scheduler if the room script enables it.
+void control_scenario(ScenarioState &state);
 // bhSetRoom/bhSetEnemy/bhFinishRoom enemy bindings. Replaces only enemies and
 // their authored work-number map after all assets validate successfully.
 void bind_room_enemies(const Bytes &data, const RoomCollision &collision,

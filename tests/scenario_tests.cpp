@@ -255,6 +255,44 @@ int main() {
        scheduler.event_timer == 5);
     tick_scenario_tasks(scheduler);
     ck(scheduler.event_timer == 5);
+    auto initialization_room = scheduled;
+    put(initialization_room, 32, 1280);
+    put(initialization_room, 1204, 32);
+    put(initialization_room, 1208, 40);
+    Bytes initialization_code{101, 2, 0, 0, 105, 11, 0, 90, 0, 0,
+                              20, 0, 0, 0, 0, 0};
+    std::copy(initialization_code.begin(), initialization_code.end(),
+              initialization_room.begin() + 1212);
+    Bytes initialization_event{55, 9, 254, 255, 0};
+    std::copy(initialization_event.begin(), initialization_event.end(),
+              initialization_room.begin() + 1240);
+    Bytes control_code{101, 2, 0, 0, 55, 7, 0, 0};
+    std::copy(control_code.begin(), control_code.end(),
+              initialization_room.begin() + 1232);
+    ScenarioState initialized;
+    initialized.scenario = std::make_shared<const RoomScenario>(
+        decode_room_scenario(initialization_room));
+    initialized.objects.resize(1);
+    initialized.tasks[0].pc = 777;
+    initialized.tasks[7].active = true;
+    initialized.tasks[7].counts[0] = 123;
+    initialized.event_timer = 900;
+    initialized.flags[6][0] = 0x100;
+    initialized.inventory[0] = 42;
+    initialize_scenario(initialized);
+    ck(initialized.objects[0].angles[1] == int32_t(90 * 182.04445f) &&
+       initialized.room_case == 9 && initialized.tasks[0].active &&
+       initialized.tasks[0].pc == 3 && initialized.event_timer == 1 &&
+       !initialized.tasks[7].active && initialized.tasks[7].counts[0] == 123 &&
+       initialized.flags[6][0] == 0x100 && initialized.inventory[0] == 42 &&
+       initialized.current_task == 15);
+    control_scenario(initialized);
+    ck(initialized.room_case == 7 && initialized.tasks[15].work_index == 0 &&
+       initialized.tasks[0].active && initialized.tasks[0].pc == 3 &&
+       initialized.event_timer == 1);
+    initialized.flags[6][0] |= 0x10;
+    tick_scenario_tasks(initialized);
+    ck(!initialized.tasks[0].active && initialized.event_timer == 2);
     start_scenario_event(scheduler, 3, 0);
     scheduler.flags[6][0] = 0;
     tick_scenario_tasks(scheduler);

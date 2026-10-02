@@ -110,15 +110,15 @@ size_t program_origin(const ScenarioProgram &program) {
 }
 template <class Program>
 void run_scenario_impl(const Program &program, ScenarioState &state,
-                       ScenarioTask *task = nullptr) {
-  size_t pc = task ? task->pc : 0;
+                       ScenarioTask *task = nullptr, bool scheduled = true) {
+  size_t pc = task && scheduled ? task->pc : 0;
   // The original G_Sp is a branch-target cursor, not a stack of targets.
   // Nested conditionals replace it; ENDIF/ELSE subtract four bytes.
   auto &branch_cursor = state.branch_cursor;
   auto &depth = state.conditional_depth;
   size_t origin = program_origin(program);
   auto finish = [&] {
-    if (task)
+    if (task && scheduled)
       task->pc = pc;
   };
   auto extent = [&](size_t n) {
@@ -720,7 +720,9 @@ void tick_scenario_tasks(ScenarioState &state) {
   if (!(state.flags[6][0] & 0x10))
     return;
   bool timed = false;
-  for (auto &task : state.tasks)
+  for (size_t level = 0; level < state.tasks.size(); ++level) {
+    state.current_task = level;
+    auto &task = state.tasks[level];
     if (task.active) {
       if (!task.program)
         throw std::runtime_error("Active scenario task without program");
@@ -734,6 +736,37 @@ void tick_scenario_tasks(ScenarioState &state) {
       run_scenario_impl(program, state, &task);
       task.program = std::move(program);
     }
+  }
+}
+void initialize_scenario(ScenarioState &state) {
+  if (!state.scenario)
+    throw std::runtime_error("No bound room scenario");
+  const auto &initialization = state.scenario->program(0);
+  for (auto &task : state.tasks)
+    task.active = false;
+  tick_scenario_actors(state);
+  state.current_task = 0;
+  state.conditional_depth = 0;
+  state.event_timer = 0;
+  // bhScenarioCheck uses task 0's command context but does not store the
+  // running script pointer into its data field, unlike the scheduler.
+  run_scenario_impl(initialization, state, &state.tasks[0], false);
+  state.flags[6][0] |= 0x10;
+  try {
+    tick_scenario_tasks(state);
+  } catch (...) {
+    state.flags[6][0] &= ~0x10u;
+    throw;
+  }
+  state.flags[6][0] &= ~0x10u;
+}
+void control_scenario(ScenarioState &state) {
+  if (!state.scenario || state.current_task >= state.tasks.size())
+    throw std::runtime_error("Invalid room control context");
+  const auto &control = state.scenario->program(1);
+  state.conditional_depth = 0;
+  run_scenario_impl(control, state, &state.tasks[state.current_task], false);
+  tick_scenario_tasks(state);
 }
 void tick_scenario_actors(ScenarioState &state) {
   if (!(state.flags[6][0] & 2))

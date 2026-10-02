@@ -120,6 +120,22 @@ complete event. Object/item loading and application room lifecycle remain
 pending.
 Player/effect bindings and sound commands remain unsupported.
 
+Native `initialize_scenario` follows `bhInitEvent`'s state/script ordering:
+deactivate old tasks without erasing their counters, run enemy control, reset
+conditional depth and event timer, execute room initialization with task 0's
+command context, then give scheduled events one pass under the temporary
+0x10 scheduler flag and clear that flag. Initialization starts at script PC0
+without storing its final PC over an event that it starts in task 0.
+`control_scenario` executes room control in the retained command context and
+then schedules events. Every enabled scheduler iteration assigns that context,
+including inactive slots; a disabled scheduler leaves it unchanged. Tests
+cover initialization command binding, a yielding task-0 event, counter
+retention, context 15 after scheduling and room-control cursor isolation.
+The headless retail probe runs all four corridor initialization states and a
+complete initialization/control/actor/event sequence through the 150-frame
+animation. Sound commands 3/4, object/item asset loading, system room-change
+flags and application integration still remain to implement.
+
 The retail RM_0010 control script sets RoomCaseNo before SetDoorCall into
 stage 0, room 2, position 0. Persistent flags choose the first-visit or return
 case. RM_0020/RM_0021 contain the return door into room 1, position 1. These
