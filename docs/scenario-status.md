@@ -20,6 +20,18 @@ substituting a conventional stack. Truncated instructions, invalid branches,
 invalid flag accesses and unsupported opcodes fail explicitly. An instruction
 budget prevents a malformed loop from hanging the process.
 
+The native scheduler retains 16 task slots, program pointers, four counters and
+the shared conditional cursor. EvtOn supports explicit slots and automatic
+allocation, including the original slot-15 overwrite when all slots are active.
+EvtKill, Sleep/Sleeping, EvtNext and EvtEnd preserve pointer advancement and
+yield behavior. Scheduling is gated by special flag `0x10`; the event timer
+increments once per enabled pass with at least one active task. A newly started
+higher slot executes in the same pass, while a lower slot waits for the next
+pass. Replacing the current slot retains its running instruction pointer as the
+original scheduler does. Sleep or yield inside a conditional continues through
+the shared branch cursor before returning. These behaviors have headless tests;
+FOR/WHILE loops and wider entity controllers are still pending.
+
 Item commands update collected/availability flags, item visibility and pickup
 trigger activation. They preserve the different source masks for item lookup
 and IC clearing. Model visibility commands resolve authored enemy indices
@@ -39,8 +51,8 @@ SetDoorCall emits a decoded transition request. Applying `bhSetDoorDemo`'s
 player/input/fade state changes, selecting the archive room by stage/room/case,
 loading the destination, and preserving persistent progress are still pending.
 The current subset can execute corridor initialization, but cannot yet execute
-its full per-frame control or the graveyard scripts. Task scheduling, additional
-inventory checks, entity control and audiovisual commands must be ported before
+its full per-frame control or the graveyard scripts. Additional inventory checks,
+event loops, entity control and audiovisual commands must be ported before
 that is possible. Unsupported commands are not skipped.
 
 The retail RM_0010 control script sets RoomCaseNo before SetDoorCall into

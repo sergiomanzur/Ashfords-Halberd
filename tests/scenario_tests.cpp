@@ -86,6 +86,113 @@ int main() {
     state.interaction_index = 3;
     run_scenario(Bytes{4, 10, 23, 0, 3, 0, 55, 9, 0, 0}, state);
     ck(state.room_case == 9);
+    Bytes scheduled(1300);
+    put(scheduled, 0, 0x41200000);
+    put(scheduled, 16, 128);
+    put(scheduled, 28, 1200);
+    put(scheduled, 32, 1240);
+    put(scheduled, 1200, 12);
+    put(scheduled, 1204, 14);
+    put(scheduled, 1208, 16);
+    Bytes task_code{55, 1, 248, 249, 3, 0, 55, 2, 254, 55, 3, 255, 0};
+    std::copy(task_code.begin(), task_code.end(), scheduled.begin() + 1216);
+    ScenarioState scheduler;
+    scheduler.scenario =
+        std::make_shared<RoomScenario>(decode_room_scenario(scheduled));
+    scheduler.flags[6][0] = 0x10;
+    run_scenario(Bytes{20, 0, 16, 0, 0, 0}, scheduler);
+    ck(scheduler.tasks[0].active && scheduler.tasks[0].pc == 0);
+    tick_scenario_tasks(scheduler);
+    ck(scheduler.room_case == 1 && scheduler.tasks[0].pc == 3 &&
+       scheduler.event_timer == 1);
+    tick_scenario_tasks(scheduler);
+    ck(scheduler.tasks[0].pc == 3);
+    tick_scenario_tasks(scheduler);
+    ck(scheduler.tasks[0].pc == 6 && scheduler.room_case == 1);
+    tick_scenario_tasks(scheduler);
+    ck(scheduler.tasks[0].pc == 9 && scheduler.room_case == 2);
+    tick_scenario_tasks(scheduler);
+    ck(!scheduler.tasks[0].active && scheduler.room_case == 3 &&
+       scheduler.event_timer == 5);
+    tick_scenario_tasks(scheduler);
+    ck(scheduler.event_timer == 5);
+    start_scenario_event(scheduler, 3, 0);
+    scheduler.flags[6][0] = 0;
+    tick_scenario_tasks(scheduler);
+    ck(scheduler.tasks[3].pc == 0 && scheduler.event_timer == 5);
+    for (size_t slot = 0; slot < 16; ++slot)
+      start_scenario_event(scheduler, slot, 0);
+    scheduler.tasks[15].pc = 6;
+    ck(start_scenario_event(scheduler, 16, 0) == 15 &&
+       scheduler.tasks[15].pc == 0);
+    run_scenario(Bytes{188, 3, 0, 0}, scheduler);
+    ck(!scheduler.tasks[3].active);
+    bad([&] { start_scenario_event(scheduler, 0, 1); });
+    bad([&] { run_scenario(Bytes{248, 249, 1, 0, 0, 0}, state); });
+    // A higher task slot started during iteration runs in the same tick;
+    // a lower slot waits until the next scheduler pass.
+    Bytes ordering = scheduled;
+    put(ordering, 1200, 16);
+    put(ordering, 1204, 18);
+    put(ordering, 1208, 20);
+    put(ordering, 1212, 30);
+    Bytes spawn{20, 0, 1, 1, 255, 0};
+    std::copy(spawn.begin(), spawn.end(), ordering.begin() + 1220);
+    Bytes child{55, 7, 255, 0};
+    std::copy(child.begin(), child.end(), ordering.begin() + 1230);
+    ScenarioState ordered;
+    ordered.scenario =
+        std::make_shared<RoomScenario>(decode_room_scenario(ordering));
+    ordered.flags[6][0] = 0x10;
+    start_scenario_event(ordered, 0, 0);
+    tick_scenario_tasks(ordered);
+    ck(ordered.room_case == 7 && !ordered.tasks[0].active &&
+       !ordered.tasks[1].active && ordered.event_timer == 1);
+    spawn[2] = 0;
+    std::copy(spawn.begin(), spawn.end(), ordering.begin() + 1220);
+    ordered.scenario =
+        std::make_shared<RoomScenario>(decode_room_scenario(ordering));
+    ordered.tasks = {};
+    ordered.room_case = 0;
+    start_scenario_event(ordered, 1, 0);
+    tick_scenario_tasks(ordered);
+    ck(ordered.room_case == 0 && ordered.tasks[0].active);
+    tick_scenario_tasks(ordered);
+    ck(ordered.room_case == 7 && !ordered.tasks[0].active);
+    Bytes self_spawn{20, 0, 0, 1, 254, 255, 0};
+    std::copy(self_spawn.begin(), self_spawn.end(), ordering.begin() + 1220);
+    ordered.scenario =
+        std::make_shared<RoomScenario>(decode_room_scenario(ordering));
+    ordered.tasks = {};
+    ordered.room_case = 0;
+    start_scenario_event(ordered, 0, 0);
+    tick_scenario_tasks(ordered);
+    ck(ordered.tasks[0].active && ordered.tasks[0].pc == 5 &&
+       (*ordered.tasks[0].program)[0] == 20);
+    tick_scenario_tasks(ordered);
+    ck(!ordered.tasks[0].active && ordered.room_case == 0);
+    Bytes conditional{1, 4, 254, 55, 4, 0, 55, 9, 255, 0};
+    std::copy(conditional.begin(), conditional.end(), ordering.begin() + 1220);
+    ordered.scenario =
+        std::make_shared<RoomScenario>(decode_room_scenario(ordering));
+    ordered.tasks = {};
+    ordered.room_case = 0;
+    start_scenario_event(ordered, 0, 0);
+    tick_scenario_tasks(ordered);
+    ck(ordered.room_case == 9 && !ordered.tasks[0].active &&
+       ordered.conditional_depth == 0);
+    Bytes conditional_sleep{1, 8, 248, 249, 2, 0, 55, 4, 0, 0, 55, 9, 255, 0};
+    std::copy(conditional_sleep.begin(), conditional_sleep.end(),
+              ordering.begin() + 1220);
+    ordered.scenario =
+        std::make_shared<RoomScenario>(decode_room_scenario(ordering));
+    ordered.tasks = {};
+    ordered.room_case = 0;
+    start_scenario_event(ordered, 0, 0);
+    tick_scenario_tasks(ordered);
+    ck(ordered.room_case == 9 && !ordered.tasks[0].active &&
+       ordered.tasks[0].counts[0] == 1);
+    bad([&] { run_scenario(Bytes{188, 16, 0, 0}, ordered); });
     Bytes shared(1300);
     put(shared, 0, 0x41200000);
     put(shared, 16, 128);

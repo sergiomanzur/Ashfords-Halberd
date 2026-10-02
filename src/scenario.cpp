@@ -1,4 +1,5 @@
 #include "scenario.hpp"
+#include <limits>
 #include <stdexcept>
 namespace ashford {
 namespace {
@@ -60,13 +61,23 @@ RoomScenario decode_room_scenario(const Bytes &data) {
   }
   return result;
 }
+size_t program_origin(const Bytes &) { return 0; }
+size_t program_origin(const ScenarioProgram &program) {
+  return program.origin();
+}
 template <class Program>
-void run_scenario_impl(const Program &program, ScenarioState &state) {
-  size_t pc = 0;
+void run_scenario_impl(const Program &program, ScenarioState &state,
+                       ScenarioTask *task = nullptr) {
+  size_t pc = task ? task->pc : 0;
   // The original G_Sp is a branch-target cursor, not a stack of targets.
   // Nested conditionals replace it; ENDIF/ELSE subtract four bytes.
-  int64_t branch_cursor = 0;
-  int depth = 0;
+  auto &branch_cursor = state.branch_cursor;
+  auto &depth = state.conditional_depth;
+  size_t origin = program_origin(program);
+  auto finish = [&] {
+    if (task)
+      task->pc = pc;
+  };
   auto extent = [&](size_t n) {
     if (pc > program.size() || n > program.size() - pc)
       throw std::runtime_error("Truncated scenario instruction");
@@ -92,17 +103,31 @@ void run_scenario_impl(const Program &program, ScenarioState &state) {
       throw std::runtime_error("Scenario entity index outside room");
     return values[index];
   };
+  auto resume = [&] {
+    if (depth <= 0) {
+      finish();
+      return false;
+    }
+    branch_cursor -= 4;
+    --depth;
+    if (branch_cursor < int64_t(origin))
+      throw std::runtime_error("Scenario branch before program");
+    jump(size_t(branch_cursor - int64_t(origin)));
+    return true;
+  };
   for (size_t steps = 0; steps < 100000; ++steps) {
     extent(1);
     switch (program[pc]) {
     case 0:
+      depth = 0;
+      finish();
       return;
     case 1: {
       extent(2);
       size_t target = pc + 2 + program[pc + 1];
       if (target >= program.size())
         throw std::runtime_error("Scenario conditional outside program");
-      branch_cursor = int64_t(target) + 4;
+      branch_cursor = int64_t(origin) + int64_t(target) + 4;
       ++depth;
       pc += 2;
       break;
@@ -133,13 +158,8 @@ void run_scenario_impl(const Program &program, ScenarioState &state) {
         pass = false;
       pc += 6;
       if (!pass) {
-        if (depth <= 0)
+        if (!resume())
           return;
-        branch_cursor -= 4;
-        --depth;
-        if (branch_cursor < 0)
-          throw std::runtime_error("Scenario branch before program");
-        jump(size_t(branch_cursor));
       }
       break;
     }
@@ -166,6 +186,59 @@ void run_scenario_impl(const Program &program, ScenarioState &state) {
       pc += 6;
       break;
     }
+    case 20:
+      extent(4);
+      start_scenario_event(state, program[pc + 2], program[pc + 3]);
+      pc += 4;
+      break;
+    case 188:
+      extent(2);
+      indexed(state.tasks, program[pc + 1]).active = false;
+      pc += 2;
+      break;
+    case 248:
+    case 249: {
+      if (!task)
+        throw std::runtime_error("Scenario sleep requires event task");
+      if (program[pc] == 248) {
+        extent(4);
+        if (task->loop >= 3)
+          throw std::runtime_error("Scenario loop nesting exceeded");
+        ++task->loop;
+        task->counts[size_t(task->loop)] = word(pc + 2);
+        ++pc;
+      } else
+        extent(3);
+      if (task->loop < 0 || task->loop >= 4)
+        throw std::runtime_error("Scenario sleeping without loop");
+      auto &count = task->counts[size_t(task->loop)];
+      count = count == std::numeric_limits<int32_t>::min()
+                  ? std::numeric_limits<int32_t>::max()
+                  : count - 1;
+      if (count == 0) {
+        pc += 3;
+        --task->loop;
+      }
+      if (!resume())
+        return;
+      break;
+    }
+    case 254:
+      if (!task)
+        throw std::runtime_error("Scenario yield requires event task");
+      ++pc;
+      if (!resume())
+        return;
+      break;
+    case 255:
+      extent(2);
+      if (!task)
+        throw std::runtime_error("Scenario end requires event task");
+      task->active = false;
+      pc += 2;
+      if (!resume())
+        return;
+      break;
     case 14: {
       extent(6);
       auto count = word(pc + 2);
@@ -280,9 +353,47 @@ void run_scenario_impl(const Program &program, ScenarioState &state) {
   throw std::runtime_error("Scenario instruction budget exhausted");
 }
 void run_scenario(const Bytes &program, ScenarioState &state) {
+  state.conditional_depth = 0;
+  state.branch_cursor = 0;
   run_scenario_impl(program, state);
 }
 void run_scenario(const ScenarioProgram &program, ScenarioState &state) {
+  state.conditional_depth = 0;
+  state.branch_cursor = 0;
   run_scenario_impl(program, state);
+}
+size_t start_scenario_event(ScenarioState &state, size_t level, size_t event) {
+  if (!state.scenario)
+    throw std::runtime_error("No bound room scenario");
+  const auto &program = state.scenario->event(event);
+  if (level >= 16) {
+    level = 0;
+    while (level != 15 && state.tasks[level].active)
+      ++level;
+  }
+  auto &task = state.tasks[level];
+  task = ScenarioTask{};
+  task.program = program;
+  task.active = true;
+  return level;
+}
+void tick_scenario_tasks(ScenarioState &state) {
+  if (!(state.flags[6][0] & 0x10))
+    return;
+  bool timed = false;
+  for (auto &task : state.tasks)
+    if (task.active) {
+      if (!task.program)
+        throw std::runtime_error("Active scenario task without program");
+      if (!timed) {
+        ++state.event_timer;
+        timed = true;
+      }
+      // Event_init can replace this slot while its old instruction stream runs.
+      // The original scheduler then stores the running pointer back into it.
+      auto program = *task.program;
+      run_scenario_impl(program, state, &task);
+      task.program = std::move(program);
+    }
 }
 } // namespace ashford

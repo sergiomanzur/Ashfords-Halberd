@@ -10,6 +10,7 @@ class ScenarioProgram {
 public:
   size_t size() const { return block_->size() - offset_; }
   uint8_t operator[](size_t index) const;
+  size_t origin() const { return offset_; }
 
 private:
   ScenarioProgram() = default;
@@ -39,6 +40,13 @@ struct ScenarioEntity {
   uint32_t flags = 0, state_flags = 0;
   int32_t angular_speed = 0;
 };
+struct ScenarioTask {
+  std::optional<ScenarioProgram> program;
+  bool active = false;
+  size_t pc = 0;
+  int loop = -1;
+  std::array<int32_t, 4> counts{};
+};
 struct ScenarioState {
   std::array<std::array<uint32_t, 32>, 17> flags{};
   uint8_t room_case = 0, interaction_index = 0, floor_index = 0;
@@ -49,9 +57,16 @@ struct ScenarioState {
   std::vector<ScenarioEntity> enemies, objects, items;
   std::vector<size_t> enemy_slots;
   std::vector<CollisionRecord> interactions;
+  std::shared_ptr<const RoomScenario> scenario;
+  std::array<ScenarioTask, 16> tasks;
+  uint32_t event_timer = 0;
+  int conditional_depth = 0;
+  int64_t branch_cursor = 0;
 };
-// Native synchronous control subset. Unsupported instructions fail explicitly;
-// task scheduling, entity controllers and audiovisual instructions are pending.
+// Native control and event scheduling subset. Unsupported instructions fail
+// explicitly; entity controllers and audiovisual instructions are pending.
 void run_scenario(const Bytes &program, ScenarioState &state);
 void run_scenario(const ScenarioProgram &program, ScenarioState &state);
+size_t start_scenario_event(ScenarioState &state, size_t level, size_t event);
+void tick_scenario_tasks(ScenarioState &state);
 } // namespace ashford
