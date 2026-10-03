@@ -88,12 +88,14 @@ bool zombie_capture_check(const ScenarioState &state, size_t work,
 void tick_zombie_lunge(ScenarioState &state, size_t work,
                        ScenarioEntity &player,
                        const std::vector<int32_t> &playing = {});
-// PlayerControl's held/lunge-grab mode2=0, complete PlyDG00 states0..8.
+// PlayerControl: mode2=0 PlyDG00 states0..8, mode2=1 PlyDG01 states0..5.
 // Clips share the enemy bank; escape restores the player's retained base bank.
-// Standing-grab mode2=1 requires its separate callback and rejects explicitly.
 void tick_zombie_player_grab(ScenarioState &state, size_t work,
                              ScenarioEntity &player,
                              const std::vector<int32_t> &playing = {});
+// Direct complete PlyDG01 standing-grab callback. Release samples base42.
+void tick_zombie_player_standing_grab(ScenarioState &state, size_t work,
+                                      ScenarioEntity &player);
 void push_zombie_grab_neighbors(ScenarioState &state, size_t work,
                                 const ScenarioEntity &player, int mode);
 // Complete en01.c::NG00 held/lunge grab damage and wall/cliff release.

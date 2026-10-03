@@ -840,3 +840,35 @@ Source review found no Critical/Important production defects. Deferred Minor
 coverage: polygon endpoint/corner priority/near-parallel threshold fixtures and
 sound/RNG rollback after late fatal-cache failure. Source paths reviewed as
 correct; these cases lack focused regression protection. Step1 remains active.
+
+Native PlayerControl now routes standing-grab mode2=1 to complete PlyDG01
+states0..5. It preserves delayed frame11 startup versus immediate state4,
+character/facing clip offsets, Claire's unwrapped frame546 yaw, frame19 voice
+requests, and source state2 without fallthrough. Frame0 release reads cached
+player root XZ, updates the separate Player EXP0 movement anchor, restores
+the base bank, clears original input/flags, and immediately samples motion42
+with source Hokan rate49152/count8. This call retains count8 and the prior
+model cache; ordinary subsequent model work remains the caller's responsibility.
+Scalars, queues, shared scratch and sampled pose commit after validation.
+
+Original Claire dependency probes cover clips401/402/404/405 and base42 across
+both facings, both startup paths and all10graveyard roots, retaining flag1000
+model placement while held and consuming the authored release loop boundary.
+These are isolated complete player callbacks; NG02 enemy timing/head-cutting,
+NG01, PlayerLink/world alignment and root scheduling still require porting.
+Decoded audio, inventory and versioned cross-room saves remain pending;
+New Game stays disabled and the full Step1 goal remains active.
+
+Standing-grab source review found an Important release-validation gap: a
+truncated cached-work layout or excessive selected range could reach cleanup.
+Both cases have observed failing regressions and pass with complete pose/cache
+size and selected-range validation. The full56-test build passes after this
+correction. Deferred Minor coverage: malformed motion42 attribute failure
+after successful pose sampling; existing staging appears correct but lacks
+a focused regression for that late failure.
+
+Final corrected verification:56/56headless checks,205retail rooms,
+4480standing player states/4440original Claire samples/40cached-root releases,
+and all previous joined bite/escape/fatal/corridor probes pass. Fresh packaged
+dummy-SDL smoke passes241ticks/240renders/53moves/10focus-blocked ticks,
+main-menu return and INI creation. Executable/ZIP refreshed; Step1 stays active.

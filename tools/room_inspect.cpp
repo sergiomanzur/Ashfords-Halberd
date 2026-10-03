@@ -150,6 +150,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t player_grab_ticks=0,player_grab_samples=0,player_grab_releases=0,player_grab_deaths=0;
         size_t zombie_grab_ticks=0,zombie_grab_bites=0,zombie_grab_escapes=0,zombie_grab_fatals=0;
         size_t zombie_grab_player_samples=0,zombie_grab_enemy_samples=0;
+        size_t standing_grab_ticks=0,standing_grab_samples=0,standing_grab_releases=0;
         size_t zombie_motion_sound_requests=0, zombie_motion_vibration_requests=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
@@ -942,7 +943,7 @@ int wmain(int argc,wchar_t** argv) {
                                         captured.motions=captured.base_motions;
                                         captured.joint_pose=actor_bind_pose(player.models.at(0));
                                         held.input_held=0xabcd;
-                                        auto sample_player=[&](ScenarioState& context,ScenarioEntity& actor,bool account=true) {
+                                        auto sample_player=[&](ScenarioState& context,ScenarioEntity& actor,int account=1) {
                                             const auto& clip=actor.motions->at(actor.motion_number).value();
                                             MotionApplicationOptions options;
                                             options.mode=actor.motion_mode;
@@ -960,6 +961,7 @@ int wmain(int argc,wchar_t** argv) {
                                                 actor.motion_mode,actor.frame,actor.frame_direction);
                                             if(actor.blend_count)--actor.blend_count;
                                             ActorPlacement placement;
+                                            if(account==2)placement.flags=actor.flags;
                                             placement.position=actor.position;placement.angles=actor.angles;
                                             actor.model_work=calculate_actor_model_work(player.models.at(0),
                                                 actor.joint_pose,*actor.model_work,placement);
@@ -967,9 +969,80 @@ int wmain(int argc,wchar_t** argv) {
                                                 for(double element:joint.matrix)
                                                     if(!std::isfinite(element))
                                                         throw std::runtime_error("Retail player grab cache is nonfinite");
-                                            if(account)++player_grab_samples;
-                                            else ++zombie_grab_player_samples;
+                                            if(account==1)++player_grab_samples;
+                                            else if(account==0)++zombie_grab_player_samples;
+                                            else ++standing_grab_samples;
                                         };
+                                        // Isolated complete PlyDG01 with original Claire clips.
+                                        // NG02 timing/head cutting and PlayerLink remain separate.
+                                        for(bool immediate:{false,true}) {
+                                            auto standing=grabbing;
+                                            auto& enemy=standing.enemies[root];
+                                            if(back)enemy.zombie_flags|=0x4000;
+                                            else enemy.zombie_flags&=~0x4000u;
+                                            enemy.frame=(immediate?19:11)*65536;
+                                            auto held_player=victim;
+                                            held_player.player_work.emplace();
+                                            held_player.base_motions=captured.base_motions;
+                                            held_player.motions=held_player.base_motions;
+                                            held_player.joint_pose=actor_bind_pose(player.models.at(0));
+                                            held_player.modes={4,0,1,uint8_t(immediate?4:0)};
+                                            const auto voice_count=standing.pending_player_voices.size();
+                                            tick_zombie_player_grab(standing,root,held_player);++standing_grab_ticks;
+                                            if(held_player.motion_number!=uint32_t(back?401:402) ||
+                                               held_player.modes[3]!=(immediate?5:1) ||
+                                               held_player.control0!=(!immediate && !back?1:0) ||
+                                               !(held_player.flags&0x1000) ||
+                                               enemy.grab_yaw_offset!=(back?-32768:0))
+                                                throw std::runtime_error("Retail standing player startup/facing mismatch");
+                                            const auto hold_frames=held_player.motions->at(held_player.motion_number)->frames;
+                                            for(uint32_t frame=0;frame<hold_frames;++frame) {
+                                                enemy.frame=(!immediate && frame==7?19:12)*65536;
+                                                tick_zombie_player_grab(standing,root,held_player);++standing_grab_ticks;
+                                                const auto expected_yaw=int32_t(uint16_t(uint32_t(enemy.angles[1])+
+                                                    (back?32768u:0u)))+(!immediate && !back?int32_t(frame*546u):0);
+                                                if(held_player.yaw_correction!=expected_yaw)
+                                                    throw std::runtime_error("Retail standing Claire frame546 yaw mismatch");
+                                                sample_player(standing,held_player,2);
+                                            }
+                                            if(standing.pending_player_voices.size()!=voice_count+1 ||
+                                               standing.pending_player_voices.back()!=1026 || held_player.frame!=0)
+                                                throw std::runtime_error("Retail standing hold/voice/sample boundary mismatch");
+                                            held_player.modes[3]=2;
+                                            tick_zombie_player_grab(standing,root,held_player);++standing_grab_ticks;
+                                            if(held_player.motion_number!=uint32_t(back?404:405) ||
+                                               held_player.modes[3]!=3 || held_player.frame!=0)
+                                                throw std::runtime_error("Retail standing release setup mismatch");
+                                            const auto release_frames=held_player.motions->at(held_player.motion_number)->frames;
+                                            sample_player(standing,held_player,2);
+                                            for(uint32_t frame=1;frame<release_frames;++frame) {
+                                                tick_zombie_player_grab(standing,root,held_player);++standing_grab_ticks;
+                                                sample_player(standing,held_player,2);
+                                            }
+                                            if(held_player.frame!=0)
+                                                throw std::runtime_error("Retail standing release did not reach original loop boundary");
+                                            const auto cached_x=float(held_player.model_work->joints[0].matrix[3]);
+                                            const auto cached_z=float(held_player.model_work->joints[0].matrix[11]);
+                                            standing.input_held=0xabcd;
+                                            tick_zombie_player_grab(standing,root,held_player);++standing_grab_ticks;
+                                            ++standing_grab_samples; // Callback's immediate base42 sample.
+                                            if(held_player.motions!=held_player.base_motions ||
+                                               held_player.motion_number!=42 || held_player.frame!=0 ||
+                                               held_player.motion_step || held_player.blend_count!=8 ||
+                                               held_player.blend_rate!=49152 ||
+                                               held_player.modes!=std::array<uint8_t,4>{1,0,0,0} ||
+                                               (held_player.flags&0x11004) || standing.input_held!=0xabc0 ||
+                                               (enemy.zombie_flags&0xa4080) ||
+                                               held_player.position.x!=cached_x || held_player.position.z!=cached_z ||
+                                               held_player.player_work->movement_anchor.x!=cached_x ||
+                                               held_player.player_work->movement_anchor.z!=cached_z)
+                                                throw std::runtime_error("Retail standing cached-root/base42 release mismatch");
+                                            for(const auto& pose:held_player.joint_pose)
+                                                if(pose.position && (!std::isfinite(pose.position->x) ||
+                                                    !std::isfinite(pose.position->y) || !std::isfinite(pose.position->z)))
+                                                    throw std::runtime_error("Retail standing immediate base42 pose is nonfinite");
+                                            ++standing_grab_releases;
+                                        }
                                         const auto voices=held.pending_player_voices.size();
                                         for(size_t tick=0;tick<8;++tick) {
                                             tick_zombie_player_grab(held,root,captured);++player_grab_ticks;
@@ -1649,6 +1722,12 @@ int wmain(int argc,wchar_t** argv) {
                          <<" authored bites, "<<zombie_grab_escapes<<" input escapes and "<<zombie_grab_fatals
                          <<" fatal releases; "<<zombie_grab_player_samples<<" original Claire and "
                          <<zombie_grab_enemy_samples<<" paired enemy motion/cache samples\n";
+                if(standing_grab_releases!=zombie_brain_roots*4 ||
+                   standing_grab_samples<standing_grab_releases*3 || standing_grab_ticks<=standing_grab_samples)
+                    throw std::runtime_error("Retail standing player callback coverage mismatch");
+                std::cout<<"Advanced "<<standing_grab_ticks<<" standing player grab states and "
+                         <<standing_grab_samples<<" original Claire motion samples; "
+                         <<standing_grab_releases<<" cached-root/base42 releases across both facings and startup paths\n";
                 if(zombie_model_ticks!=zombie_set_motion_ticks || zombie_cache_draws!=zombie_brain_roots*3 ||
                    zombie_cache_changed_draws!=zombie_brain_roots*2)
                     throw std::runtime_error("Retail CalcEnemy/cache drawing coverage mismatch");

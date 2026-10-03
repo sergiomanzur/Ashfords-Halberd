@@ -147,8 +147,12 @@ void tick_zombie_player_grab(ScenarioState &s, size_t work, ScenarioEntity &p,
   if (!(e.zombie_flags & 0x20000) || (p.modes[0] != 4 && p.modes[0] != 6))
     return;
   no_alias(s, p);
+  if (p.modes[2] == 1) {
+    tick_zombie_player_standing_grab(s, work, p);
+    return;
+  }
   if (p.modes[2] != 0)
-    throw std::runtime_error("Standing player grab callback required");
+    throw std::runtime_error("Invalid player grab callback mode");
   auto m = detail::snapshot(p);
   auto bank = p.motions;
   auto modes = p.modes;
