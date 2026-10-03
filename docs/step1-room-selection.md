@@ -50,6 +50,12 @@ gm_flg toggle. The corridor still enters normally;120original corridor ticks
 verify retained player work, cache/capsule updates and source normal-anchor
 timing separately from the front/movement anchors.
 
+The native sound asset prerequisite now decodes the selected sound keys10/20/21,
+including both graveyard ambient SQ sequences and their original instrument
+samples. See docs/native-audio-status.md. This does not remove the148 boundary:
+the original sequence synthesis, native mixer/fades and script playback bridge
+still need to be implemented and verified through actual room entry.
+
 The ordinary ID1 modes1..5 remain explicit unsupported states in the joined
 controller; hit damage checking and first linked-fire birth also remain
 unfinished. Existing movement/grab services must next be connected through

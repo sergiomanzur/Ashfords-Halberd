@@ -22,6 +22,9 @@ int main() {
   Bytes afs(32); afs[0]='A';afs[1]='F';afs[2]='S';put(afs,4,2);
   put(afs,8,24);put(afs,12,4);put(afs,16,28);put(afs,20,4);
   check(afs_index(afs,32).size()==2);
+  // Sound partitions use "AFS " on the USA disc. CRI adx_fs.c checks
+  // the first three signature bytes; the native parser recognizes both forms.
+  afs[3]=0x20;check(afs_index(afs,32).size()==2);afs[3]=0;
   rejects([&] { afs_index(afs,31); });
   put(afs,16,26); rejects([&] { afs_index(afs,32); });
   put(afs,16,28);put(afs,8,8); rejects([&] { afs_index(afs,32); });

@@ -12,6 +12,11 @@ been adapted or compiled for the PC.
 - Python: 3.12.4, isolated in `.venv` with a complete pip version lock.
 - CMake 4.4.3 and Ninja 1.13.2 are installed in that environment.
 - 7-Zip 26.02 is available for manual disc extraction.
+- Audio validation: optional headless vgmstream r2117 Windows x64 CLI under
+  ignored `local/tools`, installed with SHA256 verification by
+  `tools/setup-audio-oracle.ps1`. It is an independent PCM oracle, not a game
+  runtime dependency. Native `AshfordAudioInspect` exports original sound
+  samples/events without opening an audio device; see native-audio-status.md.
 
 The local ISO has 51 files and a 32-bit MIPS `SLUS_201.84` executable.
 Executable SHA-1 `f6c26ed664c2de72627fea5323b0d6a931601e13` matches the

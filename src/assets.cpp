@@ -18,7 +18,8 @@ float f32(const Bytes& b, size_t p) {
 }
 std::vector<AfsEntry> afs_index(const Bytes& header, uint64_t file_size) {
     range(header,0,8);
-    if (header[0]!='A' || header[1]!='F' || header[2]!='S' || header[3]!=0)
+    if (header[0]!='A' || header[1]!='F' || header[2]!='S' ||
+        (header[3]!=0 && header[3]!=0x20))
         throw std::runtime_error("Invalid AFS signature");
     auto count=u32(header,4);
     if (count==0 || count>10000) throw std::runtime_error("Invalid AFS entry count");
