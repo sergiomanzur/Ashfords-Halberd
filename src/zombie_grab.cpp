@@ -5,7 +5,7 @@
 #include "zombie.hpp"
 #include <cmath>
 #include <stdexcept>
-// Native adaptation of MIT recvx-decomp en01.c::NG00/NG01/ZulzulCheck/
+// Native adaptation of MIT recvx-decomp en01.c::NG00/NG01/NG02/ZulzulCheck/
 // GakeotiCheck/FlyingCap and zonzon.c::LeverCheck/AngleCheck.
 namespace ashford {
 namespace {
@@ -557,5 +557,161 @@ void tick_zombie_failed_grab(ScenarioState &s, size_t work,
   s.random_seed = seed;
   if (sound)
     s.pending_enemy_sounds.push_back(*sound);
+}
+void tick_zombie_standing_grab(ScenarioState &s, size_t work,
+                               ScenarioEntity &player,
+                               const std::vector<int32_t> &playing) {
+  const auto &original = root(s, work);
+  for (const auto &other : s.enemies)
+    if (&other == &player)
+      throw std::runtime_error("Player aliases standing-grab enemy pool");
+  Work e(original);
+  auto head = original.zombie_work->head_damage;
+  auto velocity = original.damage_velocity;
+  auto player_modes = player.modes;
+  auto player_health = player.health;
+  auto player_timer = player.control1;
+  std::optional<size_t> body;
+  std::optional<Work> linked;
+  auto link = [&] {
+    if (linked || !original.zombie_work->body)
+      return;
+    body = original.zombie_work->body;
+    if (*body == work)
+      throw std::runtime_error("Standing-grab body aliases root");
+    linked.emplace(root(s, *body));
+  };
+  auto change = [&](uint32_t main, uint32_t paired, int32_t frame,
+                    int32_t blend) {
+    detail::change(e.motion, main, frame, blend);
+    e.zflags &= ~0x3000000u;
+    link();
+    if (linked) {
+      detail::change(linked->motion, paired, frame, blend);
+      linked->zflags &= ~0x3000000u;
+    }
+  };
+  auto last_frame = [&] {
+    if (!original.motions ||
+        e.motion.motion_number >= original.motions->size() ||
+        !original.motions->at(e.motion.motion_number) ||
+        !original.motions->at(e.motion.motion_number)->frames)
+      throw std::runtime_error("Missing standing-grab authored frame count");
+    return int64_t(e.motion.frame / 65536) ==
+           int64_t(original.motions->at(e.motion.motion_number)->frames) - 1;
+  };
+  // The synchronous creators replace only pool/RNG. Restore them if a later
+  // consumed frame count or paired work fails, without copying any model data.
+  struct BirthRollback {
+    ScenarioState &state;
+    std::shared_ptr<const NativeEffectPool> pool;
+    uint32_t seed;
+    bool committed = false;
+    ~BirthRollback() {
+      if (!committed) {
+        state.effect_pool = std::move(pool);
+        state.random_seed = seed;
+      }
+    }
+  } rollback{s, s.effect_pool, s.random_seed};
+  auto seed = s.random_seed;
+  std::optional<EnemySoundRequest> sound;
+  auto cut = [&](int32_t code) {
+    head = -1; // Source CutHead ignores its type and only sets EXP0_I(0x78).
+    if (auto selected = choose_zombie_sound(original, seed, code, playing))
+      sound = EnemySoundRequest{work, vector(e.position), *selected};
+    e.health = -1;
+    e.motion.flags &= ~0x20u;
+  };
+  switch (e.modes[3]) {
+  case 0: {
+    const int32_t frame = e.motion.motion_number == 15 ? 0 : 10 * 65536;
+    change(9, 209, frame, 10);
+    e.motion.flags &= ~0x40u;
+    e.secondary |= 1;
+    player_modes = {4, 0, 1, 0};
+    e.zflags |= 0x20000;
+    const bool back = e.zflags & 0x4000;
+    const int32_t yaw =
+        back ? int32_t(uint16_t(uint32_t(e.yaw) + 32768u)) : e.yaw;
+    auto matrix = detail::ninja_identity();
+    detail::ninja_translate(matrix, player.position);
+    detail::ninja_rotate(matrix, {0, yaw, 0});
+    e.position = detail::ninja_point(matrix, {0, 0, back ? -8.f : 8.844476f});
+    ++e.modes[3];
+  }
+    [[fallthrough]];
+  case 1:
+    if (e.motion.frame / 65536 == 10) {
+      e.timer = 0x50;
+      ++e.modes[3];
+    }
+    break;
+  case 2:
+    if (e.motion.frame / 65536 == 27) {
+      player_health =
+          add(player_health,
+              -(zombie_personality_at(original.zombie_work->personality)
+                    .attack_bonus +
+                5));
+      if (player_health < 0)
+        player_health = 0;
+    }
+    if ((e.motion.flags & 0x2000000) || e.timer <= 0) {
+      const bool claire = s.player_id == 0;
+      change(claire ? 36 : 35, claire ? 236 : 235, 0, 5);
+      e.motion.flags |= 0x40000;
+      player_modes[3] = 2;
+      player_timer = 5;
+      ++e.modes[3];
+      e.timer = 0;
+    }
+    break;
+  case 3: {
+    const int32_t frame = e.motion.frame / 65536;
+    if (e.motion.motion_number == 36) {
+      if (frame == 24)
+        tick_zombie_neck_blood_effect(s, work, 0);
+      else if (frame == 25)
+        cut(4877);
+    } else if (e.motion.motion_number == 35) {
+      if (frame == 33) {
+        velocity = {};
+        tick_zombie_head_fragment_effect(s, work, 1);
+        seed = s.random_seed;
+      } else if (frame == 34)
+        cut(4869);
+      else if (frame == 35)
+        tick_zombie_neck_blood_effect(s, work, 0);
+    }
+    if (last_frame()) {
+      e.motion.motion_step = 0;
+      link();
+      if (linked) {
+        linked->motion.motion_step = 0;
+        linked->modes = {4, 2, 0, 0};
+      }
+      e.zflags &= ~0x800fu;
+      e.modes = {4, 2, 0, 0};
+    }
+    break;
+  }
+  default:
+    break;
+  }
+  if (sound)
+    s.pending_enemy_sounds.reserve(s.pending_enemy_sounds.size() + 1);
+  e.commit(s.enemies[work]);
+  if (linked)
+    linked->commit(s.enemies[*body]);
+  s.enemies[work].zombie_work->head_damage = head;
+  s.enemies[work].damage_velocity = velocity;
+  player.modes = player_modes;
+  player.health = player_health;
+  player.control1 = player_timer;
+  s.random_seed = seed;
+  if (sound)
+    s.pending_enemy_sounds.push_back(*sound);
+  rollback.committed = true;
 }
 } // namespace ashford

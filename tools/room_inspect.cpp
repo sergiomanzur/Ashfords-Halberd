@@ -152,6 +152,8 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_grab_ticks=0,zombie_grab_bites=0,zombie_grab_escapes=0,zombie_grab_fatals=0;
         size_t zombie_grab_player_samples=0,zombie_grab_enemy_samples=0;
         size_t standing_grab_ticks=0,standing_grab_samples=0,standing_grab_releases=0;
+        size_t ng02_ticks=0,ng02_player_samples=0,ng02_enemy_samples=0;
+        size_t ng02_deaths=0,ng02_releases=0,ng02_blood_births=0;
         size_t failed_grab_ticks=0,failed_grab_samples=0,failed_grab_recoveries=0,failed_grab_falls=0;
         size_t zombie_motion_sound_requests=0, zombie_motion_vibration_requests=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
@@ -1007,7 +1009,7 @@ int wmain(int argc,wchar_t** argv) {
                                                 actor.motion_mode,actor.frame,actor.frame_direction);
                                             if(actor.blend_count)--actor.blend_count;
                                             ActorPlacement placement;
-                                            if(account==2)placement.flags=actor.flags;
+                                            if(account==2 || account==3)placement.flags=actor.flags;
                                             placement.position=actor.position;placement.angles=actor.angles;
                                             actor.model_work=calculate_actor_model_work(player.models.at(0),
                                                 actor.joint_pose,*actor.model_work,placement);
@@ -1017,10 +1019,91 @@ int wmain(int argc,wchar_t** argv) {
                                                         throw std::runtime_error("Retail player grab cache is nonfinite");
                                             if(account==1)++player_grab_samples;
                                             else if(account==0)++zombie_grab_player_samples;
-                                            else ++standing_grab_samples;
+                                            else if(account==2)++standing_grab_samples;
+                                            else ++ng02_player_samples;
                                         };
+                                        // Joined NG02/PlyDG01 source dependencies. PlayerLink
+                                        // world alignment and complete root dispatch are separate.
+                                        for(bool prior15:{false,true}) {
+                                            auto combat=grabbing;
+                                            auto& enemy=combat.enemies[root];
+                                            if(back)enemy.zombie_flags|=0x4000;
+                                            else enemy.zombie_flags&=~0x4000u;
+                                            enemy.modes={2,0,2,0};
+                                            combat.enemies[body].modes=enemy.modes;
+                                            enemy.motion_number=prior15?15:85;
+                                            auto grabbed=victim;
+                                            grabbed.player_work.emplace();
+                                            grabbed.base_motions=captured.base_motions;
+                                            grabbed.motions=grabbed.base_motions;
+                                            grabbed.joint_pose=actor_bind_pose(player.models.at(0));
+                                            grabbed.health=100;
+                                            bool saw_damage=false,dead=false,released=false,finished=false;
+                                            const auto damage=zombie_personality_at(enemy.zombie_work->personality).attack_bonus+5;
+                                            for(size_t tick=0;tick<320;++tick) {
+                                                if(!dead) {
+                                                    const auto health=grabbed.health;
+                                                    tick_zombie_standing_grab(combat,root,grabbed);++ng02_ticks;
+                                                    if(grabbed.health!=health) {
+                                                        if(saw_damage || grabbed.health!=health-damage)
+                                                            throw std::runtime_error("Retail joined NG02 authored damage mismatch");
+                                                        saw_damage=true;
+                                                    }
+                                                    if(enemy.modes[3]==2 && enemy.control0!=80)
+                                                        throw std::runtime_error("Retail NG02 incorrectly decremented source timer");
+                                                    if(enemy.modes==std::array<uint8_t,4>{4,2,0,0}) {
+                                                        if(enemy.health!=-1 || enemy.zombie_work->head_damage!=-1 ||
+                                                           enemy.motion_step || combat.enemies[body].motion_step ||
+                                                           combat.enemies[body].modes!=enemy.modes ||
+                                                           (enemy.flags&0x20) || (enemy.zombie_flags&0x800f))
+                                                            throw std::runtime_error("Retail NG02 paired authored death mismatch");
+                                                        dead=true;++ng02_deaths;
+                                                    }
+                                                }
+                                                if(!released) {
+                                                    tick_zombie_player_grab(combat,root,grabbed);
+                                                    if(grabbed.modes==std::array<uint8_t,4>{1,0,0,0}) {
+                                                        if(grabbed.motions!=grabbed.base_motions || grabbed.motion_number!=42 ||
+                                                           grabbed.frame || grabbed.motion_step || grabbed.blend_count!=8 ||
+                                                           grabbed.blend_rate!=49152 || (grabbed.flags&0x11004) ||
+                                                           (enemy.zombie_flags&0xa4080) ||
+                                                           grabbed.position.x!=grabbed.player_work->movement_anchor.x ||
+                                                           grabbed.position.z!=grabbed.player_work->movement_anchor.z)
+                                                            throw std::runtime_error("Retail joined NG02 player base42 release mismatch");
+                                                        released=true;++ng02_releases;
+                                                        ++ng02_player_samples; // Immediate release sample.
+                                                    }
+                                                }
+                                                if(dead && released) {finished=true;break;}
+                                                if(!dead) {
+                                                    tick_zombie_motion(combat,root,boundary_effects);
+                                                    calculate_zombie_model(combat,root);
+                                                    tick_zombie_motion(combat,body,boundary_effects);
+                                                    calculate_zombie_model(combat,body);ng02_enemy_samples+=2;
+                                                }
+                                                if(!released)sample_player(combat,grabbed,3);
+                                            }
+                                            size_t blood_count=0,cut_sounds=0;
+                                            if(combat.effect_pool)for(const auto& effect:combat.effect_pool->works) {
+                                                if((effect.flags&1) && effect.id==370) {
+                                                    if(effect.linked_parent!=root || effect.linked_joint!=10 ||
+                                                       effect.texture_owner!=root || effect.state_flags!=0x20)
+                                                        throw std::runtime_error("Retail joined NG02 neck blood linkage mismatch");
+                                                    ++blood_count;
+                                                }
+                                                if((effect.flags&1) && effect.id==362)
+                                                    throw std::runtime_error("Retail Claire NG02 emitted non-Claire fragments");
+                                            }
+                                            for(const auto& sound:combat.pending_enemy_sounds)
+                                                cut_sounds+=sound.work==root && sound.code==4877;
+                                            if(!finished || !saw_damage || blood_count!=8 || cut_sounds!=1 ||
+                                               grabbed.health!=100-damage || enemy.motion_number!=36 ||
+                                               combat.enemies[body].motion_number!=236)
+                                                throw std::runtime_error("Retail joined NG02/PlyDG01 failed complete source sequence");
+                                            ng02_blood_births+=blood_count;
+                                        }
                                         // Isolated complete PlyDG01 with original Claire clips.
-                                        // NG02 timing/head cutting and PlayerLink remain separate.
+                                        // Immediate startup remains a distinct source player path.
                                         for(bool immediate:{false,true}) {
                                             auto standing=grabbing;
                                             auto& enemy=standing.enemies[root];
@@ -1831,6 +1914,14 @@ int wmain(int argc,wchar_t** argv) {
                 std::cout<<"Advanced "<<standing_grab_ticks<<" standing player grab states and "
                          <<standing_grab_samples<<" original Claire motion samples; "
                          <<standing_grab_releases<<" cached-root/base42 releases across both facings and startup paths\n";
+                if(ng02_deaths!=zombie_brain_roots*4 || ng02_releases!=ng02_deaths ||
+                   ng02_blood_births!=ng02_deaths*8 || ng02_ticks<=ng02_deaths*25 ||
+                   ng02_player_samples<ng02_deaths*11 || ng02_enemy_samples<ng02_deaths*50)
+                    throw std::runtime_error("Retail joined standing enemy/player grab coverage mismatch");
+                std::cout<<"Advanced "<<ng02_ticks<<" joined NG02 enemy states with "<<ng02_player_samples
+                         <<" original Claire and "<<ng02_enemy_samples<<" paired enemy motion/cache samples; "
+                         <<ng02_deaths<<" head-cut deaths, "<<ng02_releases<<" player releases and "
+                         <<ng02_blood_births<<" neck blood births\n";
                 if(failed_grab_recoveries+failed_grab_falls!=zombie_brain_roots ||
                    failed_grab_samples<zombie_brain_roots*2 || failed_grab_ticks<=zombie_brain_roots)
                     throw std::runtime_error("Retail NG01 failed-grab coverage mismatch");

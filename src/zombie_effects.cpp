@@ -5,7 +5,8 @@
 #include <limits>
 #include <stdexcept>
 // Native creation from en01.c, zonzon.c, effect.c, effsub3.c and pwksub.c.
-// Playback callbacks run later in the source; birth does not consume RNG.
+// Playback callbacks run later. Kami/Water births consume no RNG; head fragment
+// births consume their original four scale rolls before allocation.
 namespace ashford {
 namespace {
 ScenarioEntity &enemy_work(ScenarioState &s, size_t work) {

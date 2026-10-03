@@ -70,6 +70,7 @@ struct ZombieExtendedWork {
   bool path_blocked = false;                    // Nonzero EXP0 pointer(0x70).
   std::optional<size_t> stair_target;           // EXP0 pointer(0x74).
   int32_t neck_yaw = 0;                         // EXP0_I(0x50).
+  int32_t head_damage = 0;                      // EXP0_I(0x78); CutHead=-1.
   // Separate source limb accumulators; CalcEnemy reads only88/8c.
   int32_t damage_80 = 0, damage_84 = 0, damage_88 = 0, damage_8c = 0;
   float player_distance =

@@ -929,3 +929,34 @@ Fresh packaged dummy-SDL smoke passes241ticks/240renders/53moves/
 Source review found no material defects. Deferred Minor: the effect file's
 older header says birth consumes no RNG; fragment creation correctly consumes
 four rolls, explicitly preserved by its local source comment and these tests.
+
+Native en01.c::NG02 now implements complete standing-grab states0..3: paired
+9/209 startup from prior15frame0 or otherframe10; frame10ct0=80; frame27
+personality bonus+5damage clamped to0; source motion-end/timeout release into
+36/236 for Claire or35/235 for every nonzero player ID. It hands player mode3=2
+and control1=5 to the existing PlyDG01 callback without state3fallthrough.
+Claire blood24/cut+sound4877at25 and non-Claire fragments33/cut+4869at34/
+blood35 preserve source timing. CutHead sets only extended head word78=-1.
+Exact authored terminal frame stops both works in modes{4,2,0,0}, clearing
+root lowF/8000 only. Scalar/head/player changes commit after validation;
+late consumed-bank/body failure restores effect pool and RNG as well.
+
+Six focused checks pass. Original Claire probes join complete NG02/PlyDG01
+through native source animation end flags, paired SetMtn/CalcEnemy, source
+cached-root player release and immediate base42 sample:4680enemy updates,
+4680Claire samples,9280paired enemy samples,40head-cut deaths/40player
+releases/320neck-blood births across10roots, both facings and both startups.
+Non-Claire motion35events remain literal synthetic coverage. The prior stale
+effect header RNG statement is narrowed here to distinguish Kami/Water birth
+from four fragment rolls. Particle playback, PlayerLink/world alignment,
+complete root dispatch/weapon combat, decoded audio, inventory and versioned
+saves remain required; Step1 stays active and New Game remains disabled.
+
+Final NG02 verification:59/59headless checks,205rooms,4680enemy updates/
+4680Claire samples/9280paired enemy samples,40head-cut deaths/40player
+releases/320blood births. Prior grab/corridor probes remain passing.
+Fresh packaged dummy-SDL smoke passes241ticks/240renders/53moves/
+10focus-blocked ticks/main-menu return/INI creation; EXE/ZIP refreshed.
+Source review found no material defects. Deferred Minor coverage: terminal
+body validation failure after fragments/RNG; late-bank rollback is tested and
+the same rollback guard covers the inspected body path. Step1 remains active.

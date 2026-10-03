@@ -111,6 +111,10 @@ void tick_zombie_grab(ScenarioState &state, size_t work, ScenarioEntity &player,
 // stop.
 void tick_zombie_failed_grab(ScenarioState &state, size_t work,
                              const std::vector<int32_t> &playing = {});
+// Complete en01.c::NG02 standing grab, damage, authored head effects and death.
+void tick_zombie_standing_grab(ScenarioState &state, size_t work,
+                               ScenarioEntity &player,
+                               const std::vector<int32_t> &playing = {});
 void tick_zombie_neck(ScenarioState &state, size_t work,
                       const ActorModelWork &player);
 } // namespace ashford
