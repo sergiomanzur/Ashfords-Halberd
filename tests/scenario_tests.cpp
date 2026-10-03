@@ -670,6 +670,78 @@ int main() {
     bad([&] { bind_room_props(invalid_props, bound_room); });
     ck(bound_room.objects[0].id == 77 && bound_room.items[0].id == 10 &&
        bound_room.flags[1][0] == 0x12345678 && bound_room.inventory[0] == 99);
+    ScenarioState props;
+    props.flags[6][0] = 4;
+    props.items.resize(1);
+    auto &pickup = props.items[0];
+    pickup.flags = 1;
+    pickup.angular_speed = 100;
+    pickup.position = {1, 2, 3};
+    pickup.angles = {4, 5, 6};
+    pickup.model = std::make_shared<const ActorModel>(empty_model);
+    tick_scenario_props(props);
+    ck(pickup.control1 == 1 && pickup.control2 == 0 && pickup.control3 == 75 &&
+       props.random_seed == 1103527590u && pickup.rendered_model &&
+       pickup.previous_position.x == 1 && pickup.previous_angles[1] == 5);
+    for (int i = 0; i < 75; ++i)
+      tick_scenario_props(props);
+    ck(pickup.control1 == 1 && pickup.control2 == 75 &&
+       !(pickup.model_flags & 0x80));
+    tick_scenario_props(props);
+    ck(pickup.control1 == 2 && pickup.control2 == 0 &&
+       (pickup.model_flags & 0x80) && pickup.highlight_yaw == 0);
+    for (int i = 0; i < 8; ++i)
+      tick_scenario_props(props);
+    ck(pickup.control1 == 3 && pickup.control2 == 0 &&
+       !(pickup.model_flags & 0x80) && pickup.highlight_yaw == 65536 &&
+       pickup.angles[1] == 5);
+    tick_scenario_props(props);
+    ck(props.random_seed == 2524885223u && pickup.control1 == 1 &&
+       pickup.control3 == 65);
+    pickup.state_flags = 0x1000000;
+    props.player_sleep_ticks = 1;
+    tick_scenario_props(props);
+    ck(pickup.control2 == 0);
+    pickup.state_flags = 0;
+    props.flags[10][0] = 0x40000000;
+    tick_scenario_props(props);
+    ck(pickup.control2 == 0);
+    props.flags[10][0] = 0;
+    props.flags[6][0] = 0;
+    tick_scenario_props(props);
+    ck(pickup.control2 == 0);
+    props.flags[6][0] = 4;
+    props.objects.resize(6);
+    for (size_t i = 4; i < 6; ++i) {
+      props.objects[i].flags = 1;
+      props.objects[i].model = pickup.model;
+    }
+    auto &rotating = props.objects[4];
+    rotating.type = 2;
+    rotating.angular_speed = -1;
+    rotating.angles[1] = -100;
+    auto &oscillating = props.objects[5];
+    oscillating.type = 3;
+    oscillating.control1 = 16384;
+    tick_scenario_props(props);
+    ck(rotating.angles[1] == 65345 && rotating.previous_angles[1] == -100 &&
+       oscillating.angles[2] == 2048 && oscillating.control1 == 17408);
+    rotating.state_flags = 0x1000000;
+    props.player_sleep_ticks = 0;
+    tick_scenario_props(props);
+    ck(rotating.angles[1] == 65345);
+    props.player_sleep_ticks = 1;
+    tick_scenario_props(props);
+    ck(rotating.angles[1] == 130790);
+    rotating.flags |= 0x200000;
+    bad([&] { tick_scenario_props(props); });
+    rotating.flags = 0x1001;
+    bad([&] { tick_scenario_props(props); });
+    props.objects.clear();
+    pickup.flags = 0x81;
+    bad([&] { tick_scenario_props(props); });
+    pickup.flags = 0x1001;
+    bad([&] { tick_scenario_props(props); });
     transformed.enemies[1].model =
         std::make_shared<const ActorModel>(empty_model);
     controller_case(Bytes{101, 1, 0, 99, 105, 47, 255, 0}, false);

@@ -58,6 +58,7 @@ struct ScenarioEntity {
   std::array<uint8_t, 4> modes{};
   uint32_t motion_number = 0, motion_step = 65536;
   int32_t frame = 0, blend_count = 0, control1 = 0, control2 = 0;
+  int32_t control3 = 0, highlight_yaw = 0;
   uint32_t frame_direction = 0;
   uint16_t motion_attribute = 0;
   int motion_boundary = 0;
@@ -95,6 +96,7 @@ struct ScenarioState {
   std::array<ScenarioTask, 16> tasks;
   size_t current_task = 0;
   uint32_t event_timer = 0;
+  uint32_t random_seed = 1;
   int conditional_depth = 0;
   int64_t branch_cursor = 0;
   std::array<uint32_t, 384> inventory{};
@@ -110,6 +112,9 @@ void run_scenario(const ScenarioProgram &program, ScenarioState &state);
 size_t start_scenario_event(ScenarioState &state, size_t level, size_t event);
 void tick_scenario_tasks(ScenarioState &state);
 void tick_scenario_actors(ScenarioState &state);
+// Native simple object controllers and pickup highlight timing. Linked,
+// animated-special, collision/fade objects require their separate controllers.
+void tick_scenario_props(ScenarioState &state);
 // bhInitEvent's native state/script ordering. Sound commands 3/4 are pending
 // the audio backend. All room resources must already be bound.
 void initialize_scenario(ScenarioState &state);

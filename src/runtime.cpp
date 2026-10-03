@@ -1,6 +1,26 @@
 #include "runtime.hpp"
 #include <stdexcept>
 namespace ashford {
+void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
+                       const PlayerTranslationTables &translations,
+                       uint16_t pad) {
+  auto &scenario = runtime.scenario;
+  tick_scenario_actors(scenario);
+  if (scenario.flags[6][0] & 1) {
+    if (scenario.equipped_weapon != 0)
+      throw std::runtime_error("Armed runtime requires its player controller");
+    runtime.world = advance_player_world(runtime.world, player, translations,
+                                         runtime.collision, runtime.cuts, pad);
+    runtime.player_pose = sample_player_locomotion_pose(
+        player, runtime.world.player, runtime.player_pose);
+    runtime.player_scene =
+        pose_actor(player.models.at(0), runtime.player_pose,
+                   runtime.world.player.position, runtime.world.player.yaw);
+  }
+  scenario.player_frame = runtime.world.player.frame;
+  tick_scenario_props(scenario);
+  control_scenario(scenario);
+}
 RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
                               size_t entry, ScenarioState persistent,
                               const PlayerPackage &player) {

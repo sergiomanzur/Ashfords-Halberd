@@ -71,7 +71,9 @@ attachment slots 0–3 while replacing room objects and pickups. It follows
 `bhSetObject`/`bhSetItem`: low-byte type, high-byte parameter, authored floor,
 signed three-axis angles, drawing type, hide bytes and flag-derived model flags.
 Both replacement vectors are prepared before mutation, so malformed assets
-leave the old room bindings intact. Native prop controllers remain pending.
+leave the old room bindings intact. Native simple object and pickup controllers
+now rebuild posed models in the shared runtime; special controllers and the
+pickup highlight drawing overlay remain pending.
 The headless retail scenario probe decoded 1,914 object/pickup models across
 all 205 rooms, including nine skinned objects. The existing corridor lifecycle,
 150-frame actor animation and scripted door probes also passed.

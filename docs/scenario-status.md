@@ -117,7 +117,7 @@ Synthetic tests cover compaction, signed yaw, ignored authored X/Z rotation,
 ID-dependent model flags and failure rollback. The retail probe binds enemies
 in all 205 rooms and uses the resulting corridor state for startup and its
 complete event. Object/item asset loading and bindings now exist; their
-controllers and application room lifecycle remain pending.
+remaining special controllers and application integration remain pending.
 Player/effect bindings and sound commands remain unsupported.
 
 Native `initialize_scenario` follows `bhInitEvent`'s state/script ordering:
@@ -133,8 +133,8 @@ cover initialization command binding, a yielding task-0 event, counter
 retention, context 15 after scheduling and room-control cursor isolation.
 The headless retail probe runs all four corridor initialization states and a
 complete initialization/control/actor/event sequence through the 150-frame
-animation. Sound commands 3/4, object/item controllers, system room-change
-flags and application integration still remain to implement.
+animation. Sound commands 3/4, remaining special object controllers and
+application integration still remain to implement.
 
 Native `bind_room_props` carries decoded room objects and pickups into the
 script-addressable vectors. Object slots 0–3 retain player attachments; room
@@ -157,9 +157,32 @@ restoration and the introduction require separate controller paths.
 `AshfordRoomInspect RDX_LNK.AFS report.tsv --runtime-check SYSTEM.AFS` loads
 Claire's original package and uses this shared runtime loader for all four
 corridor initialization cases. The existing scenario diagnostic remains
-available without a player archive. The application frame loop, prop
-controllers, player/event synchronization and playable menu entry are still
-pending; this loader alone does not make the game playable.
+available without a player archive. The application frame loop and playable
+menu entry are still pending; this loader alone does not make the game playable.
+
+The shared `tick_room_runtime` now updates represented actor controllers,
+healthy unarmed player movement/collision/posing, simple props and pickups,
+then room control/events. Player frame checks use the updated motion counter;
+the player and prop subsystem gates are respected. The retail runtime probe
+runs 240 ticks for each of the four corridor initialization cases, including
+60 ticks of forward input, and checks player/scenario frame synchronization
+and pickup model rebuilding. This is a shared simulation loop; it is not yet
+wired to the application input/render loop.
+The retail probe passed 960 joined ticks, with player displacement on all
+240 ticks of forward input across the four entry cases.
+
+`tick_scenario_props` implements original dummy object dispatch, type-2 yaw
+rotation, type-3 oscillation and pickup highlight timing. Pickup highlights
+cycle through the original random delay and eight 8192-angle steps, rather
+than rotating the item's base model. The 32-bit LCG and 31-bit return were
+verified against the USA ELF's `rand` routine at 0x125320. Its seed lives in
+scenario state and survives room entry. Tests cover the complete highlight
+cycle, seed values, object rotation, previous transforms, subsystem gates,
+hidden-object sleep behavior and unsupported matrices. Linked/retained
+matrices, weapon objects, object collision, alpha fading and special object
+controllers fail explicitly. The highlight drawing overlay, effects, light,
+sound, interactions, armed/damaged player states and application integration
+remain pending.
 
 The retail RM_0010 control script sets RoomCaseNo before SetDoorCall into
 stage 0, room 2, position 0. Persistent flags choose the first-visit or return

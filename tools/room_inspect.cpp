@@ -55,6 +55,8 @@ int wmain(int argc,wchar_t** argv) {
         size_t scenario_entries=0;
         size_t corridor_initializations=0;
         size_t runtime_entries=0;
+        size_t runtime_ticks=0;
+        size_t runtime_movement_ticks=0;
         size_t corridor_controls=0;
         size_t corridor_door_requests=0;
         size_t room_motions=0, room_motion_poses=0;
@@ -176,6 +178,22 @@ int wmain(int argc,wchar_t** argv) {
                                runtime.player_scene.meshes.empty() || runtime.scene.meshes.empty())
                                 throw std::runtime_error("Retail corridor runtime entry mismatch");
                             ++runtime_entries;
+                            auto running=runtime;
+                            auto translations=decode_player_translation_tables(player.auxiliary);
+                            for(size_t tick=0;tick<240;++tick) {
+                                auto previous=running.world.player.position;
+                                try {tick_room_runtime(running,player,translations,tick<180?0:1);}
+                                catch(const std::exception& error) {
+                                    throw std::runtime_error("Runtime tick "+std::to_string(tick)+": "+error.what());
+                                }
+                                if(running.scenario.player_frame!=running.world.player.frame)
+                                    throw std::runtime_error("Runtime player/scenario frame diverged");
+                                if(previous.x!=running.world.player.position.x || previous.z!=running.world.player.position.z)
+                                    ++runtime_movement_ticks;
+                                ++runtime_ticks;
+                            }
+                            if(!collected && !running.scenario.items[0].rendered_model)
+                                throw std::runtime_error("Runtime pickup model was not rebuilt");
                             state=std::move(runtime.scenario);
                         } else initialize_scenario(state);
                         if(state.interactions.size()<4 || state.items.size()<2 ||
@@ -287,6 +305,8 @@ int wmain(int argc,wchar_t** argv) {
         if(scenario_check) {
             std::cout<<"Decoded "<<prop_models<<" room object/item models, including "<<prop_skins<<" skinned objects\n";
             if(runtime_check)std::cout<<"Loaded "<<runtime_entries<<" native corridor runtime entries with Claire pose and initialized scenario state\n";
+            if(runtime_check)std::cout<<"Advanced "<<runtime_ticks<<" joined player/actor/prop/scenario runtime ticks\n";
+            if(runtime_check)std::cout<<"Applied player displacement on "<<runtime_movement_ticks<<" runtime ticks\n";
             std::cout<<"Decoded "<<enemy_motions<<" enemy motions and sampled "<<enemy_motion_poses<<" poses\n";
             std::cout<<"Decoded "<<room_motions<<" room motions and sampled "<<room_motion_poses<<" poses\n";
             std::cout<<"Posed "<<corridor_actor_poses<<" retail corridor actor frames\n";

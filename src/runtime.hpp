@@ -16,4 +16,9 @@ struct RoomRuntime {
 RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
                               size_t entry, ScenarioState persistent,
                               const PlayerPackage &player);
+// Represented baseline frame sequence. Unsupported entity controllers fail
+// explicitly; effect/light/audio and interaction dispatch remain pending.
+void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
+                       const PlayerTranslationTables &translations,
+                       uint16_t pad);
 } // namespace ashford

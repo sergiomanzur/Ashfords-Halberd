@@ -162,6 +162,21 @@ int main() {
     bad([&] {
       load_room_runtime(runtime_data, 0, 1, 0, saved_entry, entry_player);
     });
+    Bytes control_frame{56, 0, 0, 1, 1, 0, 55, 9, 0};
+    std::copy(control_frame.begin(), control_frame.end(),
+              runtime_data.begin() + 2117);
+    auto running =
+        load_room_runtime(runtime_data, 0, 1, 0, persistent, entry_player);
+    PlayerTranslationTables entry_tables(11, std::vector<float>(3, 0));
+    tick_room_runtime(running, entry_player, entry_tables, 0);
+    ck(running.scenario.room_case == 9 && running.world.player.frame == 65536 &&
+       running.world.player.sampled_frame == 0 &&
+       !running.world.player.entering &&
+       running.scenario.player_frame == running.world.player.frame);
+    auto frozen = running.world.player.frame;
+    running.scenario.flags[6][0] &= ~1u;
+    tick_room_runtime(running, entry_player, entry_tables, 0);
+    ck(running.world.player.frame == frozen);
     RoomCut cut;
     cut.flags = 1;
     CutArea area;
