@@ -3,6 +3,11 @@
 #include <limits>
 #include <stdexcept>
 namespace ashford {
+uint32_t scenario_random(ScenarioState &state) {
+  // USA ELF rand at 0x125320: wrapped LCG state, 31-bit return.
+  state.random_seed = state.random_seed * 1103515245u + 12345u;
+  return state.random_seed & 0x7fffffffu;
+}
 void bind_room_props(const Bytes &data, ScenarioState &state) {
   auto records = decode_room_records(data);
   auto models = decode_room_actor_models(data);

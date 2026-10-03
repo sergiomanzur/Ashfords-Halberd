@@ -270,3 +270,24 @@ AI, attacks/damage, collision and drawing still require their controllers.
 The actual transition diagnostic continues to reject actor ID 1 at mode 0.
 The selected initial graveyard contains five type-0 zombies (models 9 and 32)
 and actor ID 91; both zombie and subplayer controller paths remain necessary.
+
+`zombie.cpp` now ports the original personality/model lookup, normal/easy health
+tables, signed integer health adjustment, and root walking-pair selection.
+The lookup preserves the source's 30-row iteration limit, so model 43 retains
+the original fallback rather than selecting the table's final row. Walking
+selection skips linked/inactive/non-zombie work, cycles from the preceding
+initialized root, and consumes random state only for the first root. The USA
+ELF RNG is shared with pickup timing, preserving wrapped 32-bit state and its
+31-bit return value. Missing preceding extended work fails explicitly.
+
+All 16 `bhEne01_InitType` table entries are adapted: root versus linked-body
+motion selection, half-health and parent-health restoration, extended flags,
+Type10 collision flag clearing, and Type15 zero motion speed. Tests exercise
+every entry for both roots and bodies, retained frame state and RNG cadence.
+The retail diagnostic verifies ten graveyard zombie parameter/type selections
+and their actual startup/walking motion resources across both variants.
+These helpers cover the type subroutines, not complete `bhEne01_Init` or an
+enemy encounter. Surrounding model/linked-part setup, shadows, pose/collision,
+movement, attacks/damage and full controller dispatch remain required before
+the application can enter the graveyard. Actual room travel still rejects the
+unimplemented zombie controller explicitly.

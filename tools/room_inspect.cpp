@@ -7,6 +7,7 @@
 #include "motion.hpp"
 #include "actor.hpp"
 #include "runtime.hpp"
+#include "zombie.hpp"
 #include "render.hpp"
 #include <algorithm>
 #include <filesystem>
@@ -70,6 +71,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t corridor_lifecycles=0;
         size_t prop_models=0, prop_skins=0;
         size_t zombie_linked_work=0;
+        size_t zombie_parameters=0;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
@@ -91,6 +93,28 @@ int wmain(int argc,wchar_t** argv) {
                         for(size_t root=0;root<bound_enemies.enemies.size();++root)
                             if((bound_enemies.enemies[root].flags&1) && bound_enemies.enemies[root].id==1) {
                                 ++parents;
+                                auto& zombie=linked.enemies[root];
+                                zombie.health=roll_zombie_health(linked,zombie.model_version);
+                                zombie.zombie_walk_choice=0; // calloc'd extended walking work.
+                                initialize_zombie_type(linked,root);
+                                if(!zombie.zombie_walk_choice || zombie.modes[0]!=1)
+                                    throw std::runtime_error("Retail zombie type initialization mismatch");
+                                const auto choice=*zombie.zombie_walk_choice;
+                                if(zombie.health<=0 || !zombie.motions)
+                                    throw std::runtime_error("Retail zombie startup parameters mismatch");
+                                for(bool body:{false,true}) {
+                                    const auto motion=zombie_walk_motion(choice,body);
+                                    if(motion>=zombie.motions->size() || !(*zombie.motions)[motion] ||
+                                       !(*zombie.motions)[motion]->frames)
+                                        throw std::runtime_error("Retail zombie walking motion missing");
+                                    sample_motion(*(*zombie.motions)[motion],0,true);
+                                }
+                                for(uint32_t motion:{zombie.motion_number,202u}) {
+                                    if(motion>=zombie.motions->size() || !(*zombie.motions)[motion])
+                                        throw std::runtime_error("Retail zombie startup motion missing");
+                                    sample_motion(*(*zombie.motions)[motion],0,true);
+                                }
+                                ++zombie_parameters;
                                 for(const auto part:std::array<std::pair<int,uint16_t>,6>{
                                     {{1,1},{0,31},{0,32},{0,32},{0,33},{0,33}}}) {
                                     auto slot=link_zombie_enemy(linked,root,part.first,part.second);
@@ -374,6 +398,7 @@ int wmain(int argc,wchar_t** argv) {
         if(scenario_check) {
             std::cout<<"Decoded "<<prop_models<<" room object/item models, including "<<prop_skins<<" skinned objects\n";
             std::cout<<"Verified "<<zombie_linked_work<<" linked zombie work bindings against graveyard assets\n";
+            std::cout<<"Verified "<<zombie_parameters<<" graveyard zombie health/type/walking parameters and motion pairs\n";
             if(runtime_check)std::cout<<"Loaded "<<runtime_entries<<" native corridor runtime entries with Claire pose and initialized scenario state\n";
             if(runtime_check)std::cout<<"Advanced "<<runtime_ticks<<" joined player/actor/prop/scenario runtime ticks\n";
             if(runtime_check)std::cout<<"Applied player displacement on "<<runtime_movement_ticks<<" runtime ticks\n";

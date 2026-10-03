@@ -89,11 +89,9 @@ void tick_scenario_props(ScenarioState &state) {
         entity.model_flags &= ~0x80u;
         entity.control1 = 1;
         entity.control2 = 0;
-        // USA ELF rand at 0x125320: wrapped LCG state, 31-bit return.
-        state.random_seed = state.random_seed * 1103515245u + 12345u;
         entity.control3 =
-            int32_t(30.f *
-                    (float(state.random_seed & 0x7fffffffu) / 2.1474836E9f)) +
+              int32_t(30.f *
+                      (float(scenario_random(state)) / 2.1474836E9f)) +
             60;
         break;
       }

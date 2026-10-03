@@ -68,6 +68,8 @@ struct ScenarioEntity {
   std::optional<size_t> linked_parent;
   int32_t linked_joint = 0;
   Vec3 linked_offset{};
+  std::optional<int32_t> zombie_walk_choice;
+  uint32_t zombie_flags = 0, zombie_secondary_flags = 0;
 };
 struct ScenarioTask {
   std::optional<ScenarioProgram> program;
@@ -102,6 +104,7 @@ struct ScenarioState {
   size_t current_task = 0;
   uint32_t event_timer = 0;
   uint32_t random_seed = 1;
+  int32_t game_mode = 0;
   int conditional_depth = 0;
   int64_t branch_cursor = 0;
   std::array<uint32_t, 384> inventory{};
@@ -123,6 +126,8 @@ void tick_scenario_actors(ScenarioState &state);
 // Native simple object controllers and pickup highlight timing. Linked,
 // animated-special, collision/fade objects require their separate controllers.
 void tick_scenario_props(ScenarioState &state);
+// USA ELF rand: wrapped 32-bit state shared by native game subsystems.
+uint32_t scenario_random(ScenarioState &state);
 // bhInitEvent's native state/script ordering. Sound commands 3/4 are pending
 // the audio backend. All room resources must already be bound.
 void initialize_scenario(ScenarioState &state);
