@@ -60,6 +60,7 @@ struct ZombieExtendedWork {
   uint8_t personality = 0;
   uint8_t awareness = 0, awareness_timeout = 0; // EXP0_UC(0x28/0x29).
   uint8_t route_id = 0, route_timer = 0;        // EXP0_UC(0x2a/0x2b).
+  uint8_t damage_rotation_frame = 0;           // EXP0_UC(0x2c).
   float target_x = 0, target_z = 0;             // EXP0_F(0x58/0x60).
   bool path_blocked = false;                    // Nonzero EXP0 pointer(0x70).
   std::optional<size_t> stair_target;           // EXP0 pointer(0x74).
@@ -104,6 +105,7 @@ struct ScenarioEntity {
   int16_t torso_yaw = 0; // BH_PWORK::wax.
   int16_t turn_speed = 0; // BH_PWORK::way.
   float speed = 0; // BH_PWORK::spd.
+  float shape_count = 0; // BH_PWORK::shp_ct, consumed by model calculation.
   uint32_t frame_direction = 0;
   uint16_t motion_attribute = 0;
   int motion_boundary = 0;

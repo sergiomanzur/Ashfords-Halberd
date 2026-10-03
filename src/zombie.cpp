@@ -1,6 +1,7 @@
 // Native startup parameters from MIT recvx-decomp en01.c.
 #include "zombie.hpp"
 #include "enemy_navigation.hpp"
+#include "zombie_motion_internal.hpp"
 #include <cmath>
 #include <stdexcept>
 namespace ashford {
@@ -217,6 +218,9 @@ void apply_zombie_motion(ScenarioState &state, size_t work) {
     return; // bhSetMotion leaves counters untouched for a null record.
   MotionApplicationOptions options;
   options.mode = zombie.motion_mode;
+  options.joint_flags.reserve(owner.model_work->joints.size());
+  for (const auto &joint : owner.model_work->joints)
+    options.joint_flags.push_back(uint8_t(joint.flags));
   const bool body = zombie.zombie_flags & 0x80000000u;
   options.joint_base = body ? 8 : 0;
   options.mirror_map =
@@ -377,6 +381,11 @@ void initialize_work(ScenarioState &state, size_t work) {
   calculate_startup_capsule(state, work);
 }
 } // namespace
+namespace detail {
+void apply_zombie_motion_channels(ScenarioState &state, size_t work) {
+  apply_zombie_motion(state, work);
+}
+} // namespace detail
 void initialize_zombie_work(ScenarioState &state, size_t work) {
   auto replacement = state;
   initialize_work(replacement, work);

@@ -1,5 +1,6 @@
 #pragma once
 #include "scenario.hpp"
+#include <functional>
 namespace ashford {
 struct ZombiePersonality {
   float attack_distance = 0, notice_distance = 0;
@@ -51,6 +52,15 @@ std::optional<int32_t> choose_zombie_sound(const ScenarioEntity &enemy,
                                            const std::vector<int32_t> &playing);
 void tick_zombie_motion_table(ScenarioState &state, size_t work, int32_t frame,
                               const std::vector<int32_t> &playing = {});
+// Synchronous source effect dependencies. Hooks append requests/update RNG;
+// backend storage must stage its own changes if it can fail. Required for
+// mode0<5; a caller must not replace needed source effects with a silent no-op.
+struct ZombieMotionEffects {
+  std::function<void(ScenarioState &, size_t, int32_t)> kami, water;
+};
+int tick_zombie_motion(ScenarioState &state, size_t work,
+                       const ZombieMotionEffects &effects = {},
+                       const std::vector<int32_t> &playing = {});
 void tick_zombie_idle(ScenarioState &state, size_t work);
 // en01.c::MV01 walking state callback; full Move/SetMtn dispatch is separate.
 void tick_zombie_walk(ScenarioState &state, size_t work,

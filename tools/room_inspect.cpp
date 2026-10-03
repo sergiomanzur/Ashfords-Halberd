@@ -140,6 +140,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_search_neck_ticks=0;
         size_t zombie_walk_ticks=0, zombie_root_displacements=0, zombie_speed_samples=0;
         size_t zombie_motion_table_ticks=0, zombie_foot_zero_probes=0;
+        size_t zombie_set_motion_ticks=0,zombie_dry_effect_checks=0;
         size_t zombie_motion_sound_requests=0, zombie_motion_vibration_requests=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
@@ -675,17 +676,27 @@ int wmain(int argc,wchar_t** argv) {
                                                 throw std::runtime_error("Retail original walking root key produced invalid displacement/speed");
                                         }
                                     }
-                                    // Isolated sampled channels -> original motion tables
-                                    // -> fresh full native cache. This does not substitute
-                                    // for Move/SetMtn effects or the CalcEnemy scheduler.
+                                    // Source SetMtn -> fresh full native cache. These
+                                    // explicit dry-effect probes reject required effects;
+                                    // full effects/Move/CalcEnemy remain separate.
+                                    const ZombieMotionEffects dry_effects{
+                                        [&](ScenarioState& state,size_t slot,int32_t) {
+                                            const auto motion=state.enemies[slot].motion_number;
+                                            if(motion!=0 && motion!=40 && motion!=41 && motion!=125 &&
+                                               motion!=200 && motion!=240 && motion!=241 && motion!=325)
+                                                throw std::runtime_error("Retail dry SetMtn probe selected a motion requiring Kami effect inspection");
+                                            ++zombie_dry_effect_checks;
+                                        },
+                                        [&](ScenarioState& state,size_t slot,int32_t) {
+                                            if(state.enemies[slot].state_flags&0x100000)
+                                                throw std::runtime_error("Retail dry SetMtn probe requires a water effect backend");
+                                            ++zombie_dry_effect_checks;
+                                        }};
                                     auto planted=walking;
                                     for(size_t tick=0;tick<80;++tick) {
-                                        const auto root_frame=planted.enemies[root].frame/65536;
-                                        const auto body_frame=planted.enemies[body].frame/65536;
-                                        advance_zombie_motion(planted,root);advance_zombie_motion(planted,body);
                                         const auto before_sounds=planted.pending_enemy_sounds.size();
-                                        tick_zombie_motion_table(planted,root,root_frame);++zombie_motion_table_ticks;
-                                        tick_zombie_motion_table(planted,body,body_frame);++zombie_motion_table_ticks;
+                                        tick_zombie_motion(planted,root,dry_effects);++zombie_set_motion_ticks;++zombie_motion_table_ticks;
+                                        tick_zombie_motion(planted,body,dry_effects);++zombie_set_motion_ticks;++zombie_motion_table_ticks;
                                         zombie_motion_sound_requests+=planted.pending_enemy_sounds.size()-before_sounds;
                                         auto& current=planted.enemies[root];
                                         ActorPlacement cached_placement;
@@ -1205,6 +1216,10 @@ int wmain(int argc,wchar_t** argv) {
                 std::cout<<"Applied "<<zombie_motion_table_ticks<<" isolated native motion-table callbacks with "
                          <<zombie_motion_sound_requests<<" sound requests and "<<zombie_motion_vibration_requests
                          <<" vibration requests; verified "<<zombie_foot_zero_probes<<" exact zero-drift cached foot paths\n";
+                if(zombie_set_motion_ticks!=zombie_brain_roots*160 || zombie_dry_effect_checks!=zombie_set_motion_ticks*2)
+                    throw std::runtime_error("Retail SetMtn/dry-effect probe coverage mismatch");
+                std::cout<<"Advanced "<<zombie_set_motion_ticks<<" paired source SetMtn calls with "
+                         <<zombie_dry_effect_checks<<" proven dry effect callbacks\n";
             }
             if(zombie_model_work_samples!=zombie_channel_applications || zombie_range_draws!=zombie_parameters*2)
                 throw std::runtime_error("Missing retail zombie model-work coverage");

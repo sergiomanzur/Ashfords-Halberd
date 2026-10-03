@@ -591,3 +591,30 @@ SetMtn effects and complete enemy action/combat integration remain pending.
 The complete Windows build,39 headless tests and package creation pass. A fresh
 packaged dummy-SDL profile passes241 runtime ticks,240 rendered frames,
 53 movement ticks,10 focus-blocked ticks and return to the main menu.
+
+Native bhEne01_SetMtn now orchestrates shared source channel/counter sampling,
+root/body joint0/8 zeroing, root-key translation or scalar-speed movement,
+original turning gates, body damage recoil and boundary flags. It retains the
+original71/70/40 mouth-shape tables and4x8 recoil table, verified against every
+public source constant. Model shape flag/scalar updates preserve the original
+inactive/type10 cases. Shared zombie sampling now forwards actual cached O_WORK
+flags, preserving protected angles, skipped channels and body offset behavior.
+
+The callback requires synchronous KamiEffect/WaterEffect handlers for mode0<5,
+called before mouth/table processing using the incoming pre-sampling frame.
+These dependencies are explicit; the source effect backend is still pending.
+The frame transaction snapshots only the owner pose and consumed work/parent
+scalars, RNG/scratch and appended sound/vibration request lengths. It does not
+copy immutable models or rendered scenes. Effect backend storage owns its own
+rollback and handlers must keep the fixed work pool/pose ownership intact.
+
+The retail scan now runs1,600 paired SetMtn calls across ten original graveyard
+roots, with3,200 explicit dry-effect checks and the existing4,800 zero-drift
+foot paths. Diagnostic handlers admit only walking motions absent from the
+source Kami table and reject WaterEffect's wet state. They do not implement
+the effects backend or register full root Move/action/combat scheduling.
+Source review found no remaining Critical/Important/Minor issues after the
+O_WORK forwarding fix, whose regression was observed RED then GREEN.
+The full Windows build,40 headless tests and package creation pass. A fresh
+packaged dummy-SDL smoke passes241 runtime ticks,240 rendered frames,
+53 movement ticks,10 focus-blocked ticks, main-menu return and INI creation.
