@@ -6,6 +6,7 @@
 #include "scenario.hpp"
 #include "motion.hpp"
 #include "actor.hpp"
+#include "face_model.hpp"
 #include "runtime.hpp"
 #include "zombie.hpp"
 #include "render.hpp"
@@ -91,6 +92,23 @@ int wmain(int argc,wchar_t** argv) {
                     bind_room_enemies(data,collision,bound_enemies);
                     bind_room_props(data,bound_enemies);
                     if(i==2 || i==3) {
+                        for(size_t slot=0;slot<bound_enemies.enemies.size();++slot) {
+                            const auto& actor=bound_enemies.enemies[slot];
+                            if((actor.flags&1) && actor.id==91) {
+                                const auto raw_skin=decode_skin(actor.model->skin,actor_bind_pose(*actor.model).size());
+                                std::cout<<"Graveyard subplayer dependency: room="<<i<<" slot="<<slot
+                                         <<" joints="<<actor_bind_pose(*actor.model).size()
+                                         <<" skin_bytes="<<actor.model->skin.size()
+                                         <<" mask_bytes="<<actor.model_bank->mask.size()<<'\n';
+                                const auto facial=prepare_face_model(*actor.model,actor.model_bank->mask);
+                                const auto expanded=actor_bind_pose(facial.actor);
+                                const auto facial_scene=pose_actor(facial.actor,expanded,actor.position,uint16_t(actor.angles[1]));
+                                if(raw_skin.size()!=27 || expanded.size()!=31 || facial_scene.meshes.empty())
+                                    throw std::runtime_error("Graveyard facial preparation differs from selected model");
+                                std::cout<<"Prepared subplayer joints="<<expanded.size()
+                                         <<" meshes="<<facial_scene.meshes.size()<<'\n';
+                            }
+                        }
                         auto linked=bound_enemies;
                         linked.collision=collision;
                         size_t parents=0,bindings=0;

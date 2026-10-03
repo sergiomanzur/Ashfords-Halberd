@@ -291,7 +291,8 @@ RoomActorModels decode_room_actor_models(const Bytes &data) {
 std::vector<ActorModelBank> decode_room_enemy_models(const Bytes &data) {
   return decode_room_actor_models_impl(data, false).enemies;
 }
-std::vector<SkinNode> decode_skin(const Bytes &data, size_t count) {
+std::vector<SkinNode> decode_skin(const Bytes &data, size_t count,
+                                 SkinLayout layout) {
   // npSkinConvPreparation/npSkinConvSub and npCalcSkin use a ten-step
   // blend between a joint's unrotated and rotated transforms.
   Reader r{data};
@@ -302,7 +303,13 @@ std::vector<SkinNode> decode_skin(const Bytes &data, size_t count) {
   std::vector<SkinNode> nodes(count);
   std::array<bool, 16> groups{};
   size_t p = 4, total = 0;
-  for (auto &node : nodes) {
+  if (layout == SkinLayout::FaceModel && count < 15)
+    throw std::runtime_error("Invalid facial skin skeleton");
+  for (size_t index = 0; index < count; ++index) {
+    // npInitCalcSkinFM/npCalcSkinFM: these objects consume no source record.
+    if (layout == SkinLayout::FaceModel && index >= 11 && index <= 14)
+      continue;
+    auto &node = nodes[index];
     node.flags = r.u32(p);
     p += 4;
     if (node.flags & ~3u)
@@ -328,10 +335,12 @@ std::vector<SkinNode> decode_skin(const Bytes &data, size_t count) {
         auto packed = r.u32(p);
         p += 4;
         auto joint = packed >> 24, level = (packed >> 16) & 255;
+        if (layout == SkinLayout::FaceModel && joint > 10)
+          joint += 4;
         if (joint >= count || level > 9)
           throw std::runtime_error("Invalid skin vertex binding");
         node.vertices.push_back(
-            {uint8_t(joint), float(level + 1) * 0.1f, uint16_t(packed)});
+            {uint16_t(joint), float(level + 1) * 0.1f, uint16_t(packed)});
       }
     }
   }

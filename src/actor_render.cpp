@@ -175,6 +175,8 @@ size_t work_count(const ActorModelWork &work, size_t count) {
 Scene draw_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
                  const Matrix &placement,
                  const ActorModelWork *work = nullptr) {
+  if (actor.skin_layout == SkinLayout::FaceModel && !actor.skin_preconverted)
+    throw std::runtime_error("Facial skin must be converted before expansion");
   auto skeleton = calculate_skeleton(actor, pose, placement);
   const auto base = skeleton.base, count = skeleton.count,
              table = skeleton.table;
@@ -208,7 +210,7 @@ Scene draw_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
   Bytes posed = actor.model;
   auto drawing_matrices = world;
   if (!actor.skin.empty()) {
-    auto skin = decode_skin(actor.skin, count);
+    auto skin = decode_skin(actor.skin, count, actor.skin_layout);
     struct Extent {
       size_t start, end;
       bool skinned;
@@ -257,9 +259,10 @@ Scene draw_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
               skin[weight.joint].group != skin[i].group)
             throw std::runtime_error("Skin joint belongs to a different group");
           auto local = r.vec(vertex + 64 + v * 32);
-          local = {local.x + bind[i].x - bind[weight.joint].x,
-                   local.y + bind[i].y - bind[weight.joint].y,
-                   local.z + bind[i].z - bind[weight.joint].z};
+          if (!actor.skin_preconverted)
+            local = {local.x + bind[i].x - bind[weight.joint].x,
+                     local.y + bind[i].y - bind[weight.joint].y,
+                     local.z + bind[i].z - bind[weight.joint].z};
           auto a = point(unrotated[weight.joint], local),
                b = point(world[weight.joint], local);
           Vec3 out{a.x + weight.rotation_weight * (b.x - a.x),

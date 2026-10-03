@@ -1,8 +1,9 @@
 #pragma once
 #include "motion.hpp"
 namespace ashford {
+enum class SkinLayout { Standard, FaceModel };
 struct SkinWeight {
-  uint8_t joint = 0;
+  uint16_t joint = 0;
   float rotation_weight = 1;
   uint16_t auxiliary = 0;
 };
@@ -10,11 +11,15 @@ struct SkinNode {
   uint32_t flags = 0, group = 0;
   std::vector<SkinWeight> vertices;
 };
-std::vector<SkinNode> decode_skin(const Bytes &data, size_t object_count);
+std::vector<SkinNode> decode_skin(const Bytes &data, size_t object_count,
+                                 SkinLayout layout = SkinLayout::Standard);
 struct ActorModel {
   Bytes model;
   Bytes skin;
   Bytes textures;
+  // FM layout belongs to the expanded model after ordinary bind conversion.
+  SkinLayout skin_layout = SkinLayout::Standard;
+  bool skin_preconverted = false;
 };
 struct ActorModelBank {
   std::vector<ActorModel> models;

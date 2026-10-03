@@ -148,3 +148,27 @@ Synthetic checks cover frozen child/descendant/sibling behavior, reset/retained
 placement, selected geometry, frozen skinned vertices, invalid work and copied
 runtime isolation. Material/shadow rendering and actual detachment, damage and
 enemy controller integration remain pending.
+
+Native facial model preparation now adapts the selected graveyard ID 91
+dependency from `face_bh.c` and `njplus.c`. It converts the original ordinary
+skin in private storage before inserting tooth, tongue and eye objects.
+Model-bearing DFS lookup suppresses descent into already wrapped parents.
+Source face/tongue vertices remain separate from their mutable destinations;
+wrappers retain the original clone angles and scales. Jaw anchors initialize
+parent Y/Z rotations using the source atan ratios. New O_WORK entries mask
+motion on joints 6 through 14.
+
+The expanded model explicitly selects FM skin decoding: runtime joints 11–14
+consume no source records, and packed influences above 10 receive index +4.
+Expanded rendering requires preconverted vertices. Joint indices use 16 bits
+so packed index 255 can map to 259 without wrapping. Absolute world skin output
+and identity drawing matrices apply placement once, equivalent to the original
+actor-relative skin output followed by its actor translation.
+
+Synthetic tests cover immutable input, private output, malformed headers,
+IDs/tables/graphs/vertices, four-object expansion, fractional rotation blending,
+angled jaw anchors, and translated/rotated world placement. The headless retail
+probe prepares room archive entry 2 slot 4 from 27 to 31 joints and draws six
+meshes. This preparation intentionally supports the selected four-added-object
+skin layout. Facial deformation, eye matrices, lip shapes and MASK/controller
+updates still require their own source port before ID 91 runs in gameplay.
