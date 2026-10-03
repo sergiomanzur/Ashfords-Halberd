@@ -104,6 +104,8 @@ struct ScenarioState {
   int32_t equipped_weapon = 0, player_health = 0, message_selection = 0,
           status_timer = 0;
   int32_t player_frame = 0;
+  uint16_t selected_item_id = 0;
+  uint32_t player_state_flags = 0;
 };
 // Native control and event scheduling subset. Unsupported instructions fail
 // explicitly; entity controllers and audiovisual instructions are pending.

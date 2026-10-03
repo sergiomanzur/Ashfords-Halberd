@@ -78,6 +78,8 @@ void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
                        const PlayerTranslationTables &translations,
                        uint16_t pad) {
   auto &scenario = runtime.scenario;
+  uint16_t pressed = uint16_t(pad & ~runtime.previous_pad);
+  runtime.previous_pad = pad;
   tick_scenario_actors(scenario);
   if (scenario.flags[6][0] & 1) {
     if (scenario.equipped_weapon != 0)
@@ -89,6 +91,9 @@ void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
     runtime.player_scene =
         pose_actor(player.models.at(0), runtime.player_pose,
                    runtime.world.player.position, runtime.world.player.yaw);
+    if ((pressed & 0x200) && !(scenario.flags[10][0] & 0x4017) &&
+        !(scenario.player_state_flags & 0x10080))
+      examine_room_interaction(runtime);
   }
   scenario.player_frame = runtime.world.player.frame;
   tick_scenario_props(scenario);
@@ -130,6 +135,7 @@ RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
   persistent.interaction_index = 0;
   persistent.floor_index = 0;
   persistent.player_frame = result.world.player.frame;
+  persistent.player_state_flags &= 0x78280000;
   persistent.collision = result.collision;
   persistent.interactions = result.collision.miscellaneous;
   bind_room_enemies(data, result.collision, persistent);

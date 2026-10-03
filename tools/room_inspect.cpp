@@ -181,6 +181,23 @@ int wmain(int argc,wchar_t** argv) {
                                runtime.player_scene.meshes.empty() || runtime.scene.meshes.empty())
                                 throw std::runtime_error("Retail corridor runtime entry mismatch");
                             ++runtime_entries;
+                            auto examined=runtime;
+                            const auto& trigger=examined.scenario.interactions.at(0);
+                            examined.world.player.yaw=0;
+                            examined.world.player.position={trigger.position.x+trigger.size.x*.5f,
+                                trigger.position.y,trigger.position.z+trigger.size.z*.5f+
+                                (trigger.type==0?4.5f:6.f)};
+                            examined.world.front_anchor=examined.world.player.position;
+                            examined.world.front_offset=0;
+                            examined.world.floor=trigger.floor;
+                            if(!examine_room_interaction(examined) ||
+                               examined.scenario.interaction_index!=0 ||
+                               !(examined.scenario.flags[10][0]&0x100))
+                                throw std::runtime_error("Retail corridor examine selection mismatch");
+                            run_scenario(scenario.program(1),examined.scenario);
+                            if(!examined.scenario.door || examined.scenario.door->stage!=0 ||
+                               examined.scenario.door->room!=2 || examined.scenario.door->position!=0)
+                                throw std::runtime_error("Retail examined door request mismatch");
                             auto running=runtime;
                             auto translations=decode_player_translation_tables(player.auxiliary);
                             for(size_t tick=0;tick<240;++tick) {

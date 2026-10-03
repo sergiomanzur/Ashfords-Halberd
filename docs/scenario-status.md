@@ -218,3 +218,16 @@ The retail RM_0010 control script sets RoomCaseNo before SetDoorCall into
 stage 0, room 2, position 0. Persistent flags choose the first-visit or return
 case. RM_0020/RM_0021 contain the return door into room 1, position 1. These
 records establish the candidate connected pair without inventing room links.
+
+Native examination now selects authored interaction records using the original
+five forward probes, floor checks, facing masks and first-match ordering.
+Door requests retain the authored destination; script-only examination feeds
+the selected index into scenario control; standing pickups request the original
+pickup interface without prematurely awarding inventory. The runtime triggers
+examination on a new button press, so holding the button does not repeat it.
+Tests cover probe offsets, cardinal facing masks, inactive records, floor
+matching, blocked doors, pickup binding and press/release behavior.
+Stairs, ledges, kneeling pickups, item boxes and examination camera/message
+interfaces still require their original controllers and fail explicitly.
+Physical examine input, confirmation UI, inventory awards and room transition
+consumption remain pending in the application preview.
