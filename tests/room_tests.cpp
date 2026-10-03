@@ -153,12 +153,15 @@ int main() {
     auto old_routes = std::make_shared<RoomRoutes>();
     old_routes->regions.resize(2);
     persistent.routes = old_routes;
+    persistent.dynamic_miscellaneous.resize(2);
     auto runtime =
         load_room_runtime(runtime_data, 0, 1, 1, persistent, entry_player);
     ck(runtime.scenario.routes && runtime.scenario.routes != old_routes &&
        runtime.scenario.routes->regions.size() == 1 &&
        room_route_id(*runtime.scenario.routes, {0, 0, 0}) == 0 &&
        persistent.routes == old_routes);
+    ck(runtime.scenario.dynamic_miscellaneous.empty() &&
+       persistent.dynamic_miscellaneous.size() == 2);
     ck(runtime.world.player.position.x == -10 &&
        runtime.world.player.yaw == 123 && runtime.world.player.entering &&
        runtime.scenario.stage == 0 && runtime.scenario.room == 1 &&

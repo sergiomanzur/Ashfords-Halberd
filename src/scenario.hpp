@@ -59,6 +59,10 @@ struct ZombieExtendedWork {
   uint32_t material_color = 0;
   uint8_t personality = 0;
   uint8_t awareness = 0, awareness_timeout = 0; // EXP0_UC(0x28/0x29).
+  uint8_t route_id = 0, route_timer = 0;        // EXP0_UC(0x2a/0x2b).
+  float target_x = 0, target_z = 0;             // EXP0_F(0x58/0x60).
+  bool path_blocked = false;                    // Nonzero EXP0 pointer(0x70).
+  std::optional<size_t> stair_target;           // EXP0 pointer(0x74).
   int32_t left_leg_state = 0, right_leg_state = 0;
   float player_distance =
       0; // EXP0_F(84), updated by the original Move callback.
@@ -112,6 +116,7 @@ struct ScenarioEntity {
   uint32_t combo_flags = 0;
   int32_t combo_timeout = 0;
   int32_t look_joint = 0;
+  std::optional<size_t> stair_index; // kdnp/kdnidx in current-room ATR work.
 };
 struct ScenarioTask {
   std::optional<ScenarioProgram> program;
@@ -149,6 +154,7 @@ struct ScenarioState {
   std::array<EnemyCallbackKind, 100> enemy_callbacks{};
   std::vector<CollisionRecord> interactions;
   std::optional<RoomCollision> collision;
+  std::vector<CollisionRecord> dynamic_miscellaneous; // sys->metcp.
   std::shared_ptr<const RoomRoutes> routes;
   std::shared_ptr<const std::vector<std::optional<Motion>>> room_motions;
   std::shared_ptr<const std::vector<Bytes>> face_masks;

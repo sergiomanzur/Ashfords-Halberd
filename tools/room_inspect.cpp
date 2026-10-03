@@ -13,6 +13,7 @@
 #include "runtime.hpp"
 #include "zombie.hpp"
 #include "enemy_targeting.hpp"
+#include "enemy_navigation.hpp"
 #include "render.hpp"
 #include <algorithm>
 #include <cmath>
@@ -88,6 +89,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t enemy_floor_probes=0, zombie_view_probes=0, zombie_neck_updates=0;
         size_t route_regions=0, route_queries=0, invalid_route_hops=0;
         size_t zombie_awareness_ticks=0;
+        size_t enemy_stair_probes=0, zombie_brain_roots=0, zombie_brain_ticks=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
         size_t facial_lip_ticks=0, facial_lip_changed_frames=0;
@@ -135,6 +137,19 @@ int wmain(int argc,wchar_t** argv) {
                     ++enemy_floor_probes;
                 }
                 auto scenario=decode_room_scenario(data);
+                if(scenario_check) for(const auto& stair:collision.miscellaneous) {
+                    if(!(stair.flags&1) || stair.type!=1 || (stair.attribute&0x400000) ||
+                       stair.size.x<1 || stair.size.z<1)continue;
+                    const Vec3 center{stair.position.x+.5f*stair.size.x,0,stair.position.z+.5f*stair.size.z};
+                    const auto hit=enemy_stair_trigger(collision,{},center,0,stair.floor,0);
+                    if(!hit || *hit>=collision.miscellaneous.size())
+                        throw std::runtime_error("Retail authored stair center has no native query result");
+                    const auto& selected=collision.miscellaneous[*hit];
+                    if(!(selected.flags&1) || selected.type!=1 || (selected.attribute&0x400000) ||
+                       selected.floor!=stair.floor)
+                        throw std::runtime_error("Retail stair query selected ineligible source record");
+                    ++enemy_stair_probes;
+                }
                 scenario_entries+=scenario.entry_count();
                 if(scenario_check) {
                     ScenarioState bound_enemies;
@@ -526,6 +541,33 @@ int wmain(int argc,wchar_t** argv) {
                                 if(result!=-1 && (result<-32768 || result>32768))
                                     throw std::runtime_error("Retail view cone returned an invalid signed yaw");
                                 ++zombie_view_probes;
+                                // Isolated Brain00 close pursuit, using actual initialized
+                                // root/cache/route work. Player flag4 suppresses stairs;
+                                // this is not Move/attack/damage or a full encounter tick.
+                                if(owner.type!=2 && owner.type!=3 && owner.type!=5 && owner.type!=6 &&
+                                   owner.type!=7 && owner.type!=8 && owner.type!=9) {
+                                    auto pursuit=initialized;
+                                    auto& actor=pursuit.enemies[root];
+                                    auto& extended=*actor.zombie_work;
+                                    ScenarioEntity target;
+                                    target.position=actor.position;
+                                    target.position.x+=2;target.floor=actor.floor;target.flags=4;
+                                    extended.player_distance=2;actor.zombie_flags|=0x400;
+                                    const auto region=room_route_id(*pursuit.routes,actor.position);
+                                    const auto before=actor.modes;
+                                    const auto seed=pursuit.random_seed;
+                                    const auto original_frame=actor.frame;
+                                    for(size_t tick=0;tick<93;++tick) {
+                                        tick_zombie_brain(pursuit,root,target);
+                                        if(extended.target_x!=target.position.x || extended.target_z!=target.position.z ||
+                                           extended.route_id!=region || extended.route_timer!=0 || actor.modes!=before ||
+                                           actor.frame!=original_frame || pursuit.random_seed!=seed ||
+                                           actor.model->model!=raw || actor.stair_index)
+                                            throw std::runtime_error("Retail native Brain00 close pursuit changed unrelated work or route policy");
+                                        ++zombie_brain_ticks;
+                                    }
+                                    ++zombie_brain_roots;
+                                }
                                 for(auto work:{root,body}) {
                                     auto& sensed=targeting.enemies[work];
                                     sensed.zombie_work->awareness=0;
@@ -964,6 +1006,8 @@ int wmain(int argc,wchar_t** argv) {
             std::cout<<"Verified "<<zombie_player_contacts<<" original player/zombie contacts with initialized retail geometry\n";
             if(!enemy_floor_probes)throw std::runtime_error("Missing retail enemy floor trigger coverage");
             std::cout<<"Queried "<<enemy_floor_probes<<" authored enemy floor trigger centers\n";
+            if(!enemy_stair_probes)throw std::runtime_error("Missing authored stair query coverage");
+            std::cout<<"Queried "<<enemy_stair_probes<<" authored stair trigger centers\n";
             if(!route_regions || !route_queries)throw std::runtime_error("Missing retail native route coverage");
             std::cout<<"Decoded "<<route_regions<<" route regions and queried "<<route_queries
                      <<" native center-to-center routes; "<<invalid_route_hops<<" out-of-range source hops excluded\n";
@@ -975,6 +1019,10 @@ int wmain(int argc,wchar_t** argv) {
                 if(zombie_awareness_ticks!=zombie_parameters*2*93)
                     throw std::runtime_error("Missing native graveyard awareness trace coverage");
                 std::cout<<"Advanced "<<zombie_awareness_ticks<<" isolated native root/body awareness updates\n";
+                if(!zombie_brain_roots || zombie_brain_ticks!=zombie_brain_roots*93)
+                    throw std::runtime_error("Missing isolated native Brain00 pursuit coverage");
+                std::cout<<"Advanced "<<zombie_brain_ticks<<" isolated Brain00 close-pursuit updates across "
+                         <<zombie_brain_roots<<" original roots\n";
             }
             if(zombie_model_work_samples!=zombie_channel_applications || zombie_range_draws!=zombie_parameters*2)
                 throw std::runtime_error("Missing retail zombie model-work coverage");

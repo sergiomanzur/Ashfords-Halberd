@@ -1,5 +1,6 @@
 // Native startup parameters from MIT recvx-decomp en01.c.
 #include "zombie.hpp"
+#include "enemy_navigation.hpp"
 #include <cmath>
 #include <stdexcept>
 namespace ashford {
@@ -371,6 +372,7 @@ void initialize_work(ScenarioState &state, size_t work) {
   zombie.model_flags &= ~0x20u;
   zombie.look_joint = 10;
   zombie.combo_flags |= 2;
+  release_actor_stairs(state, work);
   apply_zombie_motion(state, work);
   calculate_startup_capsule(state, work);
 }

@@ -1,13 +1,16 @@
+#include "zombie_awareness.hpp"
 #include "enemy_targeting.hpp"
 #include "zombie.hpp"
 #include <cmath>
 #include <stdexcept>
 // Native adaptation of MIT recvx-decomp en01.c::bhEne01_EneSearch.
 namespace ashford {
-void tick_zombie_awareness(ScenarioState &state, size_t work, Vec3 player) {
+detail::ZombieAwarenessUpdate
+detail::evaluate_zombie_awareness(const ScenarioState &state, size_t work,
+                                  Vec3 player) {
   if (state.enemies.size() != 128 || work >= state.enemies.size())
     throw std::runtime_error("Invalid zombie awareness work pool");
-  auto &enemy = state.enemies[work];
+  const auto &enemy = state.enemies[work];
   if (!(enemy.flags & 1) || enemy.id != 1 || !enemy.zombie_work)
     throw std::runtime_error("Missing original zombie awareness work");
   const auto owner_index = enemy.pose_owner.value_or(work);
@@ -50,8 +53,13 @@ void tick_zombie_awareness(ScenarioState &state, size_t work, Vec3 player) {
     // The source --EXP0_UC(0x29)<0 clear is unreachable after unsigned wrap.
     --timeout;
   }
-  enemy.zombie_work->awareness = awareness;
-  enemy.zombie_work->awareness_timeout = timeout;
-  enemy.zombie_flags = flags;
+  return {awareness, timeout, flags};
+}
+void tick_zombie_awareness(ScenarioState &state, size_t work, Vec3 player) {
+  const auto update = detail::evaluate_zombie_awareness(state, work, player);
+  auto &enemy = state.enemies[work];
+  enemy.zombie_work->awareness = update.awareness;
+  enemy.zombie_work->awareness_timeout = update.timeout;
+  enemy.zombie_flags = update.flags;
 }
 } // namespace ashford

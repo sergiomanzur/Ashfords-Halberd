@@ -308,6 +308,16 @@ int main() {
     startup.enemies[0].zombie_work->children[7] = 12;
     startup.enemies[0].zombie_work->awareness = 0x5e;
     startup.enemies[0].zombie_work->awareness_timeout = 15;
+    startup.enemies[0].zombie_work->route_id = 7;
+    startup.enemies[0].zombie_work->route_timer = 99;
+    startup.enemies[0].zombie_work->target_x = 123;
+    startup.enemies[0].zombie_work->target_z = 456;
+    startup.enemies[0].zombie_work->path_blocked = true;
+    startup.enemies[0].zombie_work->stair_target = 1;
+    startup.enemies[0].stair_index = 0;
+    startup.collision->miscellaneous.resize(2);
+    startup.collision->miscellaneous[0].parameters[3] = 1;
+    for (auto& r : startup.collision->miscellaneous) r.attribute = 0x400123;
     startup.enemies[0].zombie_flags = 0x7fffffff;
     initialize_zombie_work(startup, 0);
     ck(startup.enemies[0].zombie_work->body == 3 &&
@@ -316,6 +326,15 @@ int main() {
     ck(startup.enemies[0].zombie_flags == 0x10000001);
     ck(startup.enemies[0].zombie_work->awareness == 0 &&
        startup.enemies[0].zombie_work->awareness_timeout == 0);
+    ck(startup.enemies[0].zombie_work->route_id == 0 &&
+       startup.enemies[0].zombie_work->route_timer == 0 &&
+       startup.enemies[0].zombie_work->target_x == 0 &&
+       startup.enemies[0].zombie_work->target_z == 0 &&
+       !startup.enemies[0].zombie_work->path_blocked &&
+       !startup.enemies[0].zombie_work->stair_target &&
+       startup.enemies[0].stair_index == 0 &&
+       startup.collision->miscellaneous[0].attribute == 0x123 &&
+       startup.collision->miscellaneous[1].attribute == 0x123);
     auto exhausted = startup_fixture();
     for (auto &enemy : exhausted.enemies)
       enemy.flags |= 1;

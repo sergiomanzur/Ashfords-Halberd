@@ -466,3 +466,36 @@ auxiliary/manager dispatch, targeting, contacts and corridor runtime evidence.
 They do not imply full zombie Brain/Move/attack/damage dispatch is ready;
 unsupported root controllers still fail explicitly and New Game remains
 disabled pending the complete playable slice.
+
+Native Brain00 now evaluates awareness and stages close-player targets or
+original route refreshes from retained distance, obstruction, floor and byte
+timer fields. It preserves the exact50 threshold, cached region gate,254->255
+refresh,255->0 wrap and type5 unconditional routing. A shared region returns
+255 with a defined destination; missing regions reject the source path whose
+local target would be uninitialized. Invalid route/stair context cannot commit
+awareness, targets, flags, modes or reservation attributes.
+
+The original KaidanCheck now observes player primary/status gates and eligible
+competing zombies, then the first authored/dynamic stair query, capacity and
+floor direction. Query behavior retains Ninja look-behind, inclusive XZ bounds,
+half-unit alignment, ignored Y, and source probe-variable overwrites after a
+failed alignment. Pair reservations use stable current-room indices; adjacent
+pairs stay in their original static/dynamic array and explicit pairs always
+reference the static array. Both records validate before changing attributes.
+Primary200000 releases the selected pair and clears notice; ordinary entry
+selects modes0/8/0 and flag400000. Source actor indices remain retained after
+release. Startup now releases retained stair reservations through the existing
+transactional initializer and resets the new extended-work fields. Native room
+loading clears prior dynamic miscellaneous records, matching room-system reset.
+
+These are represented controller functions, not full root AI scheduler frames.
+Movement, action selection, damage/attacks/player response, inventory/audio and
+cross-room save/load remain pending. New Game remains disabled until the full
+Step1 playable slice is ready.
+
+The headless retail scan exercises146 authored stair centers and930 isolated
+Brain00 close-pursuit updates across ten initialized graveyard roots using
+actual cached work and current-room route regions. These traces hold the
+player primary4 gate to isolate close pursuit; paired reservations and floor
+direction are covered by synthetic tests. The205-room/85,944-route/1,860-
+awareness and existing native corridor checks remain passing.
