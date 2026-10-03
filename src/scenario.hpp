@@ -7,6 +7,7 @@
 #include <optional>
 namespace ashford {
 class RoomScenario;
+struct RoomEntity;
 class ScenarioProgram {
 public:
   size_t size() const { return block_->size() - offset_; }
@@ -63,6 +64,10 @@ struct ScenarioEntity {
   uint16_t motion_attribute = 0;
   int motion_boundary = 0;
   std::shared_ptr<const std::vector<std::optional<Motion>>> motions;
+  std::array<int8_t, 8> clip_joints{};
+  std::optional<size_t> linked_parent;
+  int32_t linked_joint = 0;
+  Vec3 linked_offset{};
 };
 struct ScenarioTask {
   std::optional<ScenarioProgram> program;
@@ -128,6 +133,15 @@ void control_scenario(ScenarioState &state);
 // their authored work-number map after all assets validate successfully.
 void bind_room_enemies(const Bytes &data, const RoomCollision &collision,
                        ScenarioState &state);
+// eneset.c::bhSetEnemy first-free allocation; an exhausted original pool
+// returns no slot. Newly allocated work has no model/motion bindings yet.
+std::optional<size_t> allocate_enemy_work(std::vector<ScenarioEntity> &pool,
+                                        const RoomEntity &authored,
+                                        const RoomCollision &collision);
+// en01.c::bhEne01_SetLinkEnemy: hidden linked work shares immutable parent
+// assets and stores its parent as a stable slot index, rather than a pointer.
+std::optional<size_t> link_zombie_enemy(ScenarioState &state, size_t parent,
+                                      int32_t joint, uint16_t id);
 // Preserve attachment slots 0–3; replace authored objects/items only after
 // validating all room assets. Controllers run separately.
 void bind_room_props(const Bytes &data, ScenarioState &state);

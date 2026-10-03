@@ -69,6 +69,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t corridor_model_rebuilds=0;
         size_t corridor_lifecycles=0;
         size_t prop_models=0, prop_skins=0;
+        size_t zombie_linked_work=0;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
@@ -81,6 +82,29 @@ int wmain(int argc,wchar_t** argv) {
                     ScenarioState bound_enemies;
                     bind_room_enemies(data,collision,bound_enemies);
                     bind_room_props(data,bound_enemies);
+                    if(i==2 || i==3) {
+                        auto linked=bound_enemies;
+                        linked.collision=collision;
+                        size_t parents=0,bindings=0;
+                        // Verify required linked ownership against real graveyard
+                        // assets, separately from the pending zombie controller.
+                        for(size_t root=0;root<bound_enemies.enemies.size();++root)
+                            if((bound_enemies.enemies[root].flags&1) && bound_enemies.enemies[root].id==1) {
+                                ++parents;
+                                for(const auto part:std::array<std::pair<int,uint16_t>,6>{
+                                    {{1,1},{0,31},{0,32},{0,32},{0,33},{0,33}}}) {
+                                    auto slot=link_zombie_enemy(linked,root,part.first,part.second);
+                                    if(!slot || linked.enemies[*slot].linked_parent!=root ||
+                                       linked.enemies[*slot].model!=bound_enemies.enemies[root].model ||
+                                       linked.enemies[*slot].motions!=bound_enemies.enemies[root].motions)
+                                        throw std::runtime_error("Retail linked zombie work mismatch");
+                                    ++zombie_linked_work;
+                                    ++bindings;
+                                }
+                            }
+                        if(!parents || bindings!=parents*6)
+                            throw std::runtime_error("Missing retail linked zombie work coverage");
+                    }
                     for(const auto* entities:{&bound_enemies.objects,&bound_enemies.items})
                         for(const auto& entity:*entities)if(entity.model) {
                             ++prop_models;if(!entity.model->skin.empty())++prop_skins;
@@ -205,7 +229,13 @@ int wmain(int argc,wchar_t** argv) {
                                 const auto next=entries.at(room_archive_index(
                                     examined.scenario.door->stage,examined.scenario.door->room,
                                     examined.scenario.room_case));
-                                transition_room_runtime(examined,expand(read(file,next.offset,next.size)),player);
+                                auto destination=expand(read(file,next.offset,next.size));
+                                for(const auto& enemy:decode_room_records(destination).enemies)
+                                    if(enemy.flags&1)
+                                        std::cout<<"Destination authored enemy: id="<<enemy.id
+                                            <<" type="<<enemy.type<<" model="<<int(enemy.model_version)
+                                            <<" work="<<int(enemy.work_number)<<" flags="<<enemy.flags<<"\n";
+                                transition_room_runtime(examined,destination,player);
                                 if(examined.scenario.room!=2 || examined.scenario.door)
                                     throw std::runtime_error("Retail destination entry mismatch");
                             }
@@ -343,6 +373,7 @@ int wmain(int argc,wchar_t** argv) {
         std::cout<<"Validated "<<entries.size()<<" rooms and "<<scenario_entries<<" scenario entry slots\n";
         if(scenario_check) {
             std::cout<<"Decoded "<<prop_models<<" room object/item models, including "<<prop_skins<<" skinned objects\n";
+            std::cout<<"Verified "<<zombie_linked_work<<" linked zombie work bindings against graveyard assets\n";
             if(runtime_check)std::cout<<"Loaded "<<runtime_entries<<" native corridor runtime entries with Claire pose and initialized scenario state\n";
             if(runtime_check)std::cout<<"Advanced "<<runtime_ticks<<" joined player/actor/prop/scenario runtime ticks\n";
             if(runtime_check)std::cout<<"Applied player displacement on "<<runtime_movement_ticks<<" runtime ticks\n";

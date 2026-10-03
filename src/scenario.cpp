@@ -46,7 +46,6 @@ void bind_room_enemies(const Bytes &data, const RoomCollision &collision,
   auto motions = decode_room_enemy_motion_banks(data);
   std::vector<ScenarioEntity> enemies(128);
   std::vector<size_t> slots;
-  size_t active = 0;
   for (size_t i = 0; i < records.enemies.size(); ++i) {
     const auto &authored = records.enemies[i];
     if (authored.work_number >= enemies.size())
@@ -54,20 +53,10 @@ void bind_room_enemies(const Bytes &data, const RoomCollision &collision,
     slots.push_back(authored.work_number);
     if (!(authored.flags & 1))
       continue;
-    auto &entity = enemies.at(active++);
-    entity.flags = authored.flags;
-    entity.id = authored.id;
-    entity.type = authored.type;
-    entity.model_version = authored.model_version;
-    if (entity.id > 40) {
-      entity.model_flags |= 0x20;
-      entity.flags |= 0x8000;
-    }
-    if (entity.id > 90)
-      entity.model_flags |= 0x100;
-    entity.position = authored.position;
-    entity.angles = {0, authored.rotation_y, 0};
-    entity.floor = player_floor_number(collision, entity.position.y);
+    auto slot = allocate_enemy_work(enemies, authored, collision);
+    if (!slot)
+      throw std::runtime_error("Authored enemies exceed native work pool");
+    auto &entity = enemies.at(*slot);
     entity.model_bank =
         std::make_shared<const ActorModelBank>(std::move(models.at(i)));
     if (!entity.model_bank->models.empty())

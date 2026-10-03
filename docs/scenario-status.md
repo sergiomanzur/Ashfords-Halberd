@@ -250,3 +250,23 @@ mode 0. `en01.c::bhEne01_Init` requires the zombie controller and linked enemy
 work for body parts before the destination can run. Porting that controller
 is the next room-travel dependency; application travel remains unavailable.
 Door presentation, audio and a complete two-room playable slice remain pending.
+
+`allocate_enemy_work` now ports `eneset.c::bhSetEnemy` for the original fixed
+128-slot pool. It chooses the first inactive work slot, resets retained state,
+sets authored type/model version/position/yaw, recalculates floor, and follows
+the original model flags and final clipping-entry overwrite order. Room enemy
+binding uses this allocator while retaining the existing authored mapping and
+motion-loading order. Exhaustion returns no slot; invalid context or nonfinite
+positions/ground fail before changing the pool.
+
+`link_zombie_enemy` ports `en01.c::bhEne01_SetLinkEnemy`: allocate the original
+ID-1 `zob_lkmtab` before replacing its ID, set hidden linked flags, share the
+parent's immutable model/motion resources, and store parent/joint references
+as native indices. Tests cover recycled work, clipping lists, exhaustion,
+malformed context and ownership after state copying. The retail diagnostic
+checks six core linked-work bindings per zombie in both graveyard variants.
+These are allocation/ownership checks; zombie startup, linked-part transforms,
+AI, attacks/damage, collision and drawing still require their controllers.
+The actual transition diagnostic continues to reject actor ID 1 at mode 0.
+The selected initial graveyard contains five type-0 zombies (models 9 and 32)
+and actor ID 91; both zombie and subplayer controller paths remain necessary.
