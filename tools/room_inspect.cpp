@@ -74,6 +74,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_linked_work=0;
         size_t zombie_parameters=0;
         size_t zombie_joint_samples=0, zombie_linked_poses=0;
+        size_t zombie_channel_applications=0;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
@@ -112,9 +113,57 @@ int wmain(int argc,wchar_t** argv) {
                                     sample_motion(*(*zombie.motions)[motion],0,true);
                                 }
                                 for(uint32_t motion:{zombie.motion_number,202u}) {
-                                    if(motion>=zombie.motions->size() || !(*zombie.motions)[motion])
+                                    if(motion>=zombie.motions->size() || !(*zombie.motions)[motion] || !(*zombie.motions)[motion]->frames)
                                         throw std::runtime_error("Retail zombie startup motion missing");
                                     sample_motion(*(*zombie.motions)[motion],0,true);
+                                }
+                                // en01_flipTree / en01_flipTree2; body channels
+                                // address the complete skeleton starting at 8.
+                                for(bool body:{false,true}) {
+                                    const std::vector<int8_t> flip=body
+                                        ? std::vector<int8_t>{0,1,2,3,7,8,9,4,5,6,-1}
+                                        : std::vector<int8_t>{0,1,5,6,7,2,3,4,8,9,10,11,15,16,17,12,13,14,-1};
+                                    for(uint32_t number:{body?202u:zombie.motion_number,zombie_walk_motion(choice,body)}) {
+                                        const auto& motion=*(*zombie.motions)[number];
+                                        for(uint32_t frame:{0u,motion.frames/2,motion.frames-1})
+                                            for(bool mirrored:{false,true})
+                                                for(bool blended:{false,true}) {
+                                                    auto bind=actor_bind_pose(*zombie.model);
+                                                    MotionApplicationOptions options;
+                                                    options.mode=mirrored?2:0;
+                                                    options.joint_base=body?8:0;
+                                                    options.mirror_map=flip;
+                                                    if(blended)options.blend_rate=.35f;
+                                                    auto applied=apply_motion_pose(bind,motion,int64_t(frame)*65536,options);
+                                                    if(applied.pose.size()!=bind.size() || actor_joint_matrices(*zombie.model,applied.pose).size()!=bind.size())
+                                                        throw std::runtime_error("Retail zombie motion application changed joint count");
+                                                    if(body)
+                                                        for(size_t joint=0;joint<8;++joint) {
+                                                            const auto a=*bind[joint].position,b=*applied.pose[joint].position;
+                                                            if(a.x!=b.x || a.y!=b.y || a.z!=b.z || bind[joint].angles!=applied.pose[joint].angles)
+                                                                throw std::runtime_error("Retail body motion changed joints before offset eight");
+                                                        }
+                                                    if(!blended) {
+                                                        const bool slow=motion.flags&0x20,fast=!slow && !(motion.flags&0x10);
+                                                        const auto sampled=sample_motion(motion,int64_t(frame)*65536,slow);
+                                                        for(size_t track=0;track<sampled.size();++track) {
+                                                            const auto destination=options.joint_base+(mirrored?size_t(flip.at(track)):track);
+                                                            const auto& q=applied.pose.at(destination);
+                                                            if((!fast || !track) && sampled[track].position) {
+                                                                auto p=*sampled[track].position;if(mirrored)p.x=-p.x;
+                                                                if(q.position->x!=p.x || q.position->y!=p.y || q.position->z!=p.z)
+                                                                    throw std::runtime_error("Retail zombie translation channel mapping mismatch");
+                                                            }
+                                                            if(sampled[track].angles) {
+                                                                auto angles=*sampled[track].angles;
+                                                                if(mirrored){angles[1]=uint16_t(-int(angles[1]));angles[2]=uint16_t(-int(angles[2]));}
+                                                                if(q.angles!=angles)throw std::runtime_error("Retail zombie angle channel mapping mismatch");
+                                                            }
+                                                        }
+                                                    }
+                                                    ++zombie_channel_applications;
+                                                }
+                                    }
                                 }
                                 ++zombie_parameters;
                                 const auto& startup=*(*zombie.motions)[zombie.motion_number];
@@ -449,6 +498,9 @@ int wmain(int argc,wchar_t** argv) {
             if(zombie_joint_samples!=zombie_parameters*3 || zombie_linked_poses!=zombie_linked_work*3)
                 throw std::runtime_error("Missing retail zombie linked pose coverage");
             std::cout<<"Verified "<<zombie_joint_samples<<" graveyard skeleton samples and "<<zombie_linked_poses<<" whole-model linked placements\n";
+            if(zombie_channel_applications!=zombie_parameters*48)
+                throw std::runtime_error("Missing retail zombie channel application coverage");
+            std::cout<<"Applied "<<zombie_channel_applications<<" full/body graveyard motion samples with original mirroring, joint offset and blending\n";
             if(runtime_check)std::cout<<"Loaded "<<runtime_entries<<" native corridor runtime entries with Claire pose and initialized scenario state\n";
             if(runtime_check)std::cout<<"Advanced "<<runtime_ticks<<" joined player/actor/prop/scenario runtime ticks\n";
             if(runtime_check)std::cout<<"Applied player displacement on "<<runtime_movement_ticks<<" runtime ticks\n";

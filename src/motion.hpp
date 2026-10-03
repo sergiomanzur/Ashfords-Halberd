@@ -1,7 +1,7 @@
 #pragma once
 #include "scene.hpp"
-#include <optional>
 #include <memory>
+#include <optional>
 namespace ashford {
 struct MotionTrack {
   std::vector<Vec3> positions;
@@ -17,11 +17,30 @@ struct JointPose {
   std::optional<Vec3> position;
   std::optional<std::array<uint16_t, 3>> angles;
 };
-std::vector<JointPose> blend_motion_pose(const std::vector<JointPose> &current,
-                                         const std::vector<JointPose> &target,
-                                         float rate,
-                                         bool direct_translation = false,
-                                         const std::vector<uint8_t> &joint_flags = {});
+struct MotionApplicationOptions {
+  uint32_t mode = 0;
+  size_t joint_base = 0;
+  std::vector<uint8_t> joint_flags;
+  std::vector<int8_t> mirror_map;
+  std::optional<float> blend_rate;
+};
+struct MotionApplicationResult {
+  std::vector<JointPose> pose;
+  std::array<uint16_t, 3> angle_scratch{};
+};
+// Stateful SetMtn channel application; immutable inputs, no frame advancement.
+// Flags/map refer to work joints; mirror destinations are relative to
+// joint_base.
+MotionApplicationResult
+apply_motion_pose(const std::vector<JointPose> &current, const Motion &motion,
+                  int64_t frame_fixed,
+                  const MotionApplicationOptions &options = {},
+                  std::array<uint16_t, 3> angle_scratch = {});
+std::vector<JointPose>
+blend_motion_pose(const std::vector<JointPose> &current,
+                  const std::vector<JointPose> &target, float rate,
+                  bool direct_translation = false,
+                  const std::vector<uint8_t> &joint_flags = {});
 Motion decode_motion(const Bytes &data, size_t key_limit = 2000000);
 // bhSetMotion's post-sampling 16.16 counter update. Return -1/1 on loop
 // underflow/overflow, zero otherwise. Ping-pong direction is a complemented

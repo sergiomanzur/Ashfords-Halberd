@@ -265,8 +265,9 @@ parent's immutable model/motion resources, and store parent/joint references
 as native indices. Tests cover recycled work, clipping lists, exhaustion,
 malformed context and ownership after state copying. The retail diagnostic
 checks six core linked-work bindings per zombie in both graveyard variants.
-These are allocation/ownership checks; zombie startup, linked-part transforms,
-AI, attacks/damage, collision and drawing still require their controllers.
+These are allocation/ownership checks. Linked placement and channel application
+have the probes described below; zombie startup, AI, attacks/damage, collision
+and body drawing still require their controllers.
 The actual transition diagnostic continues to reject actor ID 1 at mode 0.
 The selected initial graveyard contains five type-0 zombies (models 9 and 32)
 and actor ID 91; both zombie and subplayer controller paths remain necessary.
@@ -295,6 +296,16 @@ unimplemented zombie controller explicitly.
 The linked transform prerequisite is now available through the actor renderer:
 world joint queries and baseline parent-joint/local-offset/XYZ placement share
 one skeleton traversal. Retail coverage includes 30 graveyard skeleton samples
-and 180 whole-model linked poses. Partial-body skeleton/motion selection,
+and 180 whole-model linked poses. Body subtree selection,
 rotation-reset flags and the complete enemy controller remain required; the
 diagnostic poses do not enable application travel or an enemy encounter.
+
+`apply_motion_pose` now supplies bounded full/body channel mapping and the
+original mirroring, work flags and six motion-application branches. Shared
+blend-angle scratch is owned by native scenario state and used by both actors
+and the player, preserving cross-call behavior without process globals.
+The corridor/player missing-channel regressions failed before integration and
+passed after it. Retail checks cover 480 graveyard startup/walking applications
+with mirrored/blended samples and the body's joint-eight offset. Complete
+zombie initialization, body subtree drawing, movement/attacks/damage and ID-91
+subplayer handling remain required; application graveyard travel stays pending.

@@ -23,9 +23,12 @@ struct PlayerLocomotion {
 // Healthy unarmed primary-model posing with the sampled frame/blend fields
 // retained by advance_player_locomotion. Keep the returned pose between ticks.
 // Player.c marks joints 7/11 for FastHokan's alternate angle interpolation.
-std::vector<JointPose> sample_player_locomotion_pose(
-    const PlayerPackage &package, const PlayerLocomotion &state,
-    const std::vector<JointPose> &previous = {});
+// A runtime supplies its shared angle scratch; isolated probes may omit it.
+std::vector<JointPose>
+sample_player_locomotion_pose(const PlayerPackage &package,
+                              const PlayerLocomotion &state,
+                              const std::vector<JointPose> &previous = {},
+                              std::array<uint16_t, 3> *angle_scratch = nullptr);
 // Retains the retail legacy clamp to a raw new frame count. Confirmed against
 // the user's USA ELF at bhGetFrameNum, not assumed from its partial decompile.
 int32_t remap_player_frame(uint32_t old_count, uint32_t new_count,

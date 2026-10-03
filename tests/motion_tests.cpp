@@ -67,6 +67,142 @@ int main() {
   try {
     auto b = fixture();
     auto m = decode_motion(b);
+    // Remapping must preserve source order and mirror only X position/YZ angle.
+    Motion channels;
+    channels.flags = 0x10;
+    channels.frames = 1;
+    channels.tracks.resize(2);
+    channels.tracks[0].positions = {{2, 4, 6}};
+    channels.tracks[0].angles = {{{100, 200, 300}}};
+    channels.tracks[1].positions = {{8, 10, 12}};
+    channels.tracks[1].angles = {{{400, 500, 600}}};
+    std::vector<JointPose> joints(5);
+    for (auto &joint : joints) {
+      joint.position = Vec3{20, 30, 40};
+      joint.angles = std::array<uint16_t, 3>{10, 20, 30};
+    }
+    MotionApplicationOptions mapping;
+    mapping.mode = 2;
+    mapping.joint_base = 2;
+    mapping.mirror_map = {1, 0, -1};
+    auto applied = apply_motion_pose(joints, channels, 0, mapping);
+    ck(applied.pose[0].position->x == 20 && applied.pose[4].position->x == 20);
+    ck(applied.pose[3].position->x == -2 && applied.pose[3].position->y == 4 &&
+       *applied.pose[3].angles ==
+           std::array<uint16_t, 3>{100, uint16_t(-200), uint16_t(-300)});
+    ck(applied.pose[2].position->x == -8 &&
+       (*applied.pose[2].angles)[0] == 400);
+    ck(joints[2].position->x == 20 && channels.tracks[0].positions[0].x == 2);
+    auto interpolated = channels;
+    interpolated.frames = 2;
+    for (auto &track : interpolated.tracks) {
+      track.positions.push_back({6, 8, 10});
+      track.angles.push_back({200, 600, 1000});
+    }
+    mapping.mode = 2 | 8; // Force Slow despite the motion's Normal flag.
+    applied = apply_motion_pose(joints, interpolated, 32768, mapping);
+    ck(applied.pose[3].position->x == -4 &&
+       *applied.pose[3].angles == std::array<uint16_t, 3>{150, uint16_t(-400), uint16_t(-650)});
+    mapping = {};
+    mapping.joint_flags = {4, 2, 0};
+    applied = apply_motion_pose(joints, channels, 0, mapping);
+    // Skip joint zero without consuming a track; joint one preserves angles.
+    ck(applied.pose[0].position->x == 20 && applied.pose[1].position->x == 2 &&
+       *applied.pose[1].angles == *joints[1].angles &&
+       applied.pose[2].position->x == 8);
+    mapping.blend_rate = .5f;
+    applied = apply_motion_pose(joints, channels, 0, mapping);
+    // NormalHokan consumes track zero even though destination zero is skipped.
+    ck(applied.pose[1].position->x == 14 && applied.pose[2].position->x == 20);
+    channels.flags = 0x20;
+    applied = apply_motion_pose(joints, channels, 0, mapping);
+    ck(applied.pose[1].position->x == 11 && applied.pose[2].position->x == 14);
+    channels.flags = 0;
+    mapping.blend_rate.reset();
+    applied = apply_motion_pose(joints, channels, 0, mapping);
+    // Fast root translation precedes the flag-4 test; later translations
+    // ignored.
+    ck(applied.pose[0].position->x == 2 && applied.pose[1].position->x == 20 &&
+       (*applied.pose[2].angles)[0] == 400);
+    mapping.blend_rate = .5f;
+    applied = apply_motion_pose(joints, channels, 0, mapping);
+    ck(applied.pose[0].position->x == 11);
+    mapping.mode = 0x100;
+    ck(apply_motion_pose(joints, channels, 0, mapping).pose[0].position->x ==
+       2);
+    mapping = {};
+    auto absent_channels = channels;
+    absent_channels.tracks[1].angles.clear();
+    for (uint8_t format : {uint8_t(0x10), uint8_t(0x20)}) {
+      absent_channels.flags = format;
+      applied = apply_motion_pose(joints, absent_channels, 0, mapping);
+      ck(*applied.pose[1].angles == std::array<uint16_t, 3>{0, 20, 30});
+    }
+    absent_channels.flags = 0;
+    ck(*apply_motion_pose(joints, absent_channels, 0).pose[1].angles ==
+       std::array<uint16_t, 3>{});
+    absent_channels.flags = 0x20;
+    mapping.blend_rate = 1.f;
+    applied = apply_motion_pose(joints, absent_channels, 0, mapping);
+    ck(*applied.pose[1].angles == std::array<uint16_t, 3>{0, 200, 300} &&
+       applied.angle_scratch == std::array<uint16_t, 3>{0, 200, 300});
+    // SlowHokan scratch survives separate calls and skips angle-disabled work.
+    Motion missing;
+    missing.frames = 1;
+    missing.flags = 0x20;
+    missing.tracks.resize(1);
+    applied =
+        apply_motion_pose(joints, missing, 0, mapping, applied.angle_scratch);
+    ck(*applied.pose[0].angles == std::array<uint16_t, 3>{0, 200, 300});
+    mapping.joint_flags = {2};
+    applied = apply_motion_pose(joints, channels, 0, mapping, {7, 8, 9});
+    ck(*applied.pose[0].angles == *joints[0].angles &&
+       applied.angle_scratch == std::array<uint16_t, 3>{400, 500, 600});
+    mapping.joint_flags = {};
+    missing.flags = 0x10;
+    applied = apply_motion_pose(joints, missing, 0, mapping, {7, 8, 9});
+    ck(applied.angle_scratch == std::array<uint16_t, 3>{});
+    // Work flag 8 affects only FastHokan's alternate Euler interpolation.
+    mapping.blend_rate = .35f;
+    mapping.joint_flags = {8};
+    channels.flags = 0;
+    channels.tracks[0].angles[0] = {8192, 8192, 8192};
+    auto alternate = apply_motion_pose(joints, channels, 0, mapping);
+    mapping.joint_flags.clear();
+    ck(alternate.pose[0].angles !=
+       apply_motion_pose(joints, channels, 0, mapping).pose[0].angles);
+    for (uint8_t format : {uint8_t(0x10), uint8_t(0x20)}) {
+      channels.flags = format;
+      mapping.joint_flags = {8};
+      auto flagged = apply_motion_pose(joints, channels, 0, mapping);
+      mapping.joint_flags.clear();
+      ck(flagged.pose[0].angles ==
+         apply_motion_pose(joints, channels, 0, mapping).pose[0].angles);
+    }
+    mapping = {};
+    mapping.mode = 2;
+    mapping.mirror_map = {0, -1};
+    bad([&] { apply_motion_pose(joints, channels, 0, mapping); });
+    mapping.mirror_map = {0, 99};
+    bad([&] { apply_motion_pose(joints, channels, 0, mapping); });
+    mapping = {};
+    mapping.joint_base = 5;
+    bad([&] { apply_motion_pose(joints, channels, 0, mapping); });
+    mapping = {};
+    mapping.joint_flags = {4, 4, 4, 4, 4};
+    bad([&] { apply_motion_pose(joints, channels, 0, mapping); });
+    mapping = {};
+    mapping.blend_rate = NAN;
+    bad([&] { apply_motion_pose(joints, channels, 0, mapping); });
+    bad([&] { apply_motion_pose(joints, channels, 65536); });
+    auto invalid_channels = channels;
+    invalid_channels.tracks[0].positions[0].x = INFINITY;
+    bad([&] { apply_motion_pose(joints, invalid_channels, 0); });
+    auto missing_fast_translation = channels;
+    missing_fast_translation.flags = 0;
+    missing_fast_translation.tracks[0].positions.clear();
+    bad([&] { apply_motion_pose(joints, missing_fast_translation, 0); });
+    ck(joints[0].position->x == 20 && (*joints[0].angles)[0] == 10);
     std::vector<JointPose> angle_start(1), angle_end(1);
     angle_start[0].angles = std::array<uint16_t, 3>{};
     angle_end[0].angles = std::array<uint16_t, 3>{8192, 8192, 8192};
@@ -74,18 +210,19 @@ int main() {
     auto shoulder = blend_motion_pose(angle_start, angle_end, .5f, false, {8});
     ck(shoulder[0].angles != ordinary[0].angles);
     auto endpoint = blend_motion_pose(angle_start, angle_end, 1.f, false, {8});
-    for(size_t axis=0;axis<3;++axis)
-      ck(std::abs(int((*endpoint[0].angles)[axis])-8192)<8);
+    for (size_t axis = 0; axis < 3; ++axis)
+      ck(std::abs(int((*endpoint[0].angles)[axis]) - 8192) < 8);
     bad([&] { blend_motion_pose(angle_start, angle_end, .5f, false, {4}); });
-    bad([&] { blend_motion_pose(angle_start, angle_end, .5f, false, {8,8}); });
-    angle_start[0].angles=std::array<uint16_t,3>{12000,64000,3000};
-    angle_end[0].angles=std::array<uint16_t,3>{50000,9000,62000};
-    shoulder=blend_motion_pose(angle_start,angle_end,.35f,false,{8});
+    bad([&] { blend_motion_pose(angle_start, angle_end, .5f, false, {8, 8}); });
+    angle_start[0].angles = std::array<uint16_t, 3>{12000, 64000, 3000};
+    angle_end[0].angles = std::array<uint16_t, 3>{50000, 9000, 62000};
+    shoulder = blend_motion_pose(angle_start, angle_end, .35f, false, {8});
     // Independent evaluation of the source's conversion equations and
     // quarter-wave lookup; tolerate a few integer units of libm rounding.
-    std::array<int,3> expected_shoulder{3856,2201,1158};
-    for(size_t axis=0;axis<3;++axis)
-      ck(std::abs(int((*shoulder[0].angles)[axis])-expected_shoulder[axis])<=2);
+    std::array<int, 3> expected_shoulder{3856, 2201, 1158};
+    for (size_t axis = 0; axis < 3; ++axis)
+      ck(std::abs(int((*shoulder[0].angles)[axis]) - expected_shoulder[axis]) <=
+         2);
     std::vector<JointPose> current(1), target(1);
     current[0].position = Vec3{2, 4, 6};
     target[0].position = Vec3{10, 12, 14};

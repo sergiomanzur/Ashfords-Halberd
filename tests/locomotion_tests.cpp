@@ -81,6 +81,24 @@ int main() {
         ck(std::abs(int((*player_pose[joint].angles)[axis])-expected[axis])<=4);
     }
     ck(player_pose[6].angles!=player_pose[7].angles);
+    posed_state.sampled_blend_count = 0;
+    posed_package.motions[0]->flags = 0x90;
+    posed_package.motions[0]->tracks[1].angles.clear();
+    player_pose[1].angles = std::array<uint16_t, 3>{10, 20, 30};
+    player_pose = sample_player_locomotion_pose(posed_package, posed_state, player_pose);
+    ck(*player_pose[1].angles == std::array<uint16_t, 3>{0, 20, 30});
+    posed_package.motions[0]->flags = 0xa0;
+    posed_package.motions[0]->tracks.resize(2);
+    posed_package.motions[0]->tracks[0].angles.assign(2, std::array<uint16_t, 3>{100, 200, 300});
+    posed_state.sampled_blend_count = 1;
+    posed_state.blend_rate = 0;
+    std::array<uint16_t, 3> shared_scratch{7, 8, 9};
+    player_pose = sample_player_locomotion_pose(posed_package, posed_state, player_pose, &shared_scratch);
+    ck(shared_scratch == std::array<uint16_t, 3>{0, 200, 300} &&
+       *player_pose[1].angles == shared_scratch);
+    posed_state.sampled_frame = -1;
+    bad([&] { sample_player_locomotion_pose(posed_package, posed_state, player_pose, &shared_scratch); });
+    ck(shared_scratch == std::array<uint16_t, 3>{0, 200, 300});
     tables[3].assign(21, 1);
     tables[6].assign(37, -.2f);
     PlayerLocomotion state;

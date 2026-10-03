@@ -5,9 +5,11 @@
 #include <cmath>
 #include <stdexcept>
 namespace ashford {
-std::vector<JointPose> sample_player_locomotion_pose(
-    const PlayerPackage &package, const PlayerLocomotion &state,
-    const std::vector<JointPose> &previous) {
+std::vector<JointPose>
+sample_player_locomotion_pose(const PlayerPackage &package,
+                              const PlayerLocomotion &state,
+                              const std::vector<JointPose> &previous,
+                              std::array<uint16_t, 3> *angle_scratch) {
   if (package.models.empty() || state.motion >= package.motions.size() ||
       !package.motions[state.motion])
     throw std::runtime_error("Missing player pose assets");
@@ -19,35 +21,21 @@ std::vector<JointPose> sample_player_locomotion_pose(
   if (!previous.empty() && previous.size() != bind.size())
     throw std::runtime_error("Player pose outside skeleton");
   auto current = previous.empty() ? std::move(bind) : previous;
-  bool slow = motion.flags & 0x20;
-  bool fast = !slow && !(motion.flags & 0x10);
-  auto target = sample_motion(motion, state.sampled_frame, slow);
-  if (target.size() > 64 || target.size() > current.size() ||
-      (fast && (target.empty() || !target[0].position)))
-    throw std::runtime_error("Unsupported player motion channel mapping");
-  for (size_t i = 0; i < target.size(); ++i) {
-    if (fast && i)
-      target[i].position.reset();
-    if (!target[i].angles)
-      target[i].angles = std::array<uint16_t, 3>{};
-  }
-  if (state.sampled_blend_count) {
-    std::vector<uint8_t> flags(current.size());
-    if (fast)
-      for (size_t joint : {7u, 11u})
-        if (joint < flags.size())
-          flags[joint] = 8;
-    float rate = 0.000015258789f * (65536u - state.blend_rate);
-    return blend_motion_pose(current, target, rate, false, flags);
-  }
-  for (size_t i = 0; i < target.size(); ++i) {
-    if (target[i].position)
-      current[i].position = target[i].position;
-    if (target[i].angles)
-      current[i].angles = target[i].angles;
-  }
-  return current;
+  MotionApplicationOptions options;
+  options.joint_flags.resize(current.size());
+  for (size_t joint : {7u, 11u})
+    if (joint < options.joint_flags.size())
+      options.joint_flags[joint] = 8;
+  if (state.sampled_blend_count)
+    options.blend_rate = 0.000015258789f * (65536u - state.blend_rate);
+  auto applied = apply_motion_pose(
+      current, motion, state.sampled_frame, options,
+      angle_scratch ? *angle_scratch : std::array<uint16_t, 3>{});
+  if (angle_scratch)
+    *angle_scratch = applied.angle_scratch;
+  return std::move(applied.pose);
 }
+
 int32_t remap_player_frame(uint32_t old_count, uint32_t new_count,
                            int32_t frame) {
   if (!old_count || !new_count || old_count > 32767 || new_count > 32767 ||

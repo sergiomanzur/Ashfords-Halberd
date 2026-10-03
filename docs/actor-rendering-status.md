@@ -8,7 +8,7 @@ Rigid meshes use their posed joint matrices. Actor object indices are kept
 outside the room camera's hide-mask range.
 
 This follows the default `npSkinConvert`/`npCalcSkin` path. FM remapping,
-motion-transition blending/mirroring, facial variants, attachments, lighting
+facial variants, attachments, lighting
 normals and original render-state fidelity remain pending. The current byte-copy
 deformation path explicitly rejects overlapping skin vertex buffers, including
 sharing with a rigid mesh, rather than silently overwriting another pose.
@@ -89,8 +89,8 @@ the same validated hierarchy traversal as rendering. Matrix-only queries do
 not decode meshes, skin buffers or textures. `pose_actor_linked` follows
 `bhCalcTree`'s baseline parent-joint matrix, local translation and Z–Y–X
 rotation composition. It accepts finite affine parent matrices and preserves
-cached model/skin bytes. The optional work flag `0x1000` rotation reset,
-subtree selection and mirrored/partial-body motion application remain pending.
+cached model/skin bytes. The optional work flag `0x1000` rotation reset and
+subtree selection remain pending. Body channel application is described below.
 This API poses a supplied whole model; it does not initialize zombie body-part
 controllers or make the graveyard playable.
 
@@ -100,3 +100,21 @@ and malformed parent/skeleton rejection. The headless retail runtime probe
 verified 30 skeleton samples and 180 whole-model linked placements for ten
 graveyard zombie roots across both room variants, comparing every triangle
 corner with its parent joint placement and checking cached asset immutability.
+
+Motion application now handles the original full/body destination maps, body
+joint offset, mirrored axes and work flags before rendering. All six
+Normal/Fast/Slow direct/blended paths preserve their branch-specific absent
+channel behavior. Normal and Slow direct paths clear only missing angle X;
+SlowHokan retains Y/Z in the shared blend-angle scratch. These unusual stores
+were verified against the user's USA ELF. Only FastHokan applies flag 8's
+alternate Euler conversion. Generic raw sampling keeps absent channels absent.
+The corridor controller and player locomotion both use this bounded application
+helper, sharing scratch owned by `ScenarioState`, including initial room entry.
+Errors leave caller motion/pose inputs and shared scratch unchanged.
+
+The headless retail probe applied 480 full/body startup and walking samples
+across ten graveyard roots, checking mirroring, blending and the body offset
+against both model versions. Body samples preserved joints before index eight;
+direct samples were checked against independent destination/axis mapping.
+This completes the channel-application dependency, not zombie initialization,
+body subtree drawing, AI/combat or the complete playable slice.

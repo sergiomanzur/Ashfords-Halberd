@@ -871,40 +871,25 @@ void tick_scenario_actors(ScenarioState &state) {
         throw std::runtime_error("Scenario actor frame outside motion");
       if (entity.joint_pose.empty())
         entity.joint_pose = actor_bind_pose(*entity.model);
-      bool slow = (entity.motion_mode & 8) || (motion.flags & 0x20);
-      auto target = sample_motion(motion, entity.frame, slow);
-      if (target.size() > 64 || (!slow && !(motion.flags & 0x10) &&
-                                 (target.empty() || !target[0].position)))
-        throw std::runtime_error("Unsupported scenario actor channel mapping");
-      if (target.size() > entity.joint_pose.size())
-        throw std::runtime_error("Scenario actor tracks outside skeleton");
-      for (size_t i = 0; i < target.size(); ++i) {
-        if (!slow && !(motion.flags & 0x10) && i)
-          target[i].position.reset();
-        if (!target[i].angles)
-          target[i].angles = std::array<uint16_t, 3>{};
-      }
+      MotionApplicationOptions options;
+      options.mode = entity.motion_mode;
       if (entity.blend_count) {
         uint32_t remaining_bits = 65536u - uint32_t(entity.blend_rate);
         int32_t remaining_rate =
             remaining_bits < 0x80000000u
                 ? int32_t(remaining_bits)
                 : int32_t(int64_t(remaining_bits) - 0x100000000ll);
-        float rate =
+        options.blend_rate =
             entity.motion_mode & 0x20
                 ? 1.f / entity.blend_count - 0.000015258789f * entity.blend_rate
                 : 0.000015258789f * remaining_rate;
-        entity.joint_pose = blend_motion_pose(entity.joint_pose, target, rate,
-                                              entity.motion_mode & 0x100);
-        --entity.blend_count;
-      } else {
-        for (size_t i = 0; i < target.size(); ++i) {
-          if (target[i].position)
-            entity.joint_pose[i].position = target[i].position;
-          if (target[i].angles)
-            entity.joint_pose[i].angles = target[i].angles;
-        }
       }
+      auto applied = apply_motion_pose(entity.joint_pose, motion, entity.frame,
+                                       options, state.motion_angle_scratch);
+      entity.joint_pose = std::move(applied.pose);
+      state.motion_angle_scratch = applied.angle_scratch;
+      if (entity.blend_count)
+        --entity.blend_count;
       if (!motion.attributes.empty())
         entity.motion_attribute =
             motion.attributes.at(size_t(entity.frame) >> 16);

@@ -1,8 +1,9 @@
 #include "motion.hpp"
-#include "room.hpp"
 #include "ninja_math.hpp"
+#include "room.hpp"
 // Adapted from MIT recvx-decomp binfunc.c::bhMnbBinRealize and
-// Motion.c::SetMtnNormal/SetMtnFast/SetMtnSlow. Disk pointers stay offsets.
+// Motion.c::SetMtnNormal/SetMtnFast/SetMtnSlow and their Hokan paths.
+// Disk pointers stay offsets.
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -38,22 +39,23 @@ std::array<int, 3> convert_angles(std::array<int, 3> a, bool to_yzx) {
   auto z = ninja_sin_cos(uint16_t(a[2]));
   if (to_yzx) {
     float b = z[0] * y[0];
-    return {int(10430.381f * std::atan2(z[1] * x[0] - b * x[1],
-                                       z[1] * x[1] + b * x[0])),
+    return {int(10430.381f *
+                std::atan2(z[1] * x[0] - b * x[1], z[1] * x[1] + b * x[0])),
             int(10430.381f * std::atan2(y[0], z[1] * y[1])),
             int(10430.381f * std::asin(z[0] * y[1]))};
   }
   float b = y[0] * z[0];
-  return {int(10430.381f * std::atan2(y[1] * x[0] + b * x[1],
-                                     y[1] * x[1] - b * x[0])),
+  return {int(10430.381f *
+              std::atan2(y[1] * x[0] + b * x[1], y[1] * x[1] - b * x[0])),
           int(10430.381f * std::asin(y[0] * z[1])),
           int(10430.381f * std::atan2(z[0], y[1] * z[1]))};
 }
 } // namespace
-std::vector<JointPose> blend_motion_pose(const std::vector<JointPose> &current,
-                                         const std::vector<JointPose> &target,
-                                         float rate, bool direct_translation,
-                                         const std::vector<uint8_t> &joint_flags) {
+std::vector<JointPose>
+blend_motion_pose(const std::vector<JointPose> &current,
+                  const std::vector<JointPose> &target, float rate,
+                  bool direct_translation,
+                  const std::vector<uint8_t> &joint_flags) {
   if (!std::isfinite(rate) || target.size() > current.size() ||
       current.size() > 4096 || joint_flags.size() > current.size())
     throw std::runtime_error("Invalid motion blend input");
@@ -108,14 +110,15 @@ std::vector<JointPose> blend_motion_pose(const std::vector<JointPose> &current,
         source = {32768 + source[0], 32768 - source[1], 32768 + source[2]};
       if (i < joint_flags.size() && (joint_flags[i] & 8)) {
         source = convert_angles(source, true);
-        auto destination = convert_angles({int(b[0]), int(b[1]), int(b[2])}, true);
+        auto destination =
+            convert_angles({int(b[0]), int(b[1]), int(b[2])}, true);
         for (size_t axis = 0; axis < 3; ++axis)
-          source[axis] = uint16_t(int64_t(source[axis]) +
-                                 weighted(short_word(destination[axis] - source[axis])));
+          source[axis] =
+              uint16_t(int64_t(source[axis]) +
+                       weighted(short_word(destination[axis] - source[axis])));
         source = convert_angles(source, false);
-        result[i].angles = std::array<uint16_t, 3>{uint16_t(source[0]),
-                                                   uint16_t(source[1]),
-                                                   uint16_t(source[2])};
+        result[i].angles = std::array<uint16_t, 3>{
+            uint16_t(source[0]), uint16_t(source[1]), uint16_t(source[2])};
         continue;
       }
       std::array<uint16_t, 3> out{};
@@ -124,6 +127,114 @@ std::vector<JointPose> blend_motion_pose(const std::vector<JointPose> &current,
                              weighted(short_word(int(b[axis]) - source[axis])));
       result[i].angles = out;
     }
+  }
+  return result;
+}
+MotionApplicationResult
+apply_motion_pose(const std::vector<JointPose> &current, const Motion &motion,
+                  int64_t frame, const MotionApplicationOptions &options,
+                  std::array<uint16_t, 3> angle_scratch) {
+  if (current.size() > 4096 || motion.tracks.size() > 64 || !motion.frames ||
+      motion.frames > 65535 || frame < 0 ||
+      uint64_t(frame) >= uint64_t(motion.frames) * 65536 ||
+      options.joint_base > current.size() ||
+      options.joint_flags.size() > current.size() ||
+      (options.blend_rate && !std::isfinite(*options.blend_rate)))
+    throw std::runtime_error("Invalid motion application input");
+  const bool slow = (options.mode & 8) || (motion.flags & 0x20);
+  const bool fast = !slow && !(motion.flags & 0x10);
+  const bool mirrored = options.mode & 2;
+  auto sampled = sample_motion(motion, frame, slow);
+  MotionApplicationResult result{current, angle_scratch};
+  auto destination = [&](size_t map_index) {
+    // NormalTbl has 64 entries; mirrored tables end with signed -1.
+    if (map_index >= 64)
+      throw std::runtime_error("Motion destination map exhausted");
+    size_t relative = map_index;
+    if (mirrored) {
+      if (map_index >= options.mirror_map.size() ||
+          options.mirror_map[map_index] < 0)
+        throw std::runtime_error("Motion mirror map exhausted");
+      relative = size_t(options.mirror_map[map_index]);
+    }
+    if (relative >= current.size() - options.joint_base)
+      throw std::runtime_error("Motion destination outside skeleton");
+    return options.joint_base + relative;
+  };
+  auto write_pose = [&](size_t index, const JointPose &target, uint8_t flags) {
+    if (target.position) {
+      const auto p = *target.position;
+      if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z))
+        throw std::runtime_error("Non-finite applied motion position");
+    }
+    if (options.blend_rate) {
+      // Only FastHokan has the work-flag-8 alternate Euler path.
+      auto blended = blend_motion_pose(
+          {result.pose[index]}, {target}, *options.blend_rate,
+          options.mode & 0x100, {uint8_t(fast ? flags & 8 : 0)});
+      result.pose[index] = std::move(blended[0]);
+    } else {
+      if (target.position)
+        result.pose[index].position = target.position;
+      if (target.angles)
+        result.pose[index].angles = target.angles;
+    }
+  };
+  if (fast) {
+    if (sampled.empty() || !sampled[0].position)
+      throw std::runtime_error("Fast motion missing root translation");
+    JointPose root;
+    root.position = sampled[0].position;
+    if (mirrored)
+      root.position->x = -root.position->x;
+    // The reference applies this before the first destination's flag checks.
+    write_pose(destination(0), root, 0);
+  }
+  size_t track = 0, map_index = 0;
+  while (track < sampled.size()) {
+    const auto index = destination(map_index++);
+    const uint8_t flags =
+        index < options.joint_flags.size() ? options.joint_flags[index] : 0;
+    if (flags & 4) {
+      // NormalHokan's for-loop consumes skipped tracks; other paths do not.
+      if (!slow && !fast && options.blend_rate)
+        ++track;
+      continue;
+    }
+    JointPose target;
+    if (!fast && sampled[track].position) {
+      target.position = sampled[track].position;
+      if (mirrored)
+        target.position->x = -target.position->x;
+    }
+    if (!(flags & 2)) {
+      auto angles = sampled[track].angles;
+      if (angles && mirrored) {
+        (*angles)[1] = uint16_t(-int((*angles)[1]));
+        (*angles)[2] = uint16_t(-int((*angles)[2]));
+      }
+      if (options.blend_rate) {
+        if (angles)
+          result.angle_scratch = *angles;
+        else if (slow)
+          result.angle_scratch[0] = 0;
+        else
+          result.angle_scratch = {};
+        target.angles = result.angle_scratch;
+      } else if (angles) {
+        target.angles = angles;
+      } else if (fast) {
+        target.angles = std::array<uint16_t, 3>{};
+      } else {
+        // USA SetMtnNormal/Slow store zero to X three times, retaining Y/Z.
+        if (!result.pose[index].angles)
+          throw std::runtime_error("Applied motion missing current angles");
+        target.angles = result.pose[index].angles;
+        (*target.angles)[0] = 0;
+      }
+    }
+    write_pose(index, target, flags);
+    ++track;
   }
   return result;
 }

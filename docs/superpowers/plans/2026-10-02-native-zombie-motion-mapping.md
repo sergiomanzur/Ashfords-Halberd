@@ -19,7 +19,8 @@ consumes one even when skipped. SlowHokan also skips without consuming. Work
 flag 2 preserves destination angles. Fast translation is applied to the first
 mapped destination before checking its work flags; other translations are
 ignored in that format. Translation override mode 0x100 applies during blend.
-Blend work flag 8 selects the existing alternate Euler conversion path.
+Only FastHokan uses work flag 8 for alternate Euler conversion; NormalHokan
+and SlowHokan use the ordinary angle blend regardless of that flag.
 
 Three suspicious missing-angle assignments were verified by headless static
 disassembly of the user's supplied USA executable, not by executing MIPS:
@@ -57,3 +58,15 @@ After this dependency, implement original body subtree selection, remaining
 model flags and complete zombie initialization, then movement, attack/damage
 and the required subplayer controller. Application travel remains disabled
 until those paths validate; diagnostic full-model poses are not gameplay.
+
+## Verified implementation checkpoint
+
+Implemented bounded channel application, shared scenario scratch and corridor/
+player integration. Missing-channel integration regressions failed before the
+replacement and passed afterward. All 19 CTest suites passed headlessly, and
+the packaged real-asset smoke rendered 240 frames with movement, focus blocking
+and menu return. Retail probes checked all 205 rooms, 480 full/body graveyard
+applications, 30 skeleton samples, 180 linked placements and 960 corridor ticks.
+Review found an ordering error in the diagnostic's startup-motion presence
+checks; moving those checks before every dereference resolved it, and the
+retail probe passed again. Actual travel still fails on room 2 actor 1 mode 0.

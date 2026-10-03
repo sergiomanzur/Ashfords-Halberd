@@ -100,7 +100,8 @@ void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
     runtime.world = advance_player_world(runtime.world, player, translations,
                                          runtime.collision, runtime.cuts, pad);
     runtime.player_pose = sample_player_locomotion_pose(
-        player, runtime.world.player, runtime.player_pose);
+        player, runtime.world.player, runtime.player_pose,
+        &scenario.motion_angle_scratch);
     runtime.player_scene =
         pose_actor(player.models.at(0), runtime.player_pose,
                    runtime.world.player.position, runtime.world.player.yaw);
@@ -128,8 +129,8 @@ RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
   // before advancing the motion counter visible to initialization scripts.
   if (persistent.equipped_weapon != 0)
     throw std::runtime_error("Armed room entry requires its player controller");
-  result.player_pose =
-      sample_player_locomotion_pose(player, result.world.player);
+  result.player_pose = sample_player_locomotion_pose(
+      player, result.world.player, {}, &persistent.motion_angle_scratch);
   result.player_scene =
       pose_actor(player.models.at(0), result.player_pose,
                  result.world.player.position, result.world.player.yaw);

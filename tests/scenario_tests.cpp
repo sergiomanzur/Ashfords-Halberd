@@ -966,6 +966,18 @@ int main() {
     tick_scenario_actors(transformed);
     ck(bound.joint_pose[0].position->x == 20 &&
        bound.joint_pose[1].position->y == 7 && bound.frame == 65536);
+    animation.tracks[0].angles.assign(2, std::array<uint16_t, 3>{100, 200, 300});
+    animation.tracks[1].angles.clear();
+    (*animated_bank)[0] = animation;
+    bound.frame = 0;
+    bound.blend_count = 1;
+    bound.joint_pose = actor_bind_pose(*bound.model);
+    tick_scenario_actors(transformed);
+    ck(*bound.joint_pose[1].angles == std::array<uint16_t, 3>{0, 200, 300});
+    ck(transformed.motion_angle_scratch == std::array<uint16_t, 3>{0, 200, 300});
+    auto scratch_copy = transformed;
+    scratch_copy.motion_angle_scratch[1] = 99;
+    ck(transformed.motion_angle_scratch[1] == 200);
     transformed.flags[6][0] = 0x10;
     transformed.tasks[1].work_index.reset();
     controller_case(Bytes{105, 11, 0, 0, 0, 0}, true);

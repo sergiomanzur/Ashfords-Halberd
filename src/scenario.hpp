@@ -104,6 +104,8 @@ struct ScenarioState {
   size_t current_task = 0;
   uint32_t event_timer = 0;
   uint32_t random_seed = 1;
+  // Motion.c's shared mka_ang belongs to this native runtime, not a global.
+  std::array<uint16_t, 3> motion_angle_scratch{};
   int32_t game_mode = 0;
   int conditional_depth = 0;
   int64_t branch_cursor = 0;
@@ -141,12 +143,12 @@ void bind_room_enemies(const Bytes &data, const RoomCollision &collision,
 // eneset.c::bhSetEnemy first-free allocation; an exhausted original pool
 // returns no slot. Newly allocated work has no model/motion bindings yet.
 std::optional<size_t> allocate_enemy_work(std::vector<ScenarioEntity> &pool,
-                                        const RoomEntity &authored,
-                                        const RoomCollision &collision);
+                                          const RoomEntity &authored,
+                                          const RoomCollision &collision);
 // en01.c::bhEne01_SetLinkEnemy: hidden linked work shares immutable parent
 // assets and stores its parent as a stable slot index, rather than a pointer.
 std::optional<size_t> link_zombie_enemy(ScenarioState &state, size_t parent,
-                                      int32_t joint, uint16_t id);
+                                        int32_t joint, uint16_t id);
 // Preserve attachment slots 0–3; replace authored objects/items only after
 // validating all room assets. Controllers run separately.
 void bind_room_props(const Bytes &data, ScenarioState &state);
