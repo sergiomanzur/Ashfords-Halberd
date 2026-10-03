@@ -157,7 +157,8 @@ void calculate_startup_capsule(ScenarioState &state, size_t work) {
     owner.rendered_model = draw_zombie_model(state, owner_index);
   }
 }
-void apply_zombie_motion(ScenarioState &state, size_t work) {
+void apply_zombie_motion(ScenarioState &state, size_t work, int32_t add,
+                         uint32_t mode) {
   const auto owner_index = pose_owner(state, work);
   auto &zombie = state.enemies[work];
   if (zombie.id != 1 || !(zombie.flags & 1) || !zombie.zombie_work ||
@@ -170,7 +171,7 @@ void apply_zombie_motion(ScenarioState &state, size_t work) {
   if (!slot)
     return; // bhSetMotion leaves counters untouched for a null record.
   MotionApplicationOptions options;
-  options.mode = zombie.motion_mode;
+  options.mode = mode;
   options.joint_flags.reserve(owner.model_work->joints.size());
   for (const auto &joint : owner.model_work->joints)
     options.joint_flags.push_back(uint8_t(joint.flags));
@@ -186,18 +187,16 @@ void apply_zombie_motion(ScenarioState &state, size_t work) {
         remaining_bits < 0x80000000u
             ? int32_t(remaining_bits)
             : int32_t(int64_t(remaining_bits) - 0x100000000ll);
-    options.blend_rate =
-        zombie.motion_mode & 0x20
-            ? 1.f / zombie.blend_count - .000015258789f * zombie.blend_rate
-            : .000015258789f * remaining;
+    options.blend_rate = mode & 0x20 ? 1.f / zombie.blend_count -
+                                           .000015258789f * zombie.blend_rate
+                                     : .000015258789f * remaining;
   }
   auto applied = apply_motion_pose(owner.joint_pose, *slot, zombie.frame,
                                    options, state.motion_angle_scratch);
   auto frame = zombie.frame;
   auto direction = zombie.frame_direction;
   const auto boundary =
-      advance_motion_frame(slot->frames, int32_t(zombie.motion_step),
-                           zombie.motion_mode, frame, direction);
+      advance_motion_frame(slot->frames, add, mode, frame, direction);
   const auto attribute =
       motion_attribute_at(*slot, zombie.frame, zombie.motion_attribute);
   owner.joint_pose = std::move(applied.pose);
@@ -208,6 +207,12 @@ void apply_zombie_motion(ScenarioState &state, size_t work) {
   zombie.motion_attribute = attribute;
   if (zombie.blend_count)
     --zombie.blend_count;
+}
+void apply_zombie_motion(ScenarioState &state, size_t work) {
+  if (work >= state.enemies.size())
+    throw std::runtime_error("Zombie motion work outside pool");
+  const auto &e = state.enemies[work];
+  apply_zombie_motion(state, work, int32_t(e.motion_step), e.motion_mode);
 }
 void initialize_work(ScenarioState &state, size_t work) {
   if (!state.collision || state.enemies.size() != 128 ||
@@ -345,6 +350,10 @@ void initialize_work(ScenarioState &state, size_t work) {
 namespace detail {
 void apply_zombie_motion_channels(ScenarioState &state, size_t work) {
   apply_zombie_motion(state, work);
+}
+void apply_zombie_motion_channels(ScenarioState &state, size_t work,
+                                  int32_t add, uint32_t mode) {
+  apply_zombie_motion(state, work, add, mode);
 }
 } // namespace detail
 void initialize_zombie_work(ScenarioState &state, size_t work) {

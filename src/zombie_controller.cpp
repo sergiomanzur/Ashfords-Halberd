@@ -1,3 +1,4 @@
+#include "scenario_motion.hpp"
 #include "zombie.hpp"
 #include <stdexcept>
 namespace ashford {
@@ -23,6 +24,9 @@ void tick_zombie_controller(ScenarioState &state, size_t work,
   case 0:
     initialize_zombie_work(state, work);
     player.flags &= ~4u;
+    break;
+  case 5:
+    tick_scripted_enemy(state, work);
     break;
   case 6:
     // Source MainLoop bypasses Mode0 dispatch, retaining the rest of the frame.

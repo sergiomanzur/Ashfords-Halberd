@@ -48,3 +48,7 @@ Complete Step1 still requires full original entry/gameplay in the connected
 rooms, enemy AI, combat/inventory, complete audio/effect drawing, cross-room
 versioned save/load and independent original-game comparison. New Game stays
 disabled. This increment does not establish full-slice acceptance.
+
+Subsequent original scripted motion work passes common24 and now reaches
+opcode11at364 in RDX2. See docs/native-scripted-motion-status.md for current
+boundaries; the earlier entry evidence above belongs to its own increment.

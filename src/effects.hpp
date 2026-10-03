@@ -1,5 +1,6 @@
 #pragma once
 #include "collision.hpp"
+#include "scene.hpp"
 namespace ashford {
 struct ScenarioState;
 struct EnemyShadow;
@@ -21,6 +22,7 @@ struct NativeEffectWork {
   std::array<int32_t, 3> angles{}; // O_WRK widens EF_WORK angles.
   int32_t texture_id = 0, linked_joint = 0;
   std::optional<size_t> linked_parent;
+  std::optional<ModelMatrix> model_matrix; // O_WRK::mtx after CalcLinkModel.
   std::optional<size_t> linked_wall; // Effect29's static/dynamic ATR link.
   Vec3 offset{}, base_scale{}, direction{};
   uint32_t motion_color = 0, motion_number = 0;

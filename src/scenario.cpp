@@ -1,6 +1,7 @@
 #include "scenario.hpp"
 #include "effects.hpp"
 #include "room.hpp"
+#include "scenario_motion.hpp"
 #include "zombie.hpp"
 #include <limits>
 #include <stdexcept>
@@ -578,34 +579,9 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
         }
         pc += 4;
       } else if (operation == 24) {
-        if (program[pc + 3] != 1 || program[pc + 6] != 1 || entity.id == 1)
-          throw std::runtime_error(
-              "Unsupported scenario motion selection mode or companion");
-        if (!state.room_motions || state.room_motions->size() != 512)
-          throw std::runtime_error(
-              "Scenario motion selection without room bank");
-        static constexpr uint32_t steps[] = {
-            0x8000, 0x10000, 0x10000, 0x8000, 0x5555, 0x4000, 0x3333,
-            0x2aaa, 0x8000,  0x4000,  0x2aaa, 0x2000, 0x1999, 0x1555,
-            0x2492, 0x2000,  0x1c71,  0x1999, 0x1745, 0x1555, 0x1249,
-            0x1000, 0xe38,   0xccc,   0xba2,  0xaaa};
-        auto speed = program[pc + 2];
-        if (speed >= std::size(steps))
-          throw std::runtime_error("Unsupported scenario motion speed");
-        auto motion = program[pc + 4], blend = program[pc + 7];
-        entity.motions = state.room_motions;
-        entity.motion_step = steps[speed];
-        entity.modes = {uint8_t(program[pc + 5] ? 5 : 1), motion, 0, 0};
-        entity.motion_number = (entity.motion_number & ~0xffu) | motion;
-        entity.motion_mode = speed == 1 || speed == 2 ? 0x20 : 0x28;
-        entity.blend_rate = 0;
-        entity.control1 = 1;
-        entity.control2 = blend > 8 ? 10 : blend;
-        if (blend == 6)
-          entity.motion_mode |= 8;
-        else if (blend > 8)
-          entity.blend_count = blend;
-        entity.frame = 0;
+        select_scenario_motion(state, task->work_group, *task->work_index,
+            {program[pc + 2], program[pc + 3], program[pc + 4],
+             program[pc + 5], program[pc + 6], program[pc + 7]});
         pc += 8;
       } else if (operation == 47) {
         if (!entity.model)
@@ -1066,6 +1042,24 @@ void tick_scenario_actors(ScenarioState &state, ScenarioEntity *player) {
       // Never use the previous entity reference after this callback.
       auto &completed = state.enemies[work_index];
       finish_enemy_frame(completed, enemy_damage_joints(state, work_index));
+      continue;
+    }
+    if ((entity.id == 67 || entity.id == 91) &&
+        (entity.modes[0] == 5 || entity.modes[0] == 6)) {
+      const auto damage_joints = enemy_damage_joints(state, work_index);
+      entity.previous_position = entity.position;
+      entity.previous_angles = entity.angles;
+      if (entity.id == 91 && entity.face)
+        tick_face_runtime(*entity.face, entity.joint_pose, entity.id,
+                          entity.secondary_flags, state.flags[11][0]);
+      entity.flags = (entity.flags | 0x8100) & ~2u;
+      tick_scripted_enemy(state, work_index);
+      calculate_scenario_models(state, 1, work_index, true, false);
+      if (entity.pose_owner)
+        throw std::runtime_error("Unported generic scripted actor pose alias drawing");
+      entity.rendered_model = pose_actor_model_work(
+          actor_model(entity), entity.joint_pose, *entity.model_work);
+      finish_enemy_frame(entity, damage_joints);
       continue;
     }
     if ((entity.id != 67 && entity.id != 91) || entity.modes[0] > 1 ||
