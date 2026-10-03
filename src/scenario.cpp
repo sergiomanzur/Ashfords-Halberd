@@ -609,6 +609,15 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
       }
       break;
     }
+    case 106:
+      // event.c::bhEventSkipSet consumes one byte and toggles only gm_flg.
+      extent(2);
+      if (program[pc + 1] == 0)
+        state.flags[11][0] |= 0x40000000;
+      else
+        state.flags[11][0] &= ~0x40000000u;
+      pc += 2;
+      break;
     case 182:
       extent(2);
       state.room_sound_case = program[pc + 1];
@@ -904,13 +913,19 @@ void tick_scenario_tasks(ScenarioState &state) {
     }
   }
 }
-void initialize_scenario(ScenarioState &state) {
+void initialize_scenario(ScenarioState &state, ScenarioEntity *player) {
   if (!state.scenario)
     throw std::runtime_error("No bound room scenario");
   const auto &initialization = state.scenario->program(0);
   for (auto &task : state.tasks)
     task.active = false;
-  tick_scenario_actors(state);
+  tick_scenario_actors(state, player);
+  if (player) {
+    state.player_work_flags = player->flags;
+    state.player_state_flags = player->state_flags;
+    state.player_secondary_flags = player->secondary_flags;
+    state.player_health = player->health;
+  }
   state.current_task = 0;
   state.conditional_depth = 0;
   state.event_timer = 0;
@@ -925,6 +940,12 @@ void initialize_scenario(ScenarioState &state) {
     throw;
   }
   state.flags[6][0] &= ~0x10u;
+  if (player) {
+    player->flags = state.player_work_flags;
+    player->state_flags = state.player_state_flags;
+    player->secondary_flags = state.player_secondary_flags;
+    player->health = state.player_health;
+  }
 }
 void control_scenario(ScenarioState &state) {
   if (!state.scenario || state.current_task >= state.tasks.size())
@@ -934,7 +955,7 @@ void control_scenario(ScenarioState &state) {
   run_scenario_impl(control, state, &state.tasks[state.current_task], false);
   tick_scenario_tasks(state);
 }
-void tick_scenario_actors(ScenarioState &state) {
+void tick_scenario_actors(ScenarioState &state, ScenarioEntity *player) {
   if (!(state.flags[6][0] & 2))
     return;
   for (size_t work_index = 0; work_index < state.enemies.size(); ++work_index) {
@@ -963,6 +984,18 @@ void tick_scenario_actors(ScenarioState &state) {
       entity.previous_angles = entity.angles;
       tick_zombie_auxiliary(state, work_index);
       finish_enemy_frame(entity, damage_joints);
+      continue;
+    }
+    if (entity.id == 1) {
+      if (!player)
+        throw std::runtime_error("Missing scheduled zombie player work");
+      entity.previous_position = entity.position;
+      entity.previous_angles = entity.angles;
+      tick_zombie_controller(state, work_index, *player);
+      // Init commits a replacement state, including newly allocated work.
+      // Never use the previous entity reference after this callback.
+      auto &completed = state.enemies[work_index];
+      finish_enemy_frame(completed, enemy_damage_joints(state, work_index));
       continue;
     }
     if ((entity.id != 67 && entity.id != 91) || entity.modes[0] > 1 ||

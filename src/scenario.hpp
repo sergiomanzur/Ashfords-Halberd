@@ -64,6 +64,7 @@ struct ZombieExtendedWork {
   uint8_t damage_rotation_frame = 0;            // EXP0_UC(0x2c).
   int8_t attack_delay = 0;                      // EXP0_C(0x2f).
   int8_t stair_start_floor = 0, stair_step = 0; // EXP0_C(0x2d/0x2e).
+  int32_t frame_timer_30 = 0, frame_timer_34 = 0; // EXP0_I(48/52), decimal.
   int32_t pursuit_phase_word = 0;               // EXP0_I/F(0x94), shared bits.
   int32_t pursuit_transition_timer = 0;         // EXP0_I(0x98).
   float target_x = 0, target_z = 0;             // EXP0_F(0x58/0x60).
@@ -240,7 +241,7 @@ void run_scenario(const Bytes &program, ScenarioState &state);
 void run_scenario(const ScenarioProgram &program, ScenarioState &state);
 size_t start_scenario_event(ScenarioState &state, size_t level, size_t event);
 void tick_scenario_tasks(ScenarioState &state);
-void tick_scenario_actors(ScenarioState &state);
+void tick_scenario_actors(ScenarioState &state, ScenarioEntity *player = nullptr);
 // Native simple object controllers and pickup highlight timing. Linked,
 // animated-special, collision/fade objects require their separate controllers.
 void tick_scenario_props(ScenarioState &state);
@@ -248,7 +249,7 @@ void tick_scenario_props(ScenarioState &state);
 uint32_t scenario_random(ScenarioState &state);
 // bhInitEvent's native state/script ordering. Sound commands 3/4 are pending
 // the audio backend. All room resources must already be bound.
-void initialize_scenario(ScenarioState &state);
+void initialize_scenario(ScenarioState &state, ScenarioEntity *player = nullptr);
 // bhControlEvent: room control uses the current command context, then runs
 // the event scheduler if the room script enables it.
 void control_scenario(ScenarioState &state);

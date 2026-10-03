@@ -9,14 +9,20 @@ struct RoomRuntime {
   PlayerWorldState world;
   std::vector<JointPose> player_pose;
   Scene player_scene;
+  ScenarioEntity player_work;
   ScenarioState scenario;
   uint16_t previous_pad = 0;
 };
+// Retained healthy unarmed work/caches consumed by native enemy callbacks.
+// Model/motion resources are bound once; normal-anchor timing is caller-owned.
+void synchronize_runtime_player(RoomRuntime &runtime,
+                                const PlayerPackage &player);
 // Healthy unarmed normal door entry; armed/save/introduction paths are pending.
 // Builds a complete replacement without mutating the previous runtime.
 RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
                               size_t entry, ScenarioState persistent,
-                              const PlayerPackage &player);
+                              const PlayerPackage &player,
+                              const ScenarioEntity *previous_player = nullptr);
 // Consume an authored door request after destination assets validate. Failure
 // retains the old runtime, progress and pending request for recovery.
 void transition_room_runtime(RoomRuntime &runtime, const Bytes &destination,

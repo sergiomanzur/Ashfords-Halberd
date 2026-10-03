@@ -31,19 +31,31 @@ not merely from its presence in the full-campaign callback table.
 
 ## Current runtime blocker
 
-Fresh native `load_room_runtime` entry for either graveyard variant fails at
-`initialize_scenario -> tick_scenario_actors`:
+Native ID1 startup is now integrated into the normal scenario scheduler with
+retained player work. Both authored graveyard variants execute five roots,
+five linked bodies and26auxiliaries in the same pool pass, including Init and
+MainLoop's two motion samples and the frame collision/cache sequence.
+
+Fresh native `load_room_runtime` entry for either graveyard variant now fails
+at its original initialization script, after that enemy startup:
 
 ```
-Unsupported scenario actor controller: room 2 actor 1 mode 0
+Unsupported scenario opcode 148 at 10
 ```
 
-The corridor entry succeeds and binds its original actor, items and triggers.
-Separately tested zombie startup/movement/grab services do not satisfy this
-ordinary scheduler call. The immediate integration priority is the source
-ID1 frame sequence and player work/caches, including root and linked body
-ordering, required action dispatch, player damage responses and event modes.
-Do not suppress the exception with a no-op or skip the authored enemies.
+Opcode148 is original event.c::bhBGSeOn2, which calls CallBackGroundSe2 with
+an unsigned byte and an unsigned short. Its audio dependency must be completed
+without ignoring the command. Opcode106 EventSkipSet now preserves the original
+gm_flg toggle. The corridor still enters normally;120original corridor ticks
+verify retained player work, cache/capsule updates and source normal-anchor
+timing separately from the front/movement anchors.
+
+The ordinary ID1 modes1..5 remain explicit unsupported states in the joined
+controller; hit damage checking and first linked-fire birth also remain
+unfinished. Existing movement/grab services must next be connected through
+their actual action/event/damage dispatch. Source mode6 keeps its frame services
+while bypassing Mode0 dispatch. No authored enemies or script commands are
+skipped, and the actual corridor-to-graveyard transition still fails at148.
 
 ## Remaining acceptance sequence
 
@@ -75,6 +87,12 @@ Local ignored diagnostic `local/slice_room_audit.cpp` uses production native
 `load_room_runtime`, with original `SYSTEM.AFS` Claire package entry10.
 It exited0 with `local/slice-room-audit.log`; each graveyard entry exception
 is reported as an explicit block. No user desktop/profile was touched.
+
+The subsequent ignored `local/zombie_runtime_entry_audit.cpp` exited0 with
+`local/zombie-runtime-entry-final.log`:10roots/10bodies/52auxiliaries across
+both original variants,120corridor work/cache ticks and60normal-anchor updates.
+It explicitly reports both actual entry failures at opcode148; its successful
+dependency probes do not establish a successful room transition.
 
 This proves authored connectivity and asset/controller requirements. It does
 not yet prove unlocked reciprocal travel, active combat, inventory, sound,

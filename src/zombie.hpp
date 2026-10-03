@@ -2,6 +2,9 @@
 #include "scenario.hpp"
 #include <functional>
 namespace ashford {
+// Original bhEne01 frame sequence. Unimplemented ordinary states fail explicitly.
+void tick_zombie_controller(ScenarioState &state, size_t work,
+                            ScenarioEntity &player);
 // en01.c PlayerLink's authored XZ trajectory for four characters/clips1/2/4/5.
 // Frame is an integer authored frame index; returned Y is zero.
 Vec3 zombie_player_link_offset(uint8_t player_id, uint32_t motion_number,

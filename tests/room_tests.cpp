@@ -129,14 +129,29 @@ int main() {
     ActorModel entry_model;
     entry_model.model =
         Bytes(runtime_data.begin() + 1850, runtime_data.begin() + 1918);
+    // Native player room startup addresses O_WORK joints7/11. Keep the
+    // room's tiny prop model separate from this player work fixture.
+    const auto entry_joint =
+        Bytes(entry_model.model.begin() + 16, entry_model.model.end());
+    entry_model.model.resize(16 + 12 * 52);
+    entry_model.model[6] = 12;
+    for (size_t joint = 0; joint < 12; ++joint) {
+      const size_t offset = 16 + joint * 52;
+      std::copy(entry_joint.begin(), entry_joint.end(),
+                entry_model.model.begin() + offset);
+      put(entry_model.model, offset + 44,
+          joint == 11 ? 0xffffffffu : uint32_t((joint + 1) * 52));
+      put(entry_model.model, offset + 48, 0xffffffffu);
+    }
     entry_player.models.push_back(entry_model);
     entry_player.motions.resize(43);
     Motion entry_idle;
     entry_idle.flags = 0x10;
     entry_idle.frames = 2;
-    entry_idle.tracks.resize(1);
+    entry_idle.tracks.resize(12);
     entry_idle.tracks[0].positions.resize(2);
-    entry_idle.tracks[0].angles.resize(2);
+    for (auto &track : entry_idle.tracks)
+      track.angles.resize(2);
     entry_player.motions[42] = entry_idle;
     ScenarioState persistent;
     persistent.flags[1][0] = 123;
@@ -207,7 +222,7 @@ int main() {
        runtime.scenario.player_frame == 65536 &&
        runtime.world.player.frame == 65536 &&
        runtime.world.player.sampled_frame == 0 &&
-       runtime.scenario.room_case == 7 && runtime.player_pose.size() == 1);
+       runtime.scenario.room_case == 7 && runtime.player_pose.size() == 12);
     bad([&] {
       load_room_runtime(runtime_data, 0, 1, 2, persistent, entry_player);
     });

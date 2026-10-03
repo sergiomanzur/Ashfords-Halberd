@@ -983,6 +983,28 @@ Wall2/PlayerLink, root encounter dispatch/combat, particle playback/drawing,
 decoded audio, inventory and versioned saves remain required for Step1;
 New Game remains disabled.
 
+The normal runtime scheduler now runs original ID1 startup with retained
+player work, same-pass root/body/auxiliary allocation, Init plus MainLoop motion
+samples, frame timers, collision, player linkage and cached model updates.
+It reacquires entities after startup replaces ScenarioState; no transient
+player pointer is retained. Player resources/caches, contact displacement,
+capsule and distinct normal-anchor timing are connected to healthy runtime
+movement. Initialization scripts retain their changes to player flags/health.
+Original EventSkipSet106 now toggles gm_flg with its exact two-byte command.
+
+Both original graveyard variants verify10roots/10bodies/52auxiliaries;120original
+corridor ticks verify player work/caches and60normal-anchor updates. Actual
+graveyard loading now reaches opcode148 at10, original BGSeOn2's native audio
+dependency. Ordinary modes1..5, hit damage and linked-fire birth remain explicit
+unfinished controller branches. No enemies/scripts are skipped. The stronger
+transition acceptance still fails at148 and is not counted as completed.
+
+Final runtime-startup verification:69/69headless checks,205original rooms,
+fresh packaged smoke241ticks/240renders/53moves/10focus-blocked ticks/main-menu
+return/INI creation. EXE/ZIP refreshed and all verification processes exited0.
+Fresh source review found no blocking defects. Deferred Minor: linked-fire
+boundary fixture. Full native playable slice remains unfinished.
+
 Final PlayerLink prerequisite verification:62/62headless checks,205original
 rooms,57step areas/570static+merged points/430temporary boundaries,2200Claire
 frames across10roots, all previous NG02/grab/corridor probes. Fresh packaged
