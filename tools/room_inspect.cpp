@@ -77,6 +77,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_channel_applications=0;
         size_t zombie_startups=0, zombie_auxiliary_startups=0;
         size_t zombie_startup_links=0, zombie_managers=0;
+        size_t zombie_model_work_samples=0, zombie_range_draws=0;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
@@ -137,8 +138,15 @@ int wmain(int argc,wchar_t** argv) {
                                                     options.mirror_map=flip;
                                                     if(blended)options.blend_rate=.35f;
                                                     auto applied=apply_motion_pose(bind,motion,int64_t(frame)*65536,options);
-                                                    if(applied.pose.size()!=bind.size() || actor_joint_matrices(*zombie.model,applied.pose).size()!=bind.size())
+                                                    auto expected_matrices=actor_joint_matrices(*zombie.model,applied.pose);
+                                                    auto native_work=calculate_actor_model_work(*zombie.model,applied.pose);
+                                                    if(applied.pose.size()!=bind.size() || expected_matrices.size()!=bind.size() || native_work.joints.size()!=bind.size())
                                                         throw std::runtime_error("Retail zombie motion application changed joint count");
+                                                    for(size_t joint=0;joint<bind.size();++joint)
+                                                        for(size_t element=0;element<16;++element)
+                                                            if(std::abs(native_work.joints[joint].matrix[element]-expected_matrices[joint][element])>.0001)
+                                                                throw std::runtime_error("Retail linear model work differs from hierarchy matrix");
+                                                    ++zombie_model_work_samples;
                                                     if(body)
                                                         for(size_t joint=0;joint<8;++joint) {
                                                             const auto a=*bind[joint].position,b=*applied.pose[joint].position;
@@ -283,6 +291,41 @@ int wmain(int argc,wchar_t** argv) {
                             throw std::runtime_error("Retail native startup allocation count mismatch");
                         zombie_startup_links+=allocated;
                         zombie_managers+=managers;
+                        for(auto root:roots) for(bool upper:{false,true}) {
+                            const auto& owner=initialized.enemies[root];
+                            if(!owner.model_work)throw std::runtime_error("Missing retail zombie model work");
+                            auto suffix=*owner.model_work;
+                            suffix.first_joint=upper?8:0;
+                            suffix.joint_count=upper?suffix.joints.size()-8:8;
+                            for(auto& joint:suffix.joints)joint.flags|=1;
+                            ActorPlacement displaced;
+                            displaced.position={1000,2000,3000};
+                            suffix=calculate_actor_model_work(*owner.model,owner.joint_pose,suffix,displaced);
+                            for(size_t joint=0;joint<suffix.joints.size();++joint)
+                                if(suffix.joints[joint].matrix!=owner.model_work->joints[joint].matrix)
+                                    throw std::runtime_error("Retail frozen suffix changed cached matrices");
+                            auto drawn=pose_actor_model_work(*owner.model,owner.joint_pose,suffix);
+                            std::vector<const Mesh*> expected;
+                            for(const auto& mesh:owner.rendered_model->meshes)
+                                if(mesh.object>=512+suffix.first_joint && mesh.object<512+suffix.first_joint+*suffix.joint_count)
+                                    expected.push_back(&mesh);
+                            // Retail skin geometry can be owned entirely by
+                            // joint zero; a matrix suffix need not own a mesh.
+                            if(drawn.meshes.size()!=expected.size())
+                                throw std::runtime_error("Retail frozen model drawing range mismatch");
+                            for(size_t mesh=0;mesh<expected.size();++mesh) {
+                                if(drawn.meshes[mesh].object!=expected[mesh]->object || drawn.meshes[mesh].triangles.size()!=expected[mesh]->triangles.size())
+                                    throw std::runtime_error("Retail suffix mesh ownership mismatch");
+                                for(size_t triangle=0;triangle<expected[mesh]->triangles.size();++triangle)
+                                    for(size_t corner=0;corner<3;++corner) {
+                                        const auto a=drawn.meshes[mesh].triangles[triangle].corners[corner].position;
+                                        const auto b=expected[mesh]->triangles[triangle].corners[corner].position;
+                                        if(std::abs(a.x-b.x)>.0001 || std::abs(a.y-b.y)>.0001 || std::abs(a.z-b.z)>.0001)
+                                            throw std::runtime_error("Retail frozen suffix drawing changed geometry");
+                                    }
+                            }
+                            ++zombie_range_draws;
+                        }
                     }
                     for(const auto* entities:{&bound_enemies.objects,&bound_enemies.items})
                         for(const auto& entity:*entities)if(entity.model) {
@@ -566,6 +609,9 @@ int wmain(int argc,wchar_t** argv) {
             if(zombie_auxiliary_startups!=zombie_parameters*5+2)
                 throw std::runtime_error("Missing retail zombie auxiliary Init coverage");
             std::cout<<"Initialized "<<zombie_auxiliary_startups<<" native head/arm/leg/manager works in pool order\n";
+            if(zombie_model_work_samples!=zombie_channel_applications || zombie_range_draws!=zombie_parameters*2)
+                throw std::runtime_error("Missing retail zombie model-work coverage");
+            std::cout<<"Verified "<<zombie_model_work_samples<<" linear model-work samples and "<<zombie_range_draws<<" frozen prefix/suffix drawing ranges\n";
             if(runtime_check)std::cout<<"Loaded "<<runtime_entries<<" native corridor runtime entries with Claire pose and initialized scenario state\n";
             if(runtime_check)std::cout<<"Advanced "<<runtime_ticks<<" joined player/actor/prop/scenario runtime ticks\n";
             if(runtime_check)std::cout<<"Applied player displacement on "<<runtime_movement_ticks<<" runtime ticks\n";

@@ -23,11 +23,15 @@ struct Texture {
   uint32_t width = 0, height = 0;
   Bytes rgba;
 };
-using ModelMatrix = std::array<double,16>;
+using ModelMatrix = std::array<double, 16>;
 // Optional native matrices override disk transforms for posed actors.
-std::vector<Mesh> decode_model(const Bytes &data, size_t offset,
-                               bool include_hidden = false,
-                               const std::vector<ModelMatrix>* matrices = nullptr);
+std::vector<Mesh>
+decode_model(const Bytes &data, size_t offset, bool include_hidden = false,
+             const std::vector<ModelMatrix> *matrices = nullptr);
+// MdlPut drawing walks a contiguous object range, independently of hierarchy.
+std::vector<Mesh> decode_model_range(const Bytes &data, size_t offset,
+                                     const std::vector<ModelMatrix> &matrices,
+                                     size_t first_object, size_t object_count);
 Texture decode_tim2(const Bytes &data, size_t offset, size_t size);
 std::vector<Texture> decode_texture_pack(const Bytes &data, size_t offset);
 struct Scene {

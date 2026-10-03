@@ -20,6 +20,34 @@ struct ActorModelBank {
   std::vector<ActorModel> models;
   Bytes mask;
 };
+struct ActorJointWork {
+  uint32_t flags = 0;
+  ModelMatrix matrix{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+};
+struct ActorModelWork {
+  ModelMatrix base_matrix{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+  std::vector<ActorJointWork> joints;
+  size_t first_joint = 0;
+  std::optional<size_t> joint_count;
+};
+struct ActorPlacement {
+  uint32_t flags =
+      0; // BH_PWORK flags: linked 0x80, retained/reset base 0x1000.
+  Vec3 position{}, linked_offset{};
+  std::array<int32_t, 3> angles{};
+  std::optional<ModelMatrix> parent_joint;
+};
+// MdlPut.c bhCalcModel/bhCalcTree. Owns cached matrices in full model order;
+// updates only the selected linear range and restores O_WORK flag-1 matrices.
+ActorModelWork calculate_actor_model_work(const ActorModel &actor,
+                                          const std::vector<JointPose> &pose,
+                                          ActorModelWork work = {},
+                                          const ActorPlacement &placement = {});
+// Draw selected objects with their cached matrices and original full-model
+// skin bindings. Controllers which rebase skin lists require their own path.
+Scene pose_actor_model_work(const ActorModel &actor,
+                            const std::vector<JointPose> &pose,
+                            const ActorModelWork &work);
 struct RoomActorModels {
   std::vector<ActorModelBank> enemies;
   // Object slots 0-3 belong to player attachments, not room asset pointers.
@@ -42,8 +70,8 @@ actor_joint_matrices(const ActorModel &actor,
                      const std::vector<JointPose> &pose, Vec3 position = {},
                      std::array<int32_t, 3> angles = {});
 // bhCalcTree baseline linked placement: parent joint, local offset, XYZ angles.
-// Poses the supplied whole model; subtree selection and the optional 0x1000
-// rotation-reset flag remain controller work.
+// Poses the supplied whole model; use ActorModelWork for selected ranges,
+// saved matrices and the optional 0x1000 placement flags.
 Scene pose_actor_linked(const ActorModel &actor,
                         const std::vector<JointPose> &pose,
                         const ModelMatrix &parent_joint, Vec3 offset = {},

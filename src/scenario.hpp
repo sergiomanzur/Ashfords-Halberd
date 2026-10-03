@@ -75,7 +75,7 @@ struct ScenarioEntity {
   std::shared_ptr<const ActorModel> model;
   std::shared_ptr<const ActorModelBank> model_bank;
   std::vector<JointPose> joint_pose;
-  std::vector<ModelMatrix> joint_matrices;
+  std::optional<ActorModelWork> model_work;
   // ML_WORK aliasing is represented by an owner slot, not mutable pointers.
   std::optional<size_t> pose_owner;
   std::optional<Scene> rendered_model;

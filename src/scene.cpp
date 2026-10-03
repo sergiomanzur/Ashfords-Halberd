@@ -268,6 +268,42 @@ std::vector<Mesh> decode_model(const Bytes &data, size_t offset,bool include_hid
   visit(0, identity(), 0);
   return meshes;
 }
+std::vector<Mesh> decode_model_range(const Bytes &data, size_t offset,
+                                    const std::vector<ModelMatrix> &matrices,
+                                    size_t first_object, size_t object_count) {
+  Reader r{data};
+  r.range(offset, 16);
+  if (data[offset] != 'M' || data[offset + 1] != 'D' ||
+      data[offset + 2] != 'L' || !(data[offset + 3] & 128))
+    throw std::runtime_error("Unsupported model encoding");
+  const size_t header = r.u16(offset + 4), count = r.u16(offset + 6);
+  if (header < 16 || count > 4096 || matrices.size() != count ||
+      first_object > count || object_count > count - first_object)
+    throw std::runtime_error("Invalid native model drawing range");
+  const size_t base = offset + header, table = base + r.u32(offset + 12);
+  r.range(offset, header);
+  r.range(table, count * 52);
+  std::vector<Mesh> meshes;
+  size_t total = 0;
+  for (size_t i = first_object; i < first_object + object_count; ++i) {
+    const auto &matrix = matrices[i];
+    for (double value : matrix)
+      if (!std::isfinite(value))
+        throw std::runtime_error("Non-finite native model drawing matrix");
+    if (matrix[12] != 0 || matrix[13] != 0 || matrix[14] != 0 || matrix[15] != 1)
+      throw std::runtime_error("Native model drawing matrix is not affine");
+    const size_t o = table + i * 52;
+    const auto flags = r.u32(o), model = r.u32(o + 4);
+    if (!(flags & 8) && model != 0xffffffff) {
+      auto mesh = chunks(r, base, base + model, matrix, uint32_t(i));
+      total += mesh.triangles.size();
+      if (total > 2000000)
+        throw std::runtime_error("Scene triangle limit exceeded");
+      meshes.push_back(std::move(mesh));
+    }
+  }
+  return meshes;
+}
 Texture decode_tim2(const Bytes &data, size_t offset, size_t size) {
   Reader r{data};
   r.range(offset, size);

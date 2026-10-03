@@ -244,6 +244,19 @@ int main() {
        startup.enemies[0].geometry.capsule_radius == 2);
     ck(startup.enemies[3].geometry.height == 13 &&
        startup.enemies[3].geometry.collision_height == 13);
+    auto frozen_runtime = startup;
+    auto &frozen_joint = frozen_runtime.enemies[0].model_work->joints[8];
+    frozen_joint.flags = 1;
+    frozen_joint.matrix[3] = 400;
+    frozen_joint.matrix[7] = 500;
+    frozen_joint.matrix[11] = 600;
+    initialize_zombie_work(frozen_runtime, 3);
+    ck(frozen_runtime.enemies[0].model_work->joints[8].matrix[7] == 500 &&
+       frozen_runtime.enemies[0].model_work->joints[10].matrix[7] == 502 &&
+       frozen_runtime.enemies[0].geometry.capsule_start.y == 502 &&
+       frozen_runtime.enemies[3].geometry.height == 302);
+    ck(startup.enemies[0].model_work->joints[8].matrix[7] == 211 &&
+       startup.enemies[0].model_work->joints[8].flags == 0);
     const auto startup_seed = startup.random_seed;
     for (size_t slot : {4u, 5u, 6u, 7u, 8u, 9u}) {
       startup.enemies[slot].state_flags = 0xffffffff;

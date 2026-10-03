@@ -130,10 +130,15 @@ size_t pose_owner(const ScenarioState &state, size_t work) {
 void prepare_pose(ScenarioEntity &owner) {
   if (owner.joint_pose.empty())
     owner.joint_pose = actor_bind_pose(*owner.model);
-  if (owner.joint_matrices.empty())
-    owner.joint_matrices = actor_joint_matrices(*owner.model, owner.joint_pose,
-                                                owner.position, owner.angles);
-  if (owner.joint_matrices.size() < 18)
+  if (!owner.model_work) {
+    ActorPlacement placement;
+    placement.flags = owner.flags;
+    placement.position = owner.position;
+    placement.angles = owner.angles;
+    owner.model_work = calculate_actor_model_work(
+        *owner.model, owner.joint_pose, {}, placement);
+  }
+  if (owner.model_work->joints.size() < 18)
     throw std::runtime_error("Zombie pose lacks original body joints");
 }
 Vec3 joint_origin(const ModelMatrix &m) {
@@ -155,19 +160,25 @@ void calculate_startup_capsule(ScenarioState &state, size_t work) {
     if (!zombie.linked_parent || *zombie.linked_parent != owner_index ||
         !owner.zombie_work)
       throw std::runtime_error("Attached zombie capsule lacks parent work");
-    owner.joint_matrices = actor_joint_matrices(*owner.model, owner.joint_pose,
-                                                owner.position, owner.angles);
-    owner.rendered_model = pose_actor_rotated(*owner.model, owner.joint_pose,
-                                              owner.position, owner.angles);
-    const auto &matrices = owner.joint_matrices;
+    ActorPlacement placement;
+    placement.flags = owner.flags;
+    placement.position = owner.position;
+    placement.angles = owner.angles;
+    owner.model_work = calculate_actor_model_work(
+        *owner.model, owner.joint_pose, *owner.model_work, placement);
+    owner.rendered_model = pose_actor_model_work(*owner.model, owner.joint_pose,
+                                                 *owner.model_work);
+    const auto &matrices = owner.model_work->joints;
     if (owner.zombie_work->left_leg_state == -1 ||
         owner.zombie_work->right_leg_state == -1) {
-      owner.geometry.capsule_start = joint_point(matrices.at(9), {0, 3.5f, 0});
-      owner.geometry.capsule_end = joint_point(matrices.at(9), {0, -6, 0});
+      owner.geometry.capsule_start =
+          joint_point(matrices.at(9).matrix, {0, 3.5f, 0});
+      owner.geometry.capsule_end =
+          joint_point(matrices.at(9).matrix, {0, -6, 0});
     } else {
-      owner.geometry.capsule_start = joint_origin(matrices.at(10));
-      const auto a = joint_origin(matrices.at(4)),
-                 b = joint_origin(matrices.at(7));
+      owner.geometry.capsule_start = joint_origin(matrices.at(10).matrix);
+      const auto a = joint_origin(matrices.at(4).matrix),
+                 b = joint_origin(matrices.at(7).matrix);
       owner.geometry.capsule_end = {(a.x + b.x) / 2, (a.y + b.y) / 2,
                                     (a.z + b.z) / 2};
     }
@@ -184,7 +195,7 @@ void calculate_startup_capsule(ScenarioState &state, size_t work) {
     }
   }
   zombie.geometry.height = zombie.geometry.collision_height =
-      float(owner.joint_matrices.at(10)[7]) - zombie.position.y;
+      float(owner.model_work->joints.at(10).matrix[7]) - zombie.position.y;
 }
 void apply_zombie_motion(ScenarioState &state, size_t work) {
   const auto owner_index = pose_owner(state, work);

@@ -124,5 +124,27 @@ matrices for its collision capsule. Attached-body initialization refreshes the
 parent's combined rendered pose; retail checks cover all ten roots across the
 two graveyard variants. The root's requested material color and both shadow
 descriptors remain metadata until their original rendering paths are adapted.
-Saved O_WORK matrices, selected joint-range drawing, detached body work and
-flag-0x1000 placement remain required before complete enemy rendering.
+Detached body controllers and their model/skin rebasing remain required before
+complete enemy rendering. General saved-matrix/range support is described below.
+
+Persistent `ActorModelWork` now implements the model-calculation dependency.
+It owns O_WORK flags and matrices in full asset joint order. Calculation walks
+the selected contiguous range in the source's linear order, pushes matrices
+for siblings, pops them at leaves, and restores flag-1 world matrices before
+processing descendants. Work outside the selected range is retained. Linked
+placement transforms the local offset before flag-0x1000 resets rotation and
+applies XYZ angles. Unlinked flag-0x1000 retains the preceding base matrix.
+
+`pose_actor_model_work` draws selected mesh owners with these cached matrices,
+using original full-model skin bindings. Selecting a joint range does not
+guarantee a mesh in that range: the retail zombie's entire skin mesh can be
+owned by joint zero. Controllers that select/rebase separate skin lists still
+need their own source path; this API does not claim that rebasing. Visibility
+flags and immutable model/skin bytes remain respected.
+
+Zombie bind initialization and attached-body capsule/render refresh now use
+this persistent work directly, avoiding a second divergent matrix cache.
+Synthetic checks cover frozen child/descendant/sibling behavior, reset/retained
+placement, selected geometry, frozen skinned vertices, invalid work and copied
+runtime isolation. Material/shadow rendering and actual detachment, damage and
+enemy controller integration remain pending.

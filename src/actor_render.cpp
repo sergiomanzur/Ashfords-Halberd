@@ -164,11 +164,42 @@ SkeletonTransforms calculate_skeleton(const ActorModel &actor,
       throw std::runtime_error("Unreachable actor joint");
   return result;
 }
+size_t work_count(const ActorModelWork &work, size_t count) {
+  if (work.first_joint > count || work.joints.size() != count)
+    throw std::runtime_error("Invalid actor model work range");
+  const auto selected = work.joint_count.value_or(count - work.first_joint);
+  if (selected > count - work.first_joint)
+    throw std::runtime_error("Invalid actor model work count");
+  return selected;
+}
 Scene draw_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
-                 const Matrix &placement) {
-  const auto skeleton = calculate_skeleton(actor, pose, placement);
+                 const Matrix &placement,
+                 const ActorModelWork *work = nullptr) {
+  auto skeleton = calculate_skeleton(actor, pose, placement);
   const auto base = skeleton.base, count = skeleton.count,
              table = skeleton.table;
+  size_t first = 0, selected = count;
+  if (work) {
+    selected = work_count(*work, count);
+    first = work->first_joint;
+    Reader r{actor.model};
+    for (size_t i = 0; i < count; ++i) {
+      validate_matrix(work->joints[i].matrix);
+      skeleton.world[i] = work->joints[i].matrix;
+      skeleton.unrotated[i] = skeleton.world[i];
+      const auto o = table + i * 52;
+      std::array<uint16_t, 3> angles{uint16_t(r.u32(o + 20)),
+                                     uint16_t(r.u32(o + 24)),
+                                     uint16_t(r.u32(o + 28))};
+      if (i < pose.size())
+        angles = pose[i].angles.value_or(std::array<uint16_t, 3>{});
+      for (int axis : {0, 1, 2})
+        skeleton.unrotated[i] =
+            multiply(skeleton.unrotated[i], rotate(axis, -int(angles[axis])));
+    }
+    if (!selected)
+      return {};
+  }
   if (!count)
     return {};
   const auto &world = skeleton.world, &unrotated = skeleton.unrotated;
@@ -186,7 +217,7 @@ Scene draw_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
     // The reference redirects each skin owner to a separate output buffer.
     // This path poses a private byte copy, so reject shared writes rather than
     // silently deforming another owner or a rigid mesh using the same input.
-    for (size_t i = 0; i < count; ++i) {
+    for (size_t i = first; i < first + selected; ++i) {
       auto model = r.u32(table + i * 52 + 4);
       if (model == 0xffffffff)
         continue;
@@ -209,7 +240,7 @@ Scene draw_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
               "Overlapping skin vertex buffers require separate outputs");
       extents.push_back({vertex, end, skinned});
     }
-    for (size_t i = 0; i < count; ++i)
+    for (size_t i = first; i < first + selected; ++i)
       if (skin[i].flags & 2) {
         auto model = r.u32(table + i * 52 + 4);
         if (model == 0xffffffff)
@@ -246,7 +277,9 @@ Scene draw_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
       }
   }
   Scene result;
-  result.meshes = decode_model(posed, 0, false, &drawing_matrices);
+  result.meshes =
+      work ? decode_model_range(posed, 0, drawing_matrices, first, selected)
+           : decode_model(posed, 0, false, &drawing_matrices);
   if (!actor.textures.empty())
     result.textures = decode_texture_pack(actor.textures, 0);
   for (auto &mesh : result.meshes) {
@@ -259,6 +292,70 @@ Scene draw_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
   return result;
 }
 } // namespace
+ActorModelWork calculate_actor_model_work(const ActorModel &actor,
+                                          const std::vector<JointPose> &pose,
+                                          ActorModelWork work,
+                                          const ActorPlacement &placement) {
+  // Full immutable hierarchy validation and bind data stay separate from the
+  // source's selected linear O_WORK traversal.
+  const auto skeleton = calculate_skeleton(actor, pose, identity());
+  if (work.joints.empty())
+    work.joints.resize(skeleton.count);
+  const auto selected = work_count(work, skeleton.count);
+  if (placement.flags & 0x80) {
+    if (!placement.parent_joint)
+      throw std::runtime_error(
+          "Linked actor model work requires parent matrix");
+    validate_matrix(*placement.parent_joint);
+    work.base_matrix = multiply(*placement.parent_joint,
+                                placement_matrix(placement.linked_offset, {}));
+    if (placement.flags & 0x1000)
+      for (size_t row = 0; row < 3; ++row)
+        for (size_t column = 0; column < 3; ++column)
+          work.base_matrix[row * 4 + column] = row == column ? 1 : 0;
+    for (int axis : {2, 1, 0})
+      work.base_matrix =
+          multiply(work.base_matrix, rotate(axis, placement.angles[axis]));
+  } else if (!(placement.flags & 0x1000))
+    work.base_matrix = placement_matrix(placement.position, placement.angles);
+  validate_matrix(work.base_matrix);
+  Reader r{actor.model};
+  auto current = work.base_matrix;
+  // The final leaf restores the caller's matrix, which is unused afterward.
+  std::vector<Matrix> stack{current};
+  for (size_t i = work.first_joint; i < work.first_joint + selected; ++i) {
+    const size_t o = skeleton.table + i * 52;
+    if (r.u32(o + 48) != 0xffffffff)
+      stack.push_back(current);
+    auto p = r.vec(o + 8);
+    std::array<uint16_t, 3> angles{uint16_t(r.u32(o + 20)),
+                                   uint16_t(r.u32(o + 24)),
+                                   uint16_t(r.u32(o + 28))};
+    if (i < pose.size()) {
+      p = pose[i].position.value_or(p);
+      angles = pose[i].angles.value_or(std::array<uint16_t, 3>{});
+    }
+    current = multiply(current,
+                       placement_matrix(p, {angles[0], angles[1], angles[2]}));
+    if (work.joints[i].flags & 1)
+      current = work.joints[i].matrix;
+    validate_matrix(current);
+    work.joints[i].matrix = current;
+    if (r.u32(o + 44) == 0xffffffff) {
+      if (stack.empty())
+        throw std::runtime_error(
+            "Actor model range exceeds native matrix stack");
+      current = stack.back();
+      stack.pop_back();
+    }
+  }
+  return work;
+}
+Scene pose_actor_model_work(const ActorModel &actor,
+                            const std::vector<JointPose> &pose,
+                            const ActorModelWork &work) {
+  return draw_actor(actor, pose, identity(), &work);
+}
 std::vector<JointPose> actor_bind_pose(const ActorModel &actor) {
   Reader r{actor.model};
   r.range(0, 16);

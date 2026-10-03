@@ -325,7 +325,8 @@ matrices; attached-body startup rebuilds the combined parent pose and obtains
 capsule endpoints and height from world joints. Startup shadow descriptors and
 the default material color are retained as metadata; their rendering is still
 pending. Stair-use clearing has no native stair binding yet. Detached suffix
-calculation and saved-matrix/rotation-reset model work remain unsupported.
+controllers remain unsupported; the general saved-matrix/range calculation
+dependency is now implemented as described below.
 
 `initialize_zombie_auxiliary` adapts head, arm, leg and manager startup from
 `en01sub.c`, including original extended-work sizes and selective resets on
@@ -343,3 +344,13 @@ retail runtime probe verifies 20 root/body initializations, 62 allocations and
 the 480 motion-channel probes. This advances the native enemy startup work.
 AI, combat, ID-91 control and the rest of the Step 1 playable slice remain
 incomplete, and New Game remains unavailable.
+
+Zombie skeleton/capsule calculation now retains native `ActorModelWork`
+instead of a separate transient matrix vector. Saved joint matrices affect
+descendants while preserving siblings; the attached-body renderer consumes
+the same cache as collision. A copied-state regression freezes joint eight,
+reinitializes its body, and verifies parent capsule height and isolation from
+the original runtime. General selected-range calculation/drawing and linked
+rotation reset are now available in the actor renderer. Detached body logic
+and rebased skin lists remain pending; the runtime scheduler still rejects
+the unsupported graveyard controller rather than exposing a static encounter.

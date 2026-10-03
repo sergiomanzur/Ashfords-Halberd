@@ -354,6 +354,100 @@ int main() {
     ck(sibling_joints.size() == 3 && sibling_joints[1][3] == 10 &&
        sibling_joints[1][7] == 2 && sibling_joints[2][3] == 13 &&
        sibling_joints[2][7] == 0);
+    auto work = calculate_actor_model_work(siblings, {});
+    ck(work.joints.size() == 3 && work.joints[2].matrix == sibling_joints[2]);
+    work.joints[0].flags = 1;
+    work.joints[0].matrix =
+        ModelMatrix{0, -1, 0, 100, 1, 0, 0, 200, 0, 0, 1, 300, 0, 0, 0, 1};
+    auto saved = calculate_actor_model_work(siblings, {}, work);
+    // Saved root matrix drives both children; a frozen first child must not
+    // become the placement of its sibling.
+    ck(saved.joints[0].matrix == work.joints[0].matrix &&
+       saved.joints[1].matrix[3] == 98 && saved.joints[1].matrix[7] == 200 &&
+       saved.joints[2].matrix[3] == 100 && saved.joints[2].matrix[7] == 203);
+    work.joints[1].flags = 1;
+    work.joints[1].matrix[3] = 777;
+    auto frozen_child = calculate_actor_model_work(siblings, {}, work);
+    ck(frozen_child.joints[1].matrix[3] == 777 &&
+       frozen_child.joints[2].matrix == saved.joints[2].matrix);
+    auto chain = siblings;
+    put(chain.model, 512, 504); // Joint one now parents joint two.
+    put(chain.model, 516, 0xffffffff);
+    auto frozen_chain = calculate_actor_model_work(chain, {}, work);
+    ck(frozen_chain.joints[2].matrix[3] == 780 &&
+       frozen_chain.joints[2].matrix[7] == 2);
+    auto saved_scene = pose_actor_model_work(siblings, {}, saved);
+    auto saved_point = saved_scene.meshes[0].triangles[0].corners[0].position;
+    // Bind-converted vertex (1,-2,0), Rz(90), child origin (98,200,300).
+    ck(std::abs(saved_point.x - 100) < .0001 &&
+       std::abs(saved_point.y - 201) < .0001 && saved_point.z == 300);
+    ActorPlacement placement;
+    placement.flags = 0x80;
+    placement.parent_joint = joints[0];
+    placement.linked_offset = {2, 4, 6};
+    placement.angles = {16384, 16384, 16384};
+    auto linked_work = calculate_actor_model_work(a, pose, {}, placement);
+    auto work_point = pose_actor_model_work(a, pose, linked_work)
+                          .meshes[0]
+                          .triangles[0]
+                          .corners[0]
+                          .position;
+    ck(std::abs(work_point.x - linked_point.x) < .0001 &&
+       std::abs(work_point.y - linked_point.y) < .0001 &&
+       std::abs(work_point.z - linked_point.z) < .0001);
+    placement.flags |= 0x1000;
+    auto reset_work = calculate_actor_model_work(a, pose, {}, placement);
+    ck(reset_work.base_matrix[3] == 106 && reset_work.base_matrix[7] == 4 &&
+       reset_work.base_matrix[11] == -12);
+    // Resetting parent rotation happens after translating the local offset.
+    auto reset_point = pose_actor_model_work(a, pose, reset_work)
+                           .meshes[0]
+                           .triangles[0]
+                           .corners[0]
+                           .position;
+    ck(std::abs(reset_point.x - 106) < .0001 &&
+       std::abs(reset_point.y - 7) < .0001 &&
+       std::abs(reset_point.z + 24) < .0001);
+    placement.flags = 0x1000;
+    placement.position = {NAN, NAN, NAN}; // Ignored by this original branch.
+    placement.angles = {1234, 5678, 9012};
+    auto retained = calculate_actor_model_work(a, pose, linked_work, placement);
+    ck(retained.base_matrix == linked_work.base_matrix &&
+       retained.joints[0].matrix == linked_work.joints[0].matrix);
+    auto selected = calculate_actor_model_work(siblings, {});
+    const auto outside = selected.joints[0].matrix;
+    selected.first_joint = 2;
+    selected.joint_count = 1;
+    ActorPlacement detached;
+    detached.position = {1000, 0, 0};
+    selected = calculate_actor_model_work(siblings, {}, selected, detached);
+    ck(selected.joints[0].matrix == outside &&
+       selected.joints[2].matrix[3] == 1003 &&
+       selected.joints[2].matrix[7] == 0);
+    auto selected_scene = pose_actor_model_work(siblings, {}, selected);
+    ck(selected_scene.meshes.size() == 1 &&
+       selected_scene.meshes[0].object == 514);
+    auto selected_point =
+        selected_scene.meshes[0].triangles[0].corners[0].position;
+    ck(std::abs(selected_point.x - 1004) < .0001 &&
+       std::abs(selected_point.y) < .0001);
+    selected.joint_count = 0;
+    ck(pose_actor_model_work(siblings, {}, selected).meshes.empty());
+    auto invalid_work = work;
+    invalid_work.joints[0].matrix[0] = NAN;
+    bad([&] { calculate_actor_model_work(siblings, {}, invalid_work); });
+    invalid_work = work;
+    invalid_work.joints.resize(2);
+    bad([&] { calculate_actor_model_work(siblings, {}, invalid_work); });
+    invalid_work = work;
+    invalid_work.first_joint = 3;
+    invalid_work.joint_count = 1;
+    bad([&] { calculate_actor_model_work(siblings, {}, invalid_work); });
+    bad([&] { pose_actor_model_work(siblings, {}, invalid_work); });
+    placement.flags = 0x80;
+    placement.parent_joint.reset();
+    bad([&] { calculate_actor_model_work(a, pose, {}, placement); });
+    ck(a.model == original_model && a.skin == original_skin);
     // Matrix-only queries must not need skin or texture decoding.
     rigid.skin = {1};
     rigid.textures = {1};
