@@ -63,6 +63,7 @@ struct ZombieExtendedWork {
   uint8_t route_id = 0, route_timer = 0;        // EXP0_UC(0x2a/0x2b).
   uint8_t damage_rotation_frame = 0;            // EXP0_UC(0x2c).
   int8_t attack_delay = 0;                      // EXP0_C(0x2f).
+  int8_t stair_start_floor = 0, stair_step = 0; // EXP0_C(0x2d/0x2e).
   int32_t pursuit_phase_word = 0;               // EXP0_I/F(0x94), shared bits.
   int32_t pursuit_transition_timer = 0;         // EXP0_I(0x98).
   float target_x = 0, target_z = 0;             // EXP0_F(0x58/0x60).
@@ -119,6 +120,8 @@ struct ScenarioEntity {
   int32_t control0 = 0; // Original ct0, distinct from ct1/ct2/ct3.
   int32_t control3 = 0, highlight_yaw = 0;
   int32_t yaw_correction = 0;  // BH_PWORK::ayp.
+  int32_t pitch_correction = 0; // BH_PWORK::axp; MV08 stores target yaw here.
+  float floor_target_height = 0; // BH_PWORK::yn.
   int16_t grab_yaw_offset = 0; // BH_PWORK::waxp.
   int16_t torso_yaw = 0;       // BH_PWORK::wax.
   int16_t turn_speed = 0;      // BH_PWORK::way.

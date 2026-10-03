@@ -1051,3 +1051,26 @@ packaged smoke241ticks/240renders/53moves/10focus-blocked ticks/main-menu
 return/INI creation. EXE/ZIP refreshed. Fresh source review found no defects
 in this increment. These checks complete the callbacks and probes; complete
 native playable slice remains in progress.
+
+Native en01.c::MV08 now implements all six stair states with original paired
+entry/repeat/exit clips, same-motion startup fallthrough, cached root heights,
+signed byte stair counts and unsigned room inputs. Completion preserves the
+pre-snap previous position, original ground selection, frame50 walking handoff,
+actual owner root-pose Y reset and saved stair-pair release. Touched scalars,
+motion and pair/pose writes commit only after late consumed inputs validate.
+
+Focused source fixtures cover both directions, half-turn/word/byte boundaries,
+exact and repeated frame40, root-only repeat reset, distinct traversal and
+reservation indices, static/dynamic inactive targets, actual pose/cache owners,
+unused branches and late failure rollback. Original205room scan passes3270
+MV08 states/6500paired motion/cache samples/20completed uphill/downhill paths
+across ten roots using room7's original stairs/ground. Existing grab, PlayerLink
+and corridor probes pass. Full encounter/combat, inventory, decoded audio,
+versioned saves and the selected two-room playthrough remain required for
+Step1. New Game remains disabled.
+
+Final stair verification:67/67headless checks,205original rooms,3270MV08states/
+6500paired samples/20handoffs, fresh packaged smoke241ticks/240renders/53moves/
+10focus-blocked ticks/main-menu return/INI creation. EXE/ZIP refreshed. Fresh
+source review found no defects in this increment; all verification processes
+exited0 before commit. This completes the callback, not the playable slice.
