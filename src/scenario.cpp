@@ -533,10 +533,17 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
         break;
       }
       if (operation != 7 && operation != 11 && operation != 47 &&
-          operation != 24)
+          operation != 24 && operation != 23 && operation != 46)
         throw std::runtime_error("Unsupported scenario common controller " +
                                  std::to_string(operation));
-      extent(operation == 7 || operation == 24 ? 8 : operation == 11 ? 6 : 2);
+      extent(operation == 7 || operation == 24 ? 8
+             : operation == 11               ? 6
+             : operation == 47               ? 2
+                                             : 4);
+      if (operation == 23 && program[pc + 2] > 3) {
+        pc += 4;
+        break;
+      }
       if (!task->work_index)
         throw std::runtime_error(
             "Scenario common controller without bound work");
@@ -547,7 +554,30 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
               ? indexed(state.items, *task->work_index)
               : throw std::runtime_error(
                     "Unsupported bound scenario work group");
-      if (operation == 24) {
+      if (operation == 46) {
+        if (word(pc + 2))
+          entity.flags |= 0x20;
+        else
+          entity.flags &= ~0x20u;
+        pc += 4;
+      } else if (operation == 23) {
+        // Common_controll case23 affects only the bound work, including id1.
+        switch (program[pc + 2]) {
+        case 0:
+          entity.flags &= ~0x118u;
+          break;
+        case 1:
+          entity.flags |= 0x118;
+          break;
+        case 2:
+          entity.flags &= ~0x18u;
+          break;
+        case 3:
+          entity.flags |= 0x18;
+          break;
+        }
+        pc += 4;
+      } else if (operation == 24) {
         if (program[pc + 3] != 1 || program[pc + 6] != 1 || entity.id == 1)
           throw std::runtime_error(
               "Unsupported scenario motion selection mode or companion");
@@ -840,6 +870,23 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
     case 66:
       extent(4);
       indexed(state.items, program[pc + 1]).angular_speed = program[pc + 2];
+      pc += 4;
+      break;
+    case 34: {
+      extent(4);
+      // event.c bhEneSetCk: ed_flg uses a 9-bit MSB-first index. The
+      // authored enemy/work mapping is read only when that defeat bit is set.
+      const auto count = word(pc + 2);
+      if (state.flags[3][(count & 0x1ff) >> 5] &
+          (0x80000000u >> (count & 31)))
+        indexed(state.enemies, indexed(state.enemy_slots, program[pc + 1]))
+            .state_flags |= 0x1000000u;
+      pc += 4;
+      break;
+    }
+    case 145:
+      extent(4);
+      set_room_effect_mode(state, program[pc + 1], program[pc + 2]);
       pc += 4;
       break;
     case 67:

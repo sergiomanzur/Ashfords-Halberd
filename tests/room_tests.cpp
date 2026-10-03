@@ -262,15 +262,18 @@ int main() {
     flt(effect_data, 2324, 4);
     flt(effect_data, 2328, 4);
     flt(effect_data, 2332, 4);
-    put(effect_data, 2104, 13);
+    put(effect_data, 2104, 17);
     std::fill(effect_data.begin() + 2108, effect_data.begin() + 2120, 0);
-    effect_data[2108] = 67;
+    effect_data[2108] = 145;
+    effect_data[2110] = 7;
+    effect_data[2112] = 67;
     auto effect_runtime =
         load_room_runtime(effect_data, 0, 1, 1, persistent, entry_player);
     ck(effect_runtime.scenario.effect_pool &&
        (effect_runtime.scenario.effect_pool->works[0].state_flags &
         0x1000000) &&
        effect_runtime.scenario.effect_pool->works[0].id == 92 &&
+       effect_runtime.scenario.effect_pool->works[0].modes[1] == 7 &&
        persistent.effect_pool == old_effects);
     bad([&] {
       load_room_runtime(runtime_data, 0, 1, 2, persistent, entry_player);

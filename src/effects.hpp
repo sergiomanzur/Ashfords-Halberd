@@ -46,6 +46,8 @@ void tick_wall_damage_timers(ScenarioState &state);
 void bind_room_effects(const Bytes &data, ScenarioState &state);
 void set_room_effect_visibility(ScenarioState &state, size_t authored,
                                 bool visible);
+// event.c bhEffModeSet assigns O_WRK::mode1 through sys->efid.
+void set_room_effect_mode(ScenarioState &state, size_t authored, uint8_t mode);
 // effect.c bhSetShadow / event.c bhInitSetKage / effsub1.c bhEff001.
 // Uses real shared pool slots; modifier-volume drawing remains separate.
 std::optional<size_t> create_enemy_shadow(ScenarioState &state, size_t work,

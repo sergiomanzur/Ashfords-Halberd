@@ -126,4 +126,15 @@ void set_room_effect_visibility(ScenarioState &state, size_t authored,
   pool->works[slot].state_flags = next;
   state.effect_pool = std::move(pool);
 }
+void set_room_effect_mode(ScenarioState &state, size_t authored, uint8_t mode) {
+  if (!state.effect_pool || authored >= state.effect_slots.size() ||
+      state.effect_slots[authored] >= state.effect_pool->works.size())
+    throw std::runtime_error("Room effect mode outside authored map");
+  const auto slot = state.effect_slots[authored];
+  if (state.effect_pool->works[slot].modes[1] == mode)
+    return;
+  auto pool = std::make_shared<NativeEffectPool>(*state.effect_pool);
+  pool->works[slot].modes[1] = mode;
+  state.effect_pool = std::move(pool);
+}
 } // namespace ashford

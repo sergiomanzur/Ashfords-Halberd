@@ -23,11 +23,13 @@ matrix or required ground branch rejects the whole staged pool. An inactive
 owner releases its shadow. Native callbacks run after player control alongside
 the existing wall timers; remaining original effect callbacks are unfinished.
 
-The authoritative original entry probe binds effects1/46/62 from the selected
+At commit49c2f59 the original entry probe bound effects1/46/62 from the selected
 corridor and graveyard assets. Corridor entry succeeds. The graveyard initial
 script now stops at145 (bhEffModeSet), offset214; its later variant reaches34
 (bhEneSetCk), offset214. The prior47/67 boundaries are handled without skipping.
-Evidence: local/room-effects-entry-audit.log.
+Evidence: local/room-effects-entry-audit.log. The subsequent source-entry
+increment handles145/34 and common23/46; current initializer boundaries and
+verification are recorded in native-room-entry-status.md.
 
 A separate, explicitly isolated startup/control diagnostic binds both original
 graveyard tables before enemy startup and processes ten root/body shadows per
