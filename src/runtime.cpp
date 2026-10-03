@@ -1,4 +1,5 @@
 #include "runtime.hpp"
+#include "zombie.hpp"
 #include <algorithm>
 #include <stdexcept>
 namespace ashford {
@@ -61,12 +62,26 @@ Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
   if (draw_flags & 0x20)
     append(runtime.scene);
   if (draw_flags & 2)
-    for (const auto &entity : runtime.scenario.enemies)
+    for (size_t work = 0; work < runtime.scenario.enemies.size(); ++work) {
+      const auto &entity = runtime.scenario.enemies[work];
       if (entity.flags & 1 && !(entity.flags & 0x80000000) &&
           !(entity.state_flags & 0x41000000) && !(entity.model_flags & 1) &&
           ((runtime.scenario.flags[5][0] & 0x20) ||
-           !(entity.model_flags & 0x200)))
-        posed(entity);
+           !(entity.model_flags & 0x200))) {
+        if (entity.flags & 0x80) {
+          if (!entity.linked_parent ||
+              *entity.linked_parent >= runtime.scenario.enemies.size())
+            throw std::runtime_error("Missing runtime enemy drawing parent");
+          if (runtime.scenario.enemies[*entity.linked_parent].state_flags &
+              0x1000000)
+            continue;
+        }
+        if (entity.id == 1 && entity.zombie_work)
+          append(draw_zombie_model(runtime.scenario, work));
+        else
+          posed(entity);
+      }
+    }
   for (const auto &entity : runtime.scenario.objects) {
     uint32_t gate = entity.id >= 1000 ? (entity.id < 1210 ? 2 : 1) : 4;
     if (draw_flags & 4 && draw_flags & gate && entity.flags & 1 &&

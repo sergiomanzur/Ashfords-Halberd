@@ -153,8 +153,7 @@ void calculate_startup_capsule(ScenarioState &state, size_t work) {
   if (state.enemies[work].flags & 0x80) {
     const auto owner_index = pose_owner(state, work);
     auto &owner = state.enemies[owner_index];
-    owner.rendered_model = pose_actor_model_work(*owner.model, owner.joint_pose,
-                                                 *owner.model_work);
+    owner.rendered_model = draw_zombie_model(state, owner_index);
   }
 }
 void apply_zombie_motion(ScenarioState &state, size_t work) {
@@ -306,6 +305,12 @@ void initialize_work(ScenarioState &state, size_t work) {
   } else {
     zombie.model_flags = 0;
     zombie.zombie_flags |= 0x10000000;
+    if (!zombie.morph_models && zombie.model_bank &&
+        zombie.model_bank->models.size() >= 2) {
+      zombie.morph_models = std::make_shared<ActorMorphModels>(
+          ActorMorphModels{prepare_actor_skin(*zombie.model),
+                           prepare_actor_skin(zombie.model_bank->models[1])});
+    }
     if (zombie.zombie_work->body) {
       auto &body = state.enemies.at(*zombie.zombie_work->body);
       body.type = zombie.type;

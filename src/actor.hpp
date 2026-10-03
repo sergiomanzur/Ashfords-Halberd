@@ -25,6 +25,9 @@ struct ActorModelBank {
   std::vector<ActorModel> models;
   Bytes mask;
 };
+struct ActorMorphModels {
+  ActorModel source, target;
+};
 struct ActorJointWork {
   uint32_t flags = 0;
   ModelMatrix matrix{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
@@ -42,6 +45,14 @@ struct ActorPlacement {
   std::array<int32_t, 3> angles{};
   std::optional<ModelMatrix> parent_joint;
 };
+// njplus.c ordinary translation-only bind conversion, before pose/morphing.
+ActorModel prepare_actor_skin(const ActorModel &actor);
+// npCalcMorphing/npTransform on a private model, preserving retained assets.
+// Skinned inputs must already use source bind-converted coordinates.
+ActorModel morph_actor_model(const ActorModel &source, const ActorModel &target,
+                            const std::vector<JointPose> &pose, float amount,
+                            size_t first_joint = 0,
+                            std::optional<size_t> joint_count = {});
 // MdlPut.c bhCalcModel/bhCalcTree. Owns cached matrices in full model order;
 // updates only the selected linear range and restores O_WORK flag-1 matrices.
 ActorModelWork calculate_actor_model_work(const ActorModel &actor,

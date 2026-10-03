@@ -296,6 +296,71 @@ Scene draw_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
   return result;
 }
 } // namespace
+ActorModel prepare_actor_skin(const ActorModel &actor) {
+  if (actor.skin_layout != SkinLayout::Standard)
+    throw std::runtime_error(
+        "Ordinary skin preparation requires standard layout");
+  if (actor.skin_preconverted)
+    return actor;
+  const auto skeleton = calculate_skeleton(actor, {}, identity());
+  auto out = actor;
+  if (!actor.skin.empty()) {
+    Reader r{actor.model};
+    const auto skin = decode_skin(actor.skin, skeleton.count);
+    struct Extent {
+      size_t begin, end;
+      bool writable;
+    };
+    std::vector<Extent> extents;
+    for (size_t i = 0; i < skeleton.count; ++i) {
+      const auto object = skeleton.table + i * 52;
+      if (r.u32(object) & 0x20000000)
+        throw std::runtime_error(
+            "Expanded objects require prepared skin layout");
+      const auto model = r.u32(object + 4);
+      const bool writable = bool(skin[i].flags & 2);
+      if (model == 0xffffffff) {
+        if (writable)
+          throw std::runtime_error("Skin owner has no model");
+        continue;
+      }
+      const auto descriptor = skeleton.base + size_t(model);
+      r.range(descriptor, 24);
+      const auto vertex = skeleton.base + size_t(r.u32(descriptor));
+      r.range(vertex, 64);
+      if (actor.model[vertex] != 51)
+        throw std::runtime_error("Unsupported actor vertex chunk");
+      const auto count = size_t(r.u16(vertex + 6));
+      const auto end = vertex + 64 + count * 32;
+      r.range(vertex, end - vertex);
+      for (const auto &prior : extents)
+        if ((writable || prior.writable) && vertex < prior.end &&
+            prior.begin < end)
+          throw std::runtime_error(
+              "Overlapping skin vertex buffers require separate outputs");
+      extents.push_back({vertex, end, writable});
+      if (!writable)
+        continue;
+      if (count != skin[i].vertices.size())
+        throw std::runtime_error("Skin vertex count mismatch");
+      const auto flags = r.u32(object) | 0x80000000u;
+      for (size_t byte = 0; byte < 4; ++byte)
+        out.model[object + byte] = uint8_t(flags >> (byte * 8));
+      for (size_t v = 0; v < count; ++v) {
+        const auto joint = skin[i].vertices[v].joint;
+        if (!(skin[joint].flags & 1) || skin[joint].group != skin[i].group)
+          throw std::runtime_error("Skin joint belongs to a different group");
+        const auto p = r.vec(vertex + 64 + v * 32), a = skeleton.bind[i],
+                   b = skeleton.bind[joint];
+        write(out.model, vertex + 64 + v * 32, p.x + a.x - b.x);
+        write(out.model, vertex + 68 + v * 32, p.y + a.y - b.y);
+        write(out.model, vertex + 72 + v * 32, p.z + a.z - b.z);
+      }
+    }
+  }
+  out.skin_preconverted = true;
+  return out;
+}
 ActorModelWork calculate_actor_model_work(const ActorModel &actor,
                                           const std::vector<JointPose> &pose,
                                           ActorModelWork work,

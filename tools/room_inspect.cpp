@@ -142,6 +142,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_motion_table_ticks=0, zombie_foot_zero_probes=0;
         size_t zombie_set_motion_ticks=0,zombie_dry_effect_checks=0;
         size_t zombie_model_ticks=0,zombie_cache_draws=0,zombie_cache_changed_draws=0;
+        size_t zombie_mouth_draws=0,zombie_mouth_changed_draws=0;
         size_t zombie_motion_sound_requests=0, zombie_motion_vibration_requests=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
@@ -715,7 +716,45 @@ int wmain(int argc,wchar_t** argv) {
                                         cached_placement.flags=current.flags;cached_placement.position=current.position;
                                         cached_placement.angles=current.angles;
                                         if(tick==0 || tick==40 || tick==79) {
-                                            auto drawn=pose_actor_model_work(*current.model,current.joint_pose,*current.model_work);
+                                            const auto retained_pose=current.joint_pose;
+                                            const auto retained_cache=*current.model_work;
+                                            auto drawn=draw_zombie_model(planted,root);
+                                            if(!current.morph_models)
+                                                throw std::runtime_error("Retail zombie missing immutable prepared mouth models");
+                                            const auto baseline=pose_actor_model_work(*current.model,current.joint_pose,*current.model_work);
+                                            size_t mouth_changes=0;
+                                            if(drawn.meshes.size()!=baseline.meshes.size())
+                                                throw std::runtime_error("Retail mouth morph changed mesh topology");
+                                            for(size_t mesh=0;mesh<drawn.meshes.size();++mesh) {
+                                                if(drawn.meshes[mesh].triangles.size()!=baseline.meshes[mesh].triangles.size())
+                                                    throw std::runtime_error("Retail mouth morph changed triangle topology");
+                                                for(size_t triangle=0;triangle<drawn.meshes[mesh].triangles.size();++triangle)
+                                                    for(size_t corner=0;corner<3;++corner) {
+                                                        const auto a=drawn.meshes[mesh].triangles[triangle].corners[corner].position;
+                                                        const auto b=baseline.meshes[mesh].triangles[triangle].corners[corner].position;
+                                                        mouth_changes+=a.x!=b.x || a.y!=b.y || a.z!=b.z;
+                                                    }
+                                            }
+                                            if(current.model_flags&2) {
+                                                ++zombie_mouth_draws;
+                                                if(mouth_changes)++zombie_mouth_changed_draws;
+                                                if(current.shape_count!=0 && !mouth_changes)
+                                                    throw std::runtime_error("Retail active mouth shape did not change original geometry");
+                                            }
+                                            if(current.model->model!=raw || current.model_work->base_matrix!=retained_cache.base_matrix)
+                                                throw std::runtime_error("Retail mouth drawing changed raw model/base cache");
+                                            for(size_t joint=0;joint<retained_cache.joints.size();++joint) {
+                                                if(current.model_work->joints[joint].matrix!=retained_cache.joints[joint].matrix ||
+                                                   current.model_work->joints[joint].flags!=retained_cache.joints[joint].flags ||
+                                                   current.joint_pose[joint].angles!=retained_pose[joint].angles)
+                                                    throw std::runtime_error("Retail mouth drawing changed retained pose/cache");
+                                                if(retained_pose[joint].position) {
+                                                    const auto a=current.joint_pose[joint].position.value(),b=retained_pose[joint].position.value();
+                                                    if(a.x!=b.x || a.y!=b.y || a.z!=b.z)
+                                                        throw std::runtime_error("Retail mouth drawing changed retained joint position");
+                                                } else if(current.joint_pose[joint].position)
+                                                    throw std::runtime_error("Retail mouth drawing created retained joint position");
+                                            }
                                             size_t corners=0,changed=0;
                                             for(size_t mesh=0;mesh<drawn.meshes.size();++mesh) {
                                                 if(first_cache_draw && (mesh>=first_cache_draw->meshes.size() ||
@@ -1261,6 +1300,10 @@ int wmain(int argc,wchar_t** argv) {
                     throw std::runtime_error("Retail CalcEnemy/cache drawing coverage mismatch");
                 std::cout<<"Applied "<<zombie_model_ticks<<" source CalcEnemy cache/collision updates; derived "
                          <<zombie_cache_draws<<" headless posed draws with "<<zombie_cache_changed_draws<<" changed frames\n";
+                if(zombie_mouth_draws!=zombie_cache_draws || zombie_mouth_changed_draws<zombie_brain_roots)
+                    throw std::runtime_error("Retail mouth morph drawing coverage mismatch");
+                std::cout<<"Drew "<<zombie_mouth_draws<<" source mouth morph frames with "<<zombie_mouth_changed_draws
+                         <<" changed same-cache geometry frames; retained raw assets, poses and collision caches\n";
             }
             if(zombie_model_work_samples!=zombie_channel_applications || zombie_range_draws!=zombie_parameters*2)
                 throw std::runtime_error("Missing retail zombie model-work coverage");

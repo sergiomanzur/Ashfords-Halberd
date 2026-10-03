@@ -30,6 +30,9 @@ void advance_zombie_motion(ScenarioState &state, size_t work);
 // en01.c::CalcEnemy: refresh source model caches/capsules/heights only.
 // Drawing follows separately; an ordinary root consumes its prior cache.
 void calculate_zombie_model(ScenarioState &state, size_t work);
+// bhDrawEnemy's cached pose/morph path. Caller owns visibility/lighting gates.
+// Does not recalculate matrices, advance motion, or mutate retained assets.
+Scene draw_zombie_model(const ScenarioState &state, size_t work);
 // Original head/arm/leg and hidden parent-manager mode-0 startup. Does not
 // dispatch detached-part damage.
 void initialize_zombie_auxiliary(ScenarioState &state, size_t work);

@@ -87,6 +87,7 @@ struct ScenarioEntity {
   int32_t blend_rate = 0;
   std::shared_ptr<const ActorModel> model;
   std::shared_ptr<const ActorModelBank> model_bank;
+  std::shared_ptr<const ActorMorphModels> morph_models;
   std::vector<JointPose> joint_pose;
   std::optional<ActorModelWork> model_work;
   // BH_PWORK::mtx is per work, even when its ML_WORK cache is shared.
@@ -108,7 +109,7 @@ struct ScenarioEntity {
   int16_t torso_yaw = 0; // BH_PWORK::wax.
   int16_t turn_speed = 0; // BH_PWORK::way.
   float speed = 0; // BH_PWORK::spd.
-  float shape_count = 0; // BH_PWORK::shp_ct, consumed by model calculation.
+  float shape_count = 0; // BH_PWORK::shp_ct, consumed by draw-time morphology.
   uint32_t frame_direction = 0;
   uint16_t motion_attribute = 0;
   int motion_boundary = 0;

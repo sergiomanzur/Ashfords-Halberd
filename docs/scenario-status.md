@@ -645,3 +645,30 @@ The final Windows build passes all41 headless checks and refreshes the ZIP.
 A fresh packaged dummy-SDL profile passes241 runtime ticks,240 rendered
 frames,53 movement ticks,10 focus-blocked ticks, main-menu return and INI
 creation. The final205-room scan passes after the source-review correction.
+
+Native draw-time npCalcMorphing/npTransform now handles original zombie mouth
+shapes after the collision cache update. Ordinary skin coordinates are prepared
+once using source translation-only bind conversion; raw retail models stay
+unchanged and the source/target pair is retained separately. Drawing creates
+private morphed vertex streams, preserves source object-position arithmetic
+and unclamped shape values, skips evalflags8/missing models, and retains the
+count-mismatch position update. Identical XYZ preserves source normals/W;
+changed XYZ interpolates positions/normals and retains target W lanes as the
+source VU instructions do. Drawing never refreshes collision matrices.
+
+Initialized zombie works now compose through the cached source drawer,
+including primary1000 and linked cache ownership. The original parent
+stflg1000000 gate suppresses linked bodies. st_flg20 bypasses mouth morphing;
+unsupported mdflg4 drawing recalculation still requires its scheduler.
+The full root AI/effects/combat, lighting and clipping policy, audio, inventory
+and cross-room saves remain separate, and New Game stays disabled.
+
+The retail diagnostic draws30 actual mouth-shape frames after paired native
+SetMtn/CalcEnemy updates; all30 change same-cache geometry while preserving
+raw assets, joint poses and cached matrices. Existing205-room decoding and
+4,800 exact zero-drift foot checks pass. Source review found no remaining
+Critical/Important/Minor issues, including runtime composition gates.
+All42 headless checks pass, the Windows build/ZIP are refreshed, and a fresh
+packaged dummy-SDL smoke passes241 ticks,240 rendered frames,53 movement
+ticks,10 focus-blocked ticks, main-menu return and INI creation. The final
+205-room scan passes with the completed runtime composition integration.
