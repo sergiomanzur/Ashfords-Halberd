@@ -120,6 +120,19 @@ const DiscFile& find_file(const Disc& disc, const char* name) {
     auto found = std::find_if(disc.files.begin(), disc.files.end(), [&](const DiscFile& file) { return file.name == name; });
     check(found != disc.files.end(), "This disc is not CVX USA (SLUS-20184)."); return *found;
 }
+void rename_cache_directory(const fs::path& from, const fs::path& to) {
+    for (int attempt = 0; attempt <= 10; ++attempt) {
+        // No REPLACE_EXISTING: an unexpectedly present destination stays intact.
+        if (MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_WRITE_THROUGH)) return;
+        const auto error = GetLastError();
+        if (attempt == 10 || (error != ERROR_SHARING_VIOLATION &&
+            error != ERROR_LOCK_VIOLATION && error != ERROR_ACCESS_DENIED)) {
+            throw fs::filesystem_error("Cannot move asset-cache directory", from, to,
+                std::error_code(int(error), std::system_category()));
+        }
+        Sleep(50);
+    }
+}
 }
 
 Settings load_settings(const fs::path& path) {
@@ -273,7 +286,7 @@ bool cache_valid(const fs::path& root) {
 }
 void recover_import(const fs::path& root) {
     auto live = root / "assets", previous = root / "assets.previous";
-    if (!fs::exists(live) && fs::exists(previous)) fs::rename(previous, live);
+    if (!fs::exists(live) && fs::exists(previous)) rename_cache_directory(previous, live);
 }
 void import_disc(const Disc& disc, const fs::path& root,
                  const std::function<void(float, const std::string&)>& progress) {
@@ -305,9 +318,9 @@ void import_disc(const Disc& disc, const fs::path& root,
         manifest.flush(); check(bool(manifest), "Cannot write import manifest."); manifest.close();
         check(sha1_file(stage / "SLUS_201.84") == retail_sha1, "Imported executable verification failed.");
         if (fs::exists(old)) fs::remove_all(old);
-        if (fs::exists(live)) fs::rename(live, old);
-        try { fs::rename(stage, live); }
-        catch (...) { if (fs::exists(old) && !fs::exists(live)) fs::rename(old, live); throw; }
+        if (fs::exists(live)) rename_cache_directory(live, old);
+        try { rename_cache_directory(stage, live); }
+        catch (...) { if (fs::exists(old) && !fs::exists(live)) rename_cache_directory(old, live); throw; }
         std::error_code ignored; fs::remove_all(old, ignored);
     } catch (...) { std::error_code ignored; fs::remove_all(stage, ignored); throw; }
 }

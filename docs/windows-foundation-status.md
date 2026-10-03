@@ -93,3 +93,24 @@ implement a native rendering backend, and begin adapting the original game
 logic through explicit console-service replacements. The over-the-shoulder
 camera remains a required Step 2 enhancement, with no nonfunctional toggle
 presented in this foundation build.
+
+Asset directory recovery, import swap and swap rollback now share a native
+Windows move helper. It retries sharing/lock/access-denied failures up to10
+times at50ms and reports other failures immediately, retaining paths and the
+Windows error. It never requests destination replacement. Controlled tests
+hold the previous asset directory without delete sharing: a150ms lock permits
+recovery after release; a persistent lock fails within a bounded interval
+while preserving the old cache; recovery succeeds once that lock releases.
+An existing live cache takes priority. The intermittent workspace failure's
+responsible process remains unverified; these tests reproduce its failure
+class using an owned handle. Full Step1 remains in progress.
+
+Final headless verification passes57/57checks and205original rooms, retaining
+the grab and corridor probes. A fresh diagnostic profile completes native real
+ISO import and reimport, cache checks and ISO-path INI persistence; the normal
+user INI is unchanged. Fresh packaged dummy-SDL smoke passes241ticks/240renders/
+53movement ticks/10focus-blocked ticks/main-menu return/INI creation. The
+executable and ZIP are refreshed. Source review found no material defects;
+exception type/path/error-code assertions are deferred Minor test coverage.
+The real import checks exercise promotion and replacement without forced
+contention; controlled locks currently cover recovery through the shared helper.

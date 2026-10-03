@@ -95,6 +95,52 @@ int main(int argc, char** argv) {
         { std::ofstream marker(recovery / "assets.previous/marker.txt"); marker << "last known good"; }
         recover_import(recovery);
         require(fs::exists(recovery / "assets/marker.txt"), "interrupted cache swap must restore previous data");
+        auto sharing_recovery = root / "sharing-recovery";
+        fs::create_directories(sharing_recovery / "assets.previous");
+        { std::ofstream marker(sharing_recovery / "assets.previous/marker.txt"); marker << "recover after sharing lock"; }
+        HANDLE recovery_handle = CreateFileW((sharing_recovery / "assets.previous").c_str(), GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        require(recovery_handle != INVALID_HANDLE_VALUE, "open asset directory sharing-lock fixture");
+        std::thread release_recovery([recovery_handle] {
+            Sleep(150);
+            CloseHandle(recovery_handle);
+        });
+        std::exception_ptr recovery_error;
+        try { recover_import(sharing_recovery); }
+        catch (...) { recovery_error = std::current_exception(); }
+        release_recovery.join();
+        require(!recovery_error, "asset recovery must survive a short Windows directory sharing lock");
+        require(content(sharing_recovery / "assets/marker.txt") == "recover after sharing lock" &&
+                !fs::exists(sharing_recovery / "assets.previous"), "sharing retry must preserve restored asset data");
+        auto blocked_recovery = root / "blocked-recovery";
+        fs::create_directories(blocked_recovery / "assets.previous");
+        { std::ofstream marker(blocked_recovery / "assets.previous/marker.txt"); marker << "preserve blocked cache"; }
+        recovery_handle = CreateFileW((blocked_recovery / "assets.previous").c_str(), GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        require(recovery_handle != INVALID_HANDLE_VALUE, "open persistent asset directory lock");
+        const auto recovery_started = GetTickCount64();
+        recovery_error = nullptr;
+        try { recover_import(blocked_recovery); }
+        catch (...) { recovery_error = std::current_exception(); }
+        const auto recovery_elapsed = GetTickCount64() - recovery_started;
+        CloseHandle(recovery_handle);
+        require(recovery_error && recovery_elapsed >= 400 && recovery_elapsed < 5000,
+                "persistent asset sharing lock must fail within bounded retry");
+        require(!fs::exists(blocked_recovery / "assets") &&
+                content(blocked_recovery / "assets.previous/marker.txt") == "preserve blocked cache",
+                "blocked recovery must preserve previous assets");
+        recover_import(blocked_recovery);
+        require(content(blocked_recovery / "assets/marker.txt") == "preserve blocked cache",
+                "asset recovery must remain possible after persistent lock releases");
+        auto live_recovery = root / "live-recovery";
+        fs::create_directories(live_recovery / "assets");
+        fs::create_directories(live_recovery / "assets.previous");
+        { std::ofstream marker(live_recovery / "assets/marker.txt"); marker << "current cache"; }
+        { std::ofstream marker(live_recovery / "assets.previous/marker.txt"); marker << "previous cache"; }
+        recover_import(live_recovery);
+        require(content(live_recovery / "assets/marker.txt") == "current cache" &&
+                content(live_recovery / "assets.previous/marker.txt") == "previous cache",
+                "recovery must not replace an existing live cache");
         std::cout << "Settings and malformed-disc tests passed\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
