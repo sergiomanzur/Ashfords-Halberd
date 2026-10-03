@@ -90,6 +90,8 @@ int wmain(int argc,wchar_t** argv) {
         size_t route_regions=0, route_queries=0, invalid_route_hops=0;
         size_t zombie_awareness_ticks=0;
         size_t enemy_stair_probes=0, zombie_brain_roots=0, zombie_brain_ticks=0;
+        size_t zombie_idle_ticks=0, zombie_idle_transitions=0, zombie_idle_sound_requests=0;
+        size_t zombie_search_neck_ticks=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
         size_t facial_lip_ticks=0, facial_lip_changed_frames=0;
@@ -567,6 +569,52 @@ int wmain(int argc,wchar_t** argv) {
                                         ++zombie_brain_ticks;
                                     }
                                     ++zombie_brain_roots;
+                                    auto idle=initialized;
+                                    idle.enemies[root].modes[2]=0;idle.enemies[root].modes[3]=0;
+                                    // Exercise actual MV00 then the existing raw channel
+                                    // sampler once; full SetMtn effects/fix offsets are pending.
+                                    tick_zombie_idle(idle,root);++zombie_idle_ticks;
+                                    if(idle.enemies[root].motion_number!=2 || idle.enemies[body].motion_number!=202 ||
+                                       idle.enemies[root].frame!=idle.enemies[body].frame)
+                                        throw std::runtime_error("Retail MV00 did not select original root/body idle motions");
+                                    advance_zombie_motion(idle,root);advance_zombie_motion(idle,body);
+                                    bool transitioned=false;
+                                    for(size_t tick=0;tick<220;++tick) {
+                                        tick_zombie_idle(idle,root);++zombie_idle_ticks;
+                                        if(idle.enemies[root].modes[2]==1 && idle.enemies[root].modes[3]==0) {
+                                            transitioned=true;++zombie_idle_transitions;break;
+                                        }
+                                    }
+                                    if(!transitioned)throw std::runtime_error("Retail idle timer did not enter original walking state");
+                                    for(const auto& sound:idle.pending_enemy_sounds) {
+                                        auto seed=idle.random_seed;
+                                        const auto expected=choose_zombie_sound(idle.enemies[root],seed,16847639,false);
+                                        if(!expected || sound.code!=*expected || sound.work!=root || seed!=idle.random_seed)
+                                            throw std::runtime_error("Retail idle sound request lost source slot/code/RNG policy");
+                                        ++zombie_idle_sound_requests;
+                                    }
+                                }
+                                auto search_neck=initialized;
+                                auto& searching=search_neck.enemies[body];
+                                search_neck.enemies[root].zombie_flags|=0x800;
+                                search_neck.enemies[root].zombie_work->awareness|=0x40;
+                                searching.zombie_work->player_distance=10;
+                                searching.zombie_work->neck_yaw=-2000;
+                                for(size_t tick=0;tick<64;++tick) {
+                                    const auto before=search_neck.enemies[root].joint_pose[11].angles.value();
+                                    const auto prior=searching.zombie_work->neck_yaw;
+                                    const auto frame=searching.frame;
+                                    tick_zombie_neck(search_neck,body,claire);
+                                    const auto after=search_neck.enemies[root].joint_pose[11].angles.value();
+                                    const auto delta=uint16_t(uint32_t(after[1])-uint32_t(prior));
+                                    if(after[0]!=before[0] || after[2]!=before[2] || after[1]!=searching.zombie_work->neck_yaw ||
+                                       (delta>910 && delta<65536-910) || searching.frame!=frame ||
+                                       search_neck.enemies[root].model->model!=raw)
+                                        throw std::runtime_error("Retail SearchNeck changed unrelated work or retained yaw policy");
+                                    for(size_t joint=0;joint<cached.joints.size();++joint)
+                                        if(search_neck.enemies[root].model_work->joints[joint].matrix!=cached.joints[joint].matrix)
+                                            throw std::runtime_error("Retail SearchNeck changed prior cached world matrices");
+                                    ++zombie_search_neck_ticks;
                                 }
                                 for(auto work:{root,body}) {
                                     auto& sensed=targeting.enemies[work];
@@ -1023,6 +1071,12 @@ int wmain(int argc,wchar_t** argv) {
                     throw std::runtime_error("Missing isolated native Brain00 pursuit coverage");
                 std::cout<<"Advanced "<<zombie_brain_ticks<<" isolated Brain00 close-pursuit updates across "
                          <<zombie_brain_roots<<" original roots\n";
+                if(zombie_idle_transitions!=zombie_brain_roots || !zombie_idle_ticks || !zombie_idle_sound_requests ||
+                   zombie_search_neck_ticks!=zombie_parameters*64)
+                    throw std::runtime_error("Missing retail native MV00/SearchNeck coverage");
+                std::cout<<"Advanced "<<zombie_idle_ticks<<" isolated MV00 ticks through "<<zombie_idle_transitions
+                         <<" idle-to-walk transitions with "<<zombie_idle_sound_requests<<" retained native sound requests\n";
+                std::cout<<"Advanced "<<zombie_search_neck_ticks<<" native linked-body SearchNeck updates\n";
             }
             if(zombie_model_work_samples!=zombie_channel_applications || zombie_range_draws!=zombie_parameters*2)
                 throw std::runtime_error("Missing retail zombie model-work coverage");

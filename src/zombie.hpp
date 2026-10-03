@@ -39,4 +39,12 @@ void tick_zombie_awareness(ScenarioState &state, size_t work, Vec3 player);
 // supplies current player work; movement/attack dispatch remains separate.
 void tick_zombie_brain(ScenarioState &state, size_t work,
                        const ScenarioEntity &player);
+int change_enemy_motion(ScenarioEntity &enemy, uint32_t number, int32_t frame,
+                        int32_t rate);
+std::optional<int32_t> choose_zombie_sound(const ScenarioEntity &enemy,
+                                           uint32_t &seed, int32_t code,
+                                           bool already_playing);
+void tick_zombie_idle(ScenarioState &state, size_t work);
+void tick_zombie_neck(ScenarioState &state, size_t work,
+                      const ActorModelWork &player);
 } // namespace ashford

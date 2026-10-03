@@ -499,3 +499,43 @@ actual cached work and current-room route regions. These traces hold the
 player primary4 gate to isolate close pursuit; paired reservations and floor
 direction are covered by synthetic tests. The205-room/85,944-route/1,860-
 awareness and existing native corridor checks remain passing.
+
+Native MV00 now selects original root2/body202 idle motions, takes its random
+frame from the incoming motion count, preserves startup fallthrough and source
+RNG order, and selects walking after notice/timer expiration except type8.
+Its body-neck oscillation retains unsigned word clamps9102/56434 and sound
+countdown runs even outside handled switch states. Motion changes set step
+65536 unconditionally; unchanged selections keep other fields, while changed
+selections reset frame/blending/mode and source flag bits only. Controller
+updates stage relevant scalar work and RNG without copying scene geometry.
+
+Zombie SePlay selection now retains personality offsets, silent/status gates,
+active-voice short circuit supplied by its caller, and original voice RNG.
+MV00 emits resolved native slot/position/code requests; its low-byte23 call
+does not query an active voice. These pending requests are not decoded audio
+playback. The audio backend remains required, and room loading clears obsolete
+requests together with dynamic room data.
+
+The original ct0–ct3 counters now have distinct native fields. Prop oscillation
+uses ct0; pickup highlighting uses ct0/ct1/ct2 while leaving ct3 untouched.
+This corrects the prior shifted prop mapping and preserves existing script
+and subplayer ct1/ct2 meanings.
+
+SearchNeck now handles linked-body override1000, short torso wax, retained
+signed neck yaw, parent/body flag800 and awareness40 unions, strict distance35
+and parent-yaw tracking through cached neck/Claire joints. It decays neck yaw
+by910 when tracking is inactive, preserves root/mode>=5 no-op gates, and stages
+pose/scalar changes so invalid consumed context cannot commit a temporary
+neck seed. Prior cached matrices remain unchanged until CalcEnemy.
+
+These native controller functions remain separate from full root MainLoop.
+SetMtn fix offsets/effects, movement/action selection, damage/attacks/player
+response, decoded audio, inventory and cross-room saves still require their
+source implementations before New Game and graveyard travel are enabled.
+
+The private retail scan passed1,350 isolated MV00 calls through ten original
+idle-to-walk transitions, with ten retained sound requests and640 SearchNeck
+updates against cached Claire joint5. It sampled the selected actual idle
+root/body channels once per root; full SetMtn effects and fix offsets were not
+substituted with that sampler. All205-room and previous route/pursuit/awareness
+checks remain passing.

@@ -707,42 +707,43 @@ int main() {
     props.flags[6][0] = 4;
     props.items.resize(1);
     auto &pickup = props.items[0];
+    pickup.control3 = 987;
     pickup.flags = 1;
     pickup.angular_speed = 100;
     pickup.position = {1, 2, 3};
     pickup.angles = {4, 5, 6};
     pickup.model = std::make_shared<const ActorModel>(empty_model);
     tick_scenario_props(props);
-    ck(pickup.control1 == 1 && pickup.control2 == 0 && pickup.control3 == 75 &&
+    ck(pickup.control0 == 1 && pickup.control1 == 0 && pickup.control2 == 75 && pickup.control3 == 987 &&
        props.random_seed == 1103527590u && pickup.rendered_model &&
        pickup.previous_position.x == 1 && pickup.previous_angles[1] == 5);
     for (int i = 0; i < 75; ++i)
       tick_scenario_props(props);
-    ck(pickup.control1 == 1 && pickup.control2 == 75 &&
+    ck(pickup.control0 == 1 && pickup.control1 == 75 &&
        !(pickup.model_flags & 0x80));
     tick_scenario_props(props);
-    ck(pickup.control1 == 2 && pickup.control2 == 0 &&
+    ck(pickup.control0 == 2 && pickup.control1 == 0 &&
        (pickup.model_flags & 0x80) && pickup.highlight_yaw == 0);
     for (int i = 0; i < 8; ++i)
       tick_scenario_props(props);
-    ck(pickup.control1 == 3 && pickup.control2 == 0 &&
+    ck(pickup.control0 == 3 && pickup.control1 == 0 &&
        !(pickup.model_flags & 0x80) && pickup.highlight_yaw == 65536 &&
        pickup.angles[1] == 5);
     tick_scenario_props(props);
-    ck(props.random_seed == 2524885223u && pickup.control1 == 1 &&
-       pickup.control3 == 65);
+    ck(props.random_seed == 2524885223u && pickup.control0 == 1 &&
+       pickup.control2 == 65);
     pickup.state_flags = 0x1000000;
     props.player_sleep_ticks = 1;
     tick_scenario_props(props);
-    ck(pickup.control2 == 0);
+    ck(pickup.control1 == 0);
     pickup.state_flags = 0;
     props.flags[10][0] = 0x40000000;
     tick_scenario_props(props);
-    ck(pickup.control2 == 0);
+    ck(pickup.control1 == 0);
     props.flags[10][0] = 0;
     props.flags[6][0] = 0;
     tick_scenario_props(props);
-    ck(pickup.control2 == 0);
+    ck(pickup.control1 == 0);
     props.flags[6][0] = 4;
     props.objects.resize(6);
     for (size_t i = 4; i < 6; ++i) {
@@ -755,10 +756,11 @@ int main() {
     rotating.angles[1] = -100;
     auto &oscillating = props.objects[5];
     oscillating.type = 3;
-    oscillating.control1 = 16384;
+    oscillating.control0 = 16384;
+    oscillating.control1 = 77;
     tick_scenario_props(props);
     ck(rotating.angles[1] == 65345 && rotating.previous_angles[1] == -100 &&
-       oscillating.angles[2] == 2048 && oscillating.control1 == 17408);
+       oscillating.angles[2] == 2048 && oscillating.control0 == 17408 && oscillating.control1 == 77);
     rotating.state_flags = 0x1000000;
     props.player_sleep_ticks = 0;
     tick_scenario_props(props);

@@ -308,6 +308,7 @@ int main() {
     startup.enemies[0].zombie_work->children[7] = 12;
     startup.enemies[0].zombie_work->awareness = 0x5e;
     startup.enemies[0].zombie_work->awareness_timeout = 15;
+    startup.enemies[0].zombie_work->neck_yaw = -2000;
     startup.enemies[0].zombie_work->route_id = 7;
     startup.enemies[0].zombie_work->route_timer = 99;
     startup.enemies[0].zombie_work->target_x = 123;
@@ -326,6 +327,7 @@ int main() {
     ck(startup.enemies[0].zombie_flags == 0x10000001);
     ck(startup.enemies[0].zombie_work->awareness == 0 &&
        startup.enemies[0].zombie_work->awareness_timeout == 0);
+    ck(startup.enemies[0].zombie_work->neck_yaw == 0);
     ck(startup.enemies[0].zombie_work->route_id == 0 &&
        startup.enemies[0].zombie_work->route_timer == 0 &&
        startup.enemies[0].zombie_work->target_x == 0 &&

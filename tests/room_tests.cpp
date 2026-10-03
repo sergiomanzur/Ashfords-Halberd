@@ -154,6 +154,7 @@ int main() {
     old_routes->regions.resize(2);
     persistent.routes = old_routes;
     persistent.dynamic_miscellaneous.resize(2);
+    persistent.pending_enemy_sounds.push_back({0,{1,2,3},99});
     auto runtime =
         load_room_runtime(runtime_data, 0, 1, 1, persistent, entry_player);
     ck(runtime.scenario.routes && runtime.scenario.routes != old_routes &&
@@ -162,6 +163,8 @@ int main() {
        persistent.routes == old_routes);
     ck(runtime.scenario.dynamic_miscellaneous.empty() &&
        persistent.dynamic_miscellaneous.size() == 2);
+    ck(runtime.scenario.pending_enemy_sounds.empty() &&
+       persistent.pending_enemy_sounds.size() == 1);
     ck(runtime.world.player.position.x == -10 &&
        runtime.world.player.yaw == 123 && runtime.world.player.entering &&
        runtime.scenario.stage == 0 && runtime.scenario.room == 1 &&

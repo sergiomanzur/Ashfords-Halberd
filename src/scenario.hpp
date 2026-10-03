@@ -63,6 +63,7 @@ struct ZombieExtendedWork {
   float target_x = 0, target_z = 0;             // EXP0_F(0x58/0x60).
   bool path_blocked = false;                    // Nonzero EXP0 pointer(0x70).
   std::optional<size_t> stair_target;           // EXP0 pointer(0x74).
+  int32_t neck_yaw = 0;                         // EXP0_I(0x50).
   int32_t left_leg_state = 0, right_leg_state = 0;
   float player_distance =
       0; // EXP0_F(84), updated by the original Move callback.
@@ -98,7 +99,9 @@ struct ScenarioEntity {
   std::array<uint8_t, 4> modes{};
   uint32_t motion_number = 0, motion_step = 65536;
   int32_t frame = 0, blend_count = 0, control1 = 0, control2 = 0;
+  int32_t control0 = 0; // Original ct0, distinct from ct1/ct2/ct3.
   int32_t control3 = 0, highlight_yaw = 0;
+  int16_t torso_yaw = 0; // BH_PWORK::wax.
   uint32_t frame_direction = 0;
   uint16_t motion_attribute = 0;
   int motion_boundary = 0;
@@ -140,6 +143,11 @@ enum class EnemyCallbackKind {
   ZombieLeg,
   ZombieManager
 };
+struct EnemySoundRequest {
+  size_t work = 0;
+  Vec3 position;
+  int32_t code = 0;
+};
 struct ScenarioState {
   std::array<std::array<uint32_t, 32>, 17> flags{};
   uint8_t room_case = 0, interaction_index = 0, floor_index = 0;
@@ -155,6 +163,7 @@ struct ScenarioState {
   std::vector<CollisionRecord> interactions;
   std::optional<RoomCollision> collision;
   std::vector<CollisionRecord> dynamic_miscellaneous; // sys->metcp.
+  std::vector<EnemySoundRequest> pending_enemy_sounds;
   std::shared_ptr<const RoomRoutes> routes;
   std::shared_ptr<const std::vector<std::optional<Motion>>> room_motions;
   std::shared_ptr<const std::vector<Bytes>> face_masks;

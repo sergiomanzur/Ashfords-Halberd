@@ -1,6 +1,6 @@
 #include "ninja_math.hpp"
-#include <algorithm>
 #include "scenario.hpp"
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 namespace ashford {
@@ -53,8 +53,8 @@ void tick_scenario_props(ScenarioState &state) {
           add(entity.angles[1], uint32_t(int32_t(increment)) & 0xffff);
     } else if (entity.type == 3) {
       entity.angles[2] =
-          int32_t(65536.f * ninja_sin_cos(uint16_t(entity.control1))[0]) / 32;
-      entity.control1 = add(entity.control1, 1024);
+          int32_t(65536.f * ninja_sin_cos(uint16_t(entity.control0))[0]) / 32;
+      entity.control0 = add(entity.control0, 1024);
     } else if (entity.type != 0 && !(entity.type >= 13 && entity.type < 100)) {
       throw std::runtime_error("Unsupported prop controller");
     }
@@ -67,32 +67,30 @@ void tick_scenario_props(ScenarioState &state) {
       continue;
     previous(entity, 0x200000u);
     if (entity.angular_speed) {
-      switch (entity.control1) {
+      switch (entity.control0) {
       case 1:
-        entity.control2 = add(entity.control2, 1);
-        if (entity.control2 > entity.control3) {
+        entity.control1 = add(entity.control1, 1);
+        if (entity.control1 > entity.control2) {
           entity.model_flags |= 0x80;
           entity.highlight_yaw = 0;
-          entity.control2 = 0;
-          entity.control1 = 2;
+          entity.control1 = 0;
+          entity.control0 = 2;
         }
         break;
       case 2:
         entity.highlight_yaw = add(entity.highlight_yaw, 8192);
-        entity.control2 = add(entity.control2, 1) & 7;
-        if (!entity.control2) {
+        entity.control1 = add(entity.control1, 1) & 7;
+        if (!entity.control1) {
           entity.model_flags &= ~0x80u;
-          entity.control1 = 3;
+          entity.control0 = 3;
         }
         break;
       default:
         entity.model_flags &= ~0x80u;
-        entity.control1 = 1;
-        entity.control2 = 0;
-        entity.control3 =
-              int32_t(30.f *
-                      (float(scenario_random(state)) / 2.1474836E9f)) +
-            60;
+        entity.control0 = 1;
+        entity.control1 = 0;
+        entity.control2 =
+            int32_t(30.f * (float(scenario_random(state)) / 2.1474836E9f)) + 60;
         break;
       }
     }
