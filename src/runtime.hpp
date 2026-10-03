@@ -21,4 +21,8 @@ RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
 void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
                        const PlayerTranslationTables &translations,
                        uint16_t pad);
+// Merge prepared geometry into one depth-tested scene, preserving room hide
+// indices and actor indices. Caller supplies original drawing/camera flags.
+Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
+                           uint32_t camera_flags);
 } // namespace ashford

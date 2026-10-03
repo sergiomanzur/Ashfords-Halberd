@@ -7,6 +7,7 @@
 #include "motion.hpp"
 #include "actor.hpp"
 #include "runtime.hpp"
+#include "render.hpp"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -57,6 +58,8 @@ int wmain(int argc,wchar_t** argv) {
         size_t runtime_entries=0;
         size_t runtime_ticks=0;
         size_t runtime_movement_ticks=0;
+        size_t runtime_images=0;
+        size_t runtime_entity_images=0;
         size_t corridor_controls=0;
         size_t corridor_door_requests=0;
         size_t room_motions=0, room_motion_poses=0;
@@ -191,6 +194,14 @@ int wmain(int argc,wchar_t** argv) {
                                 if(previous.x!=running.world.player.position.x || previous.z!=running.world.player.position.z)
                                     ++runtime_movement_ticks;
                                 ++runtime_ticks;
+                                if(tick%60==0 && running.world.cut) {
+                                    auto combined=compose_room_runtime(running,0xffffffff,0);
+                                    auto image=render_camera(combined,resolve_camera(running.cuts.at(*running.world.cut),0),320,240);
+                                    if(image.rgb.size()!=320*240*3)throw std::runtime_error("Invalid runtime rendered frame");
+                                    auto room_only=render_camera(running.scene,resolve_camera(running.cuts.at(*running.world.cut),0),320,240);
+                                    if(image.rgb!=room_only.rgb)++runtime_entity_images;
+                                    ++runtime_images;
+                                }
                             }
                             if(!collected && !running.scenario.items[0].rendered_model)
                                 throw std::runtime_error("Runtime pickup model was not rebuilt");
@@ -307,6 +318,9 @@ int wmain(int argc,wchar_t** argv) {
             if(runtime_check)std::cout<<"Loaded "<<runtime_entries<<" native corridor runtime entries with Claire pose and initialized scenario state\n";
             if(runtime_check)std::cout<<"Advanced "<<runtime_ticks<<" joined player/actor/prop/scenario runtime ticks\n";
             if(runtime_check)std::cout<<"Applied player displacement on "<<runtime_movement_ticks<<" runtime ticks\n";
+            if(runtime_check)std::cout<<"Rendered "<<runtime_images<<" joined runtime camera frames headlessly\n";
+            if(runtime_check && !runtime_entity_images)throw std::runtime_error("No runtime entities contributed visible pixels");
+            if(runtime_check)std::cout<<"Runtime entities contributed visible pixels in "<<runtime_entity_images<<" camera frames\n";
             std::cout<<"Decoded "<<enemy_motions<<" enemy motions and sampled "<<enemy_motion_poses<<" poses\n";
             std::cout<<"Decoded "<<room_motions<<" room motions and sampled "<<room_motion_poses<<" poses\n";
             std::cout<<"Posed "<<corridor_actor_poses<<" retail corridor actor frames\n";

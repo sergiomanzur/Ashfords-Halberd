@@ -177,6 +177,62 @@ int main() {
     running.scenario.flags[6][0] &= ~1u;
     tick_room_runtime(running, entry_player, entry_tables, 0);
     ck(running.world.player.frame == frozen);
+    RoomRuntime drawing;
+    Scene fragment;
+    fragment.textures.resize(1);
+    Mesh mesh;
+    mesh.object = 512;
+    mesh.triangles.resize(1);
+    fragment.meshes.push_back(mesh);
+    drawing.scene = fragment;
+    drawing.scene.meshes[0].object = 0;
+    drawing.player_scene = fragment;
+    drawing.scenario.enemies.resize(1);
+    drawing.scenario.enemies[0].flags = 1;
+    drawing.scenario.enemies[0].rendered_model = fragment;
+    drawing.scenario.items.resize(1);
+    drawing.scenario.items[0].flags = 1;
+    drawing.scenario.items[0].rendered_model = fragment;
+    auto combined = compose_room_runtime(drawing, 0xffffffff, 0);
+    ck(combined.meshes.size() == 4 && combined.textures.size() == 4 &&
+       combined.meshes[0].triangles[0].texture == 0 &&
+       combined.meshes[3].triangles[0].texture == 3);
+    ck(compose_room_runtime(drawing, 0x20, 0).meshes.size() == 1);
+    ck(compose_room_runtime(drawing, 1, 0).meshes.size() == 1);
+    drawing.scenario.items[0].state_flags = 0x1000000;
+    ck(compose_room_runtime(drawing, 0xffffffff, 0).meshes.size() == 3);
+    drawing.scenario.items[0].state_flags = 0;
+    drawing.scenario.items[0].flags |= 0x40000000;
+    drawing.world.cut = 1;
+    ck(compose_room_runtime(drawing, 0xffffffff, 0).meshes.size() == 3);
+    drawing.scenario.items[0].hide[0] = 1;
+    ck(compose_room_runtime(drawing, 0xffffffff, 0).meshes.size() == 4);
+    drawing.player_scene.meshes[0].triangles[0].texture = 0xffff;
+    auto sentinel = compose_room_runtime(drawing, 0xffffffff, 0);
+    ck(sentinel.meshes.back().triangles[0].texture == 0xffff &&
+       drawing.scene.meshes[0].triangles[0].texture == 0 &&
+       drawing.scenario.items[0]
+               .rendered_model->meshes[0]
+               .triangles[0]
+               .texture == 0);
+    drawing.player_scene.meshes[0].triangles[0].texture = 1;
+    bad([&] { compose_room_runtime(drawing, 0xffffffff, 0); });
+    drawing.player_scene.meshes[0].triangles[0].texture = 0;
+    drawing.scenario.objects.resize(1);
+    auto &draw_object = drawing.scenario.objects[0];
+    draw_object.flags = 1;
+    draw_object.rendered_model = fragment;
+    draw_object.id = 999;
+    ck(compose_room_runtime(drawing, 4, 0).meshes.size() == 1);
+    draw_object.id = 1000;
+    ck(compose_room_runtime(drawing, 4, 0).meshes.empty());
+    ck(compose_room_runtime(drawing, 6, 0).meshes.size() == 2);
+    draw_object.id = 1210;
+    ck(compose_room_runtime(drawing, 6, 0).meshes.size() == 1);
+    ck(compose_room_runtime(drawing, 5, 0).meshes.size() == 2);
+    drawing.scene.textures.resize(65535);
+    ck(compose_room_runtime(drawing, 0x20, 0).textures.size() == 65535);
+    bad([&] { compose_room_runtime(drawing, 0x21, 0); });
     RoomCut cut;
     cut.flags = 1;
     CutArea area;

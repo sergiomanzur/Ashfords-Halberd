@@ -184,6 +184,20 @@ controllers fail explicitly. The highlight drawing overlay, effects, light,
 sound, interactions, armed/damaged player states and application integration
 remain pending.
 
+`compose_room_runtime` now combines prepared room, player, enemy, object and
+pickup geometry for the existing depth-tested camera renderer. It preserves
+room visibility indices and actor indices, remaps each texture pack without
+altering the untextured sentinel or cached poses, and checks resource bounds.
+The represented drawing flags, hidden states, object category gates and cut
+visibility rules control inclusion. Linked/retained matrices and morphing
+draw modes still fail explicitly. Tests cover texture remapping, sentinel and
+capacity boundaries, immutable inputs, hidden pickups and object categories.
+The retail runtime probe rendered 16 combined original-camera snapshots
+headlessly across its four entry cases. Lighting, highlight overlays and the
+application input/render loop remain pending.
+Each of those 16 images differed from the same camera's room-only render,
+confirming that runtime entities contributed visible pixels.
+
 The retail RM_0010 control script sets RoomCaseNo before SetDoorCall into
 stage 0, room 2, position 0. Persistent flags choose the first-visit or return
 case. RM_0020/RM_0021 contain the return door into room 1, position 1. These
