@@ -100,7 +100,7 @@ void apply_display(SDL_Window* window, SDL_Renderer* renderer, const Settings& s
     if (SDL_RenderSetVSync(renderer, settings.vsync ? 1 : 0) < 0)
         throw std::runtime_error("This renderer cannot change vertical sync.");
 }
-int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::path& archive_override={},bool runtime_smoke=false,const fs::path& system_override={}) {
+int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::path& archive_override={},bool runtime_smoke=false,const fs::path& system_override={},bool options_smoke=false) {
     Instance instance(root);
     recover_import(root);
     auto settings_path = root / "AshfordsHalberd.ini";
@@ -122,7 +122,8 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
     SDL_RenderSetLogicalSize(renderer.get(), 1120, 720);
     Text text(renderer.get());
     bool ready = cache_valid(root)||scene_smoke||runtime_smoke, running = true, first_launch = !ready && !smoke;
-    int page = runtime_smoke?4:scene_smoke?3:0, selected = 0, frames = 0;
+    int page = options_smoke?1:runtime_smoke?4:scene_smoke?3:0, selected = options_smoke?3:0, frames = 0;
+    if(options_smoke){SDL_Event enter{};enter.type=SDL_KEYDOWN;enter.key.keysym.sym=SDLK_RETURN;SDL_PushEvent(&enter);}
     std::unique_ptr<RuntimeView> native;
     std::array<bool,SDL_NUM_SCANCODES> runtime_keys{};
     uint64_t runtime_clock=SDL_GetPerformanceCounter();
@@ -131,7 +132,7 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
     bool runtime_focused=true;
     size_t runtime_focus_blocked=0;
     auto open_native=[&]{
-        native=std::make_unique<RuntimeView>(renderer.get(),archive_override.empty()?root/"assets/RDX_LNK.AFS":archive_override,system_override.empty()?root/"assets/SYSTEM.AFS":system_override);
+        native=std::make_unique<RuntimeView>(renderer.get(),archive_override.empty()?root/"assets/RDX_LNK.AFS":archive_override,system_override.empty()?root/"assets/SYSTEM.AFS":system_override,settings.effects_volume);
         runtime_keys.fill(false);runtime_focused=true;runtime_clock=SDL_GetPerformanceCounter();runtime_accumulator=0;frames=0;runtime_movement=0;
     };
     if(runtime_smoke)open_native();
@@ -172,8 +173,9 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
     };
     auto persist = [&](Settings next) {
         auto previous = settings;
-        try { apply_display(window.get(), renderer.get(), next); save_settings(settings_path, next); settings = next; notice = "Settings saved."; }
-        catch (...) { try { apply_display(window.get(), renderer.get(), previous); } catch (...) {} throw; }
+        const bool display_changed=next.width!=previous.width || next.height!=previous.height || next.mode!=previous.mode || next.vsync!=previous.vsync;
+        try { if(display_changed)apply_display(window.get(), renderer.get(), next); save_settings(settings_path, next); settings = next;if(native)native->set_effects_volume(next.effects_volume); notice = "Settings saved."; }
+        catch (...) { if(display_changed)try { apply_display(window.get(), renderer.get(), previous); } catch (...) {} throw; }
     };
     while (running) {
         if (job && job->finished.load(std::memory_order_acquire)) {
@@ -202,7 +204,8 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
                     next.width = widths[i]; next.height = heights[i]; persist(next);
                 } else if (selected == 1) { next.mode = next.mode == "windowed" ? "borderless" : next.mode == "borderless" ? "fullscreen" : "windowed"; persist(next); }
                 else if (selected == 2) { next.vsync = !next.vsync; persist(next); }
-                else if (selected == 3) { page = 2; selected = 0; notice.clear(); }
+                else if (selected == 3) { next.effects_volume=((next.effects_volume/10+1)%11)*10;persist(next); }
+                else if (selected == 4) { page = 2; selected = 0; notice.clear(); }
                 else { page = 0; selected = 2; notice.clear(); }
             } else {
                 if (selected == 0) choose();
@@ -230,8 +233,8 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
             }
             if (!job) {
                 if(page==4){
-                    if(back){page=0;selected=4;runtime_keys.fill(false);notice.clear();continue;}
-                    if(event.type==SDL_WINDOWEVENT && (event.window.event==SDL_WINDOWEVENT_FOCUS_LOST || event.window.event==SDL_WINDOWEVENT_FOCUS_GAINED)){runtime_focused=event.window.event==SDL_WINDOWEVENT_FOCUS_GAINED;runtime_keys.fill(false);}
+                    if(back){native->set_audio_running(false);page=0;selected=4;runtime_keys.fill(false);notice.clear();continue;}
+                    if(event.type==SDL_WINDOWEVENT && (event.window.event==SDL_WINDOWEVENT_FOCUS_LOST || event.window.event==SDL_WINDOWEVENT_FOCUS_GAINED)){runtime_focused=event.window.event==SDL_WINDOWEVENT_FOCUS_GAINED;native->set_audio_running(runtime_focused);runtime_keys.fill(false);}
                     if(runtime_focused && (event.type==SDL_KEYDOWN || event.type==SDL_KEYUP)){auto scancode=event.key.keysym.scancode;if(scancode>=0 && scancode<SDL_NUM_SCANCODES)runtime_keys[size_t(scancode)]=event.type==SDL_KEYDOWN;}
                     continue;
                 }
@@ -256,7 +259,7 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
                     }
                     continue;
                 }
-                int count = page == 0 ? 6 : page == 1 ? 5 : 2;
+                int count = page == 0 ? 6 : page == 1 ? 6 : 2;
                 if (up) selected = (selected + count - 1) % count;
                 if (down) selected = (selected + 1) % count;
                 if (back) { if (page) { page = 0; selected = 0; notice.clear(); } else running = false; }
@@ -270,7 +273,7 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
                         selected = item; confirm |= event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT;
                     }
                 }
-                if (confirm) { try { activate(); } catch (const std::exception& error) { message(window.get(), error.what()); } }
+                if (confirm) { try { activate(); } catch (const std::exception& error) { if(smoke)throw;message(window.get(), error.what()); } }
             }
         }
         if (!running) break;
@@ -299,7 +302,7 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
                 for(size_t step=0;step<steps;++step){auto before=native->state().world.player.position;native->tick(pad);if(runtime_smoke && !runtime_focused && (native->state().scenario.flags[6][0]&1) && native->state().world.player.previous_pad)throw std::runtime_error("Controller input continued after focus loss");auto after=native->state().world.player.position;if(before.x!=after.x || before.z!=after.z)++runtime_movement;}
                 if(!runtime_smoke)runtime_accumulator-=double(steps)/60;
                 SDL_Rect image{160,55,800,600};native->draw(image);
-            }catch(const std::exception& error){if(runtime_smoke)throw;page=0;selected=4;notice=error.what();continue;}
+            }catch(const std::exception& error){native->set_audio_running(false);if(runtime_smoke)throw;page=0;selected=4;notice=error.what();continue;}
             text.draw("CORRIDOR PREVIEW",68,18,16,gold);
             text.draw("WASD/Arrows or left stick: Move   SHIFT/X: Run   ESC/B: Back",68,673,15,white);
             text.draw("Movement preview / combat, interactions and saves are in development",170,631,13,gold);
@@ -349,7 +352,8 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
         else if (page == 1) labels = {
             "Resolution     " + std::to_string(settings.width) + " x " + std::to_string(settings.height),
             "Window mode     " + settings.mode,
-            std::string("Vertical sync     ") + (settings.vsync ? "On" : "Off"), "Game data", "Back"};
+            std::string("Vertical sync     ") + (settings.vsync ? "On" : "Off"),
+            "Effects volume     " + std::to_string(settings.effects_volume) + "%", "Game data", "Back"};
         else labels = {"Choose / change ISO", "Back"};
         for (int i = 0; i < int(labels.size()); ++i) {
             int y = 285 + i * 55;
@@ -383,15 +387,17 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
         text.draw("NATIVE WINDOWS BUILD", 837, 667, 12, muted);
         SDL_RenderPresent(r);
         if (first_launch && !job) { first_launch = false; try { choose(); } catch (const std::exception& error) { message(window.get(), error.what()); running = false; } }
-        if(runtime_smoke){if(frames!=240 || !runtime_movement || runtime_focus_blocked!=10)throw std::runtime_error("Native runtime input smoke failed");save_settings(settings_path,settings);std::ofstream(root/"runtime-smoke.txt")<<"ticks="<<native->ticks()<<"\nrendered_frames="<<frames<<"\nmovement_ticks="<<runtime_movement<<"\nfocus_blocked_ticks="<<runtime_focus_blocked<<"\nmenu_return=1\n";running=false;}
+        if(runtime_smoke){if(frames!=240 || !runtime_movement || runtime_focus_blocked!=10 || native->audio_queue_frames()!=0)throw std::runtime_error("Native runtime input/audio smoke failed");save_settings(settings_path,settings);std::ofstream(root/"runtime-smoke.txt")<<"ticks="<<native->ticks()<<"\nrendered_frames="<<frames<<"\nmovement_ticks="<<runtime_movement<<"\nfocus_blocked_ticks="<<runtime_focus_blocked<<"\nmenu_return=1\naudio_frames="<<native->audio_frames()<<"\naudio_submitted_frames="<<native->audio_submitted_frames()<<"\naudio_queue_frames="<<native->audio_queue_frames()<<"\neffects_volume="<<settings.effects_volume<<"\n";running=false;}
         else if(scene_smoke){std::ofstream(root/"scene-menu-return.txt")<<"Returned to main menu.\n";running=false;}
         else if (smoke && ++frames == 3) {
             save_settings(settings_path, settings);
             auto persisted = load_settings(settings_path);
             if (persisted.width != settings.width) throw std::runtime_error("Menu settings persistence failed.");
             std::ofstream(root / "smoke.txt") << "Native menu rendered; INI persisted.\n";
+            if(options_smoke){if(persisted.effects_volume!=settings.effects_volume || page!=0)throw std::runtime_error("Effects Options action/menu return failed");std::ofstream(root/"audio-options-smoke.txt")<<"effects_volume="<<settings.effects_volume<<"\nmenu_return=1\n";}
             running = false;
         }
+        if(options_smoke && frames==1){SDL_Event back{};back.type=SDL_KEYDOWN;back.key.keysym.sym=SDLK_ESCAPE;SDL_PushEvent(&back);}
         SDL_Delay(8);
     }
     return 0;
@@ -404,7 +410,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     if (!raw) return 1;
     std::vector<std::wstring> args(raw, raw + argc); LocalFree(raw);
     fs::path root;
-    bool command = false, smoke = false,scene_smoke=false,runtime_smoke=false;
+    bool command = false, smoke = false,scene_smoke=false,runtime_smoke=false,options_smoke=false;
     fs::path archive_override,system_override;
     try {
         root = user_root();
@@ -414,6 +420,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                 root = fs::absolute(fs::path(args[i]));
             }
             if (args[i] == L"--smoke-test") smoke = true;
+            if(args[i]==L"--audio-options-smoke-test"){options_smoke=true;smoke=true;command=true;}
             if(args[i]==L"--scene-smoke-test"){scene_smoke=true;smoke=true;command=true;}
             if(args[i]==L"--runtime-smoke-test"){runtime_smoke=true;smoke=true;command=true;}
             if(args[i]==L"--system"){if(++i>=args.size())throw std::runtime_error("Missing system archive argument.");system_override=fs::absolute(fs::path(args[i]));}
@@ -439,7 +446,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             }
             if (args[i] == L"--check-cache") { recover_import(root); return cache_valid(root) ? 0 : 1; }
         }
-        return run_app(root, smoke,scene_smoke,archive_override,runtime_smoke,system_override);
+        return run_app(root, smoke,scene_smoke,archive_override,runtime_smoke,system_override,options_smoke);
     } catch (const std::exception& error) {
         if (!root.empty()) { std::ofstream log(root / "last-error.txt"); log << error.what() << '\n'; }
         if (!command && !smoke) MessageBoxW(nullptr, wide(error.what()).c_str(), L"Ashford's Halberd", MB_OK | MB_ICONERROR);

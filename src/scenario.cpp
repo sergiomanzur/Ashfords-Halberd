@@ -623,6 +623,16 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
       state.room_sound_case = program[pc + 1];
       pc += 2;
       break;
+    case 146:
+      extent(2);
+      request_background_stop(state.background_audio,program[pc+1]);
+      pc+=2;
+      break;
+    case 148:
+      extent(4);
+      request_background_sound(state.background_audio,program[pc+1],word(pc+2));
+      pc+=4;
+      break;
     case 188:
       extent(2);
       indexed(state.tasks, program[pc + 1]).active = false;
@@ -917,6 +927,7 @@ void initialize_scenario(ScenarioState &state, ScenarioEntity *player) {
   if (!state.scenario)
     throw std::runtime_error("No bound room scenario");
   const auto &initialization = state.scenario->program(0);
+  background_sound_command(state.background_audio,3);
   for (auto &task : state.tasks)
     task.active = false;
   tick_scenario_actors(state, player);
@@ -940,6 +951,7 @@ void initialize_scenario(ScenarioState &state, ScenarioEntity *player) {
     throw;
   }
   state.flags[6][0] &= ~0x10u;
+  background_sound_command(state.background_audio,4);
   if (player) {
     player->flags = state.player_work_flags;
     player->state_flags = state.player_state_flags;

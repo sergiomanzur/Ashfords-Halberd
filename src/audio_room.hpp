@@ -1,6 +1,7 @@
 #pragma once
 #include "audio_assets.hpp"
 #include <array>
+#include <filesystem>
 #include <memory>
 namespace ashford {
 struct RoomSoundAssets {
@@ -14,6 +15,10 @@ RoomSoundAssets
 decode_room_sound_pack(const Bytes &data,
                        size_t pcm_budget = sound_pcm_frame_limit,
                        size_t event_budget = sound_sequence_event_limit);
+std::shared_ptr<const RoomSoundAssets>
+read_room_sound_assets(const std::filesystem::path &archive,
+                       const std::filesystem::path &index, uint8_t stage,
+                       uint8_t room, int32_t sound_case);
 // Matching RequestMidiFadeFunction/ExecSoundFadeManager tick arithmetic;
 // caller schedules manager ticks separately from sample rendering.
 class MidiVolumeFade {

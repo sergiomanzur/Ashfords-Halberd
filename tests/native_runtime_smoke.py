@@ -8,7 +8,7 @@ exe, rooms, system, profile = map(lambda value: Path(value).resolve(), sys.argv[
 if profile.exists():
     raise SystemExit('Use a fresh diagnostic profile directory')
 profile.mkdir(parents=True)
-env = dict(os.environ, SDL_VIDEODRIVER='dummy', SDL_RENDER_DRIVER='software')
+env = dict(os.environ, SDL_VIDEODRIVER='dummy', SDL_RENDER_DRIVER='software',SDL_AUDIODRIVER='dummy')
 result = subprocess.run([str(exe), '--smoke-test', '--runtime-smoke-test',
                          '--archive', str(rooms), '--system', str(system),
                          '--data-dir', str(profile)], env=env,
@@ -21,5 +21,9 @@ assert int(report['rendered_frames']) == 240
 assert int(report['movement_ticks']) > 0
 assert int(report['focus_blocked_ticks']) == 10
 assert report['menu_return'] == '1'
+assert int(report['audio_frames']) == int(report['ticks'])*800
+assert int(report['audio_submitted_frames']) == (240-10)*800
+assert int(report['audio_queue_frames']) == 0
+assert int(report['effects_volume']) == 100
 assert (profile/'AshfordsHalberd.ini').exists()
 print('Headless native application runtime passed:', report)

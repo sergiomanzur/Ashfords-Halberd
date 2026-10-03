@@ -45,6 +45,7 @@ std::map<std::string, std::string> read_configuration(const fs::path& path, bool
     };
     healthy &= valid_number("Display.width", 640, 7680) && valid_number("Display.height", 480, 4320);
     healthy &= valid_number("Viewer.room",0,9999) && valid_number("Viewer.cut",0,4095) && valid_number("Viewer.variant",0,1);
+    healthy &= valid_number("Audio.effects_volume",0,100);
     auto mode = values.find("Display.mode");
     healthy &= mode == values.end() || mode->second == "windowed" || mode->second == "borderless" || mode->second == "fullscreen";
     auto vsync = values.find("Display.vsync");
@@ -149,10 +150,12 @@ Settings load_settings(const fs::path& path) {
     result.viewer_room=bounded(values["Viewer.room"],0,0,9999);
     result.viewer_cut=bounded(values["Viewer.cut"],0,0,4095);
     result.viewer_variant=bounded(values["Viewer.variant"],0,0,1);
+    result.effects_volume=bounded(values["Audio.effects_volume"],100,0,100);
     return result;
 }
 void save_settings(const fs::path& path, const Settings& value) {
     check(value.iso_path.find_first_of("\r\n") == std::string::npos, "Invalid ISO path for configuration.");
+    check(value.effects_volume>=0 && value.effects_volume<=100,"Invalid effects volume.");
     check(value.viewer_room>=0 && value.viewer_room<=9999 && value.viewer_cut>=0 && value.viewer_cut<=4095 && value.viewer_variant>=0 && value.viewer_variant<=1,"Invalid viewer selection.");
     fs::create_directories(path.parent_path());
     fs::path temporary(path.wstring() + L".tmp"), backup(path.wstring() + L".bak");
@@ -160,6 +163,7 @@ void save_settings(const fs::path& path, const Settings& value) {
       output << "; Ashford's Halberd - user settings\n[General]\nschema_version=1\n\n[GameData]\niso_path=" << value.iso_path
              << "\n\n[Display]\nwidth=" << value.width << "\nheight=" << value.height
              << "\nmode=" << value.mode << "\nvsync=" << (value.vsync ? 1 : 0)
+             << "\n\n[Audio]\neffects_volume=" << value.effects_volume
              << "\n\n[Viewer]\nroom="<<value.viewer_room<<"\ncut="<<value.viewer_cut<<"\nvariant="<<value.viewer_variant<<"\n";
       output.flush(); check(bool(output), "Cannot write settings. Check available disk space and folder permissions."); }
     if (fs::exists(path)) {

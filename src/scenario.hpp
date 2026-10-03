@@ -1,6 +1,7 @@
 #pragma once
 #include "actor.hpp"
 #include "assets.hpp"
+#include "audio_background.hpp"
 #include "collision.hpp"
 #include "face_controller.hpp"
 #include <array>
@@ -191,6 +192,7 @@ struct ScenarioState {
   uint8_t room_case = 0, interaction_index = 0, floor_index = 0;
   uint8_t stage = 0, room = 0, player_sleep_ticks = 0;
   int32_t room_sound_case = 0;
+  BackgroundAudioState background_audio;
   std::optional<ScenarioDoor> door;
   // Caller binds current runtime entities, including the authored-enemy to
   // allocated-work-slot map produced during room loading.

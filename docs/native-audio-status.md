@@ -1,10 +1,11 @@
 # Native original sound assets
 
-The native library decodes the selected Step1 sound assets and synthesizes
-the original ambient sequences offline. **Runtime playback and the playable
-slice remain incomplete.** New Game
-is disabled; original scenario opcode148 still rejects explicitly because
-its sequenced playback service is unfinished.
+The native library decodes and synthesizes selected original sound assets.
+Native ambient requests and bounded SDL output are now joined to the corridor
+runtime, with an in-menu effects volume. **The complete playable slice remains
+unfinished.** New Game is disabled.148 now executes its source request behavior;
+the two graveyard initialization scripts stop later at47/67, so their actual
+gameplay audio and full room entry remain unverified.
 
 ## Implemented
 
@@ -232,13 +233,90 @@ after oversized rejection or empty rendering. Existing assertions prove the
 error/empty result; state preservation is visible in the implementation but
 does not yet have that independent regression.
 
+## Original request runtime and native SDL output
+
+`BackgroundAudioState` keeps source `CurrentBgSeNo`/`ReqFadeBgSe` as values;
+scenario copies and destination validation never share a mutable mixer/device.
+Native148 reads the original slot/word and schedules a request;146 schedules
+a stop. Raw-code comparison remains distinct from the forced bank3 code.
+Ambient command3 sets initialization, matching empty command4 leaves it active,
+and command1 emits source120 fade-in playback after room assets resolve.
+Command2 schedules source400 fade-outs for requested stops. Batches are bounded
+to32 actions and reject without replacing live slots on validation failure.
+These are the ambient components of the source commands; ADX/shot/door owners
+are explicitly unfinished, not implemented as silent substitutes.
+
+`RoomAudioPlayback` owns two independent native mixers/fades and one Hall stage.
+The current native60Hz cadence produces800 stereo PCM16 frames per tick at48kHz.
+Each slot applies the candidate driver gain before combining dry/effect buses;
+an effects percentage scales the final output. Zero effects volume preserves
+sequence/envelope/filter state. A conservative sum of slot peak counts bounds
+the shared voice budget to48; original shared scheduling/stealing still needs
+its required integration. Rendering failures stop the owner and require
+reconstruction, preventing continuation after partially advanced mixer state.
+
+`read_room_sound_assets` uses the source key `stage*1000+room*10+case`, reads only
+the selected validated AFS extent, and binds immutable assets. The room loader
+resolves the post-script sound case, consumes/resets it, validates ambient
+commands and constructs the replacement before committing a room transition.
+Requested ambient audio without a resolver rejects explicitly.
+
+`RuntimeView` owns the native playback/device. SDL receives48kHz stereoPCM16
+through a queue capped at half a second, with explicit initialization/queue
+errors. Preview exit, focus loss and errors pause/clear queued PCM; owner
+destruction closes the device and releases its audio subsystem reference.
+Scenario evaluation never calls SDL. **Corridor entry currently requests no
+ambient slot, so its packaged smoke proves connected output/lifetime, not
+audible original graveyard gameplay.**
+
+Effects volume is implemented under main-menu Options and persists atomically
+as `[Audio] effects_volume=0..100`. Bad values preserve valid settings/default
+the affected key; invalid writes reject. The actual Options action and a second
+process launch pass headless checks. Any valid integer volume advances to the
+next ten-point menu step, with100 wrapping to mute. Regressions exercise saved
+95/99 values and a full cycle from1, including persistence after every action.
+Music/voice controls await actual ADX
+playback. No separate configuration launcher was added.
+
+The complete build/package passed87/87 headless tests, including literal source
+requests, two-slot PCM/fades/stops/mute, dummy device consumption/queue limits,
+post-script resolver/failure preservation, effects INI and actual menu action.
+Evidence: `local/native-room-audio-runtime-full-build.log`.
+After the review fix, the complete suite again passed87/87; final packaged
+dummy smoke generated192800 frames, submitted184000 and left the queue empty.
+Evidence: `local/native-room-audio-runtime-final-build.log` and
+`local/native-room-audio-runtime-final-ui-smoke.log`.
+
+The production entry probe with original RDX/player/sound assets now passes148
+and reaches **47 at110** in graveyard case0 and **67 at48** in case1. It retains
+120 corridor updates/60 normal-anchor changes and ten roots/ten bodies/52
+auxiliaries. These next operations are not skipped. Evidence:
+`local/room-audio-runtime-entry-audit.log`.
+
+Private `local/room_audio_instruction_retail_audit.cpp` separately executes the
+actual four-byte148 at offset10 from each original initialization script.
+Both request slot0/code0x300. Their isolated requests, bound to original sound
+keys20/21, render36s each:1728000 frames, one active slot,1727066 nonzero frames,
+exact mute-clock continuation and1728000 frames transferred to a paused dummy
+device with bounded/cleared queue. **This is an isolated instruction/audio
+diagnostic, not successful room initialization or gameplay acceptance.** The
+separate output unit test verifies actual dummy consumption. Evidence:
+`local/room-audio-instruction-original36.log`.
+
+One fresh read-only review inspected all five runtime focus areas. Its Important
+finding, valid non-ten-step volumes trapping the menu above100, received a
+reproducing RED test and a GREEN fix. Deferred Minor: compare subsequent PCM
+against an untouched player after invalid-batch rejection; current assertions
+check slot count and the implementation preflights the whole batch. Original
+bank reuse, additional audio categories, full graveyard entry/gameplay and
+hardware reference acceptance remain outside this increment's completion.
+
 ## Next required integration
 
 Validate the native synthesis/effects candidate against original-game reference
 and implement remaining active instrument branches where required by the slice.
-Connect the sequenced PCM buses and source fade/depth controls to
-native SDL audio with separate music/voice/effects volumes, verified using the
-dummy driver. Preserve original148 request timing and room fade-in behavior.
-Decode required ADX music/voices separately. Then prove audio through actual
-room entry and gameplay, along with combat, inventory, cross-room saves and
-original-game reference acceptance.
+Complete the newly exposed47/67 initialization services, actual graveyard
+entry/gameplay, original bank3 reuse and room-change fade orchestration.
+Integrate shot/footstep/enemy sounds and decode required ADX music/voices with
+working separate controls. Then prove audio through actual two-room gameplay,
+along with combat, inventory, cross-room saves and original-game acceptance.

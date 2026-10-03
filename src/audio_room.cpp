@@ -1,7 +1,40 @@
 #include "audio_room.hpp"
 #include <algorithm>
+#include <fstream>
 #include <stdexcept>
 namespace ashford {
+std::shared_ptr<const RoomSoundAssets>
+read_room_sound_assets(const std::filesystem::path &archive,
+                       const std::filesystem::path &index, uint8_t stage,
+                       uint8_t room, int32_t sound_case) {
+  const uint32_t key =
+      uint32_t(stage) * 1000 + uint32_t(room) * 10 + uint32_t(sound_case);
+  if (sound_case < 0 || sound_case > 255 || key >= 0xffff ||
+      std::filesystem::file_size(index) != 2048)
+    throw std::runtime_error("Invalid native room sound key/index");
+  std::ifstream afs(archive, std::ios::binary), idx(index, std::ios::binary);
+  auto read = [](std::ifstream &file, uint64_t at, size_t size) {
+    if (size > 64 * 1024 * 1024)
+      throw std::runtime_error("Room sound extent exceeds limit");
+    Bytes bytes(size);
+    file.seekg(std::streamoff(at));
+    if (!file.read(reinterpret_cast<char *>(bytes.data()),
+                   std::streamsize(size)))
+      throw std::runtime_error("Could not read native room sound assets");
+    return bytes;
+  };
+  const auto first = read(afs, 0, 8);
+  const uint32_t count = uint32_t(first[4]) | uint32_t(first[5]) << 8 |
+                         uint32_t(first[6]) << 16 | uint32_t(first[7]) << 24;
+  if (count > 10000)
+    throw std::runtime_error("Room sound archive count exceeds limit");
+  const auto entries = afs_index(read(afs, 0, 8 + size_t(count) * 8),
+                                 std::filesystem::file_size(archive));
+  const auto entry = entries.at(
+      sound_pack_index(read(idx, 0, 2048), uint16_t(key), entries.size()));
+  return std::make_shared<const RoomSoundAssets>(
+      decode_room_sound_pack(read(afs, entry.offset, entry.size)));
+}
 RoomSoundAssets decode_room_sound_pack(const Bytes &data, size_t pcm_budget,
                                        size_t event_budget) {
   auto remaining_pcm = std::min(pcm_budget, sound_pcm_frame_limit);

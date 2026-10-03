@@ -183,6 +183,37 @@ int main() {
     persistent.pending_enemy_vibrations.push_back({0, 1, 10});
     auto runtime =
         load_room_runtime(runtime_data, 0, 1, 1, persistent, entry_player);
+    auto with_case = runtime_data;
+    const Bytes sound_case{182, 1, 0};
+    std::copy(sound_case.begin(), sound_case.end(), with_case.begin() + 2108);
+    auto sound_assets = std::make_shared<RoomSoundAssets>();
+    sound_assets->has_environment = true;
+    bool resolved = false;
+    auto sound_runtime =
+        load_room_runtime(with_case, 0, 1, 1, persistent, entry_player, nullptr,
+                          [&](uint8_t stage, uint8_t room, int32_t sound_case) {
+                            ck(stage == 0 && room == 1 && sound_case == 1);
+                            resolved = true;
+                            return sound_assets;
+                          });
+    ck(resolved && sound_runtime.sound_assets == sound_assets &&
+       sound_runtime.scenario.room_sound_case == 0 &&
+       !sound_runtime.scenario.background_audio.initializing &&
+       persistent.room_sound_case == 0 &&
+       !persistent.background_audio.initializing);
+    auto failed_sound = sound_runtime;
+    failed_sound.scenario.door = ScenarioDoor{0, 0, 1, 1, 0};
+    failed_sound.scenario.flags[10][0] |= 1;
+    bad([&] {
+      transition_room_runtime(
+          failed_sound, with_case, entry_player,
+          [](uint8_t, uint8_t,
+             int32_t) -> std::shared_ptr<const RoomSoundAssets> {
+            throw std::runtime_error("Injected sound asset failure");
+          });
+    });
+    ck(failed_sound.sound_assets == sound_assets &&
+       failed_sound.scenario.door && failed_sound.scenario.flags[10][0] & 1);
     ck(runtime.scenario.routes && runtime.scenario.routes != old_routes &&
        runtime.scenario.routes->regions.size() == 1 &&
        room_route_id(*runtime.scenario.routes, {0, 0, 0}) == 0 &&

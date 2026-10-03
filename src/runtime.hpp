@@ -1,7 +1,11 @@
 #pragma once
+#include "audio_room.hpp"
 #include "room.hpp"
 #include "scenario.hpp"
+#include <functional>
 namespace ashford {
+using RoomSoundResolver = std::function<std::shared_ptr<const RoomSoundAssets>(
+    uint8_t, uint8_t, int32_t)>;
 struct RoomRuntime {
   Scene scene;
   RoomCollision collision;
@@ -11,6 +15,7 @@ struct RoomRuntime {
   Scene player_scene;
   ScenarioEntity player_work;
   ScenarioState scenario;
+  std::shared_ptr<const RoomSoundAssets> sound_assets;
   uint16_t previous_pad = 0;
 };
 // Retained healthy unarmed work/caches consumed by native enemy callbacks.
@@ -22,11 +27,13 @@ void synchronize_runtime_player(RoomRuntime &runtime,
 RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
                               size_t entry, ScenarioState persistent,
                               const PlayerPackage &player,
-                              const ScenarioEntity *previous_player = nullptr);
+                              const ScenarioEntity *previous_player = nullptr,
+                              const RoomSoundResolver &sounds = {});
 // Consume an authored door request after destination assets validate. Failure
 // retains the old runtime, progress and pending request for recovery.
 void transition_room_runtime(RoomRuntime &runtime, const Bytes &destination,
-                             const PlayerPackage &player);
+                             const PlayerPackage &player,
+                             const RoomSoundResolver &sounds = {});
 // Represented baseline frame sequence. Unsupported entity controllers fail
 // explicitly; effect/light/audio and interaction dispatch remain pending.
 void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,

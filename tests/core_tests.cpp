@@ -20,12 +20,21 @@ int main(int argc, char** argv) {
         fs::create_directories(root);
         auto ini = root / "settings.ini";
         auto defaults = load_settings(ini);
+        require(defaults.effects_volume==100,"effects default volume");
+        defaults.effects_volume=60;
         require(defaults.width == 1120 && defaults.mode == "windowed", "missing INI defaults");
         defaults.iso_path = "C:/Games/CVX USA/日本語.iso";
         defaults.width = 1280; defaults.height = 720; defaults.vsync = false;
         defaults.viewer_room=87;defaults.viewer_cut=2;defaults.viewer_variant=1;
         save_settings(ini, defaults);
         auto restored = load_settings(ini);
+        require(restored.effects_volume==60,"effects volume INI roundtrip");
+        auto invalid_audio=restored;invalid_audio.effects_volume=101;
+        rejects([&]{save_settings(ini,invalid_audio);},"invalid effects volume must reject");
+        {std::ofstream file(ini);file<<"[Audio]\neffects_volume=-1\n[Display]\nvsync=0\n";}
+        require(load_settings(ini).effects_volume==100 && !load_settings(ini).vsync,
+                "invalid effects key preserves valid values");
+        save_settings(ini,restored);
         require(restored.iso_path == defaults.iso_path && restored.width == 1280 && !restored.vsync,
                 "settings must survive restart, including Unicode paths");
         require(restored.viewer_room==87 && restored.viewer_cut==2 && restored.viewer_variant==1,"viewer selection persistence");

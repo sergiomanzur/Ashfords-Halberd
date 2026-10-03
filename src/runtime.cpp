@@ -1,4 +1,5 @@
 #include "runtime.hpp"
+#include "audio_runtime.hpp"
 #include "effects.hpp"
 #include "ninja_matrix.hpp"
 #include "zombie.hpp"
@@ -67,13 +68,14 @@ void synchronize_runtime_player(RoomRuntime &runtime,
   p.model_work = std::move(cached);
 }
 void transition_room_runtime(RoomRuntime &runtime, const Bytes &destination,
-                             const PlayerPackage &player) {
+                             const PlayerPackage &player,
+                             const RoomSoundResolver &sounds) {
   if (!runtime.scenario.door || !(runtime.scenario.flags[10][0] & 1))
     throw std::runtime_error("No pending native room transition");
   const auto door = *runtime.scenario.door;
   auto replacement =
       load_room_runtime(destination, door.stage, door.room, door.position,
-                        runtime.scenario, player, &runtime.player_work);
+                        runtime.scenario, player, &runtime.player_work, sounds);
   // bhStartDoorDemo completes after the destination is ready. Door graphics
   // and sound have separate owners; this consumes only the loading request.
   replacement.scenario.flags[10][0] &= ~1u;
@@ -250,7 +252,8 @@ void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
 RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
                               size_t entry, ScenarioState persistent,
                               const PlayerPackage &player,
-                              const ScenarioEntity *previous_player) {
+                              const ScenarioEntity *previous_player,
+                              const RoomSoundResolver &sounds) {
   RoomRuntime result;
   if (persistent.flags[10][0] & 0x800000)
     throw std::runtime_error(
@@ -322,6 +325,19 @@ RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
   }
   synchronize_runtime_player(result, player);
   initialize_scenario(result.scenario, &result.player_work);
+  if (sounds) {
+    result.sound_assets = sounds(stage, room, result.scenario.room_sound_case);
+    result.scenario.room_sound_case =
+        0; // GetRoomSoundCaseNo consumes source case.
+    background_sound_command(result.scenario.background_audio, 1);
+    RoomAudioPlayback validation(result.sound_assets);
+    validation.apply(result.scenario.background_audio.commands);
+  } else {
+    const auto &audio = result.scenario.background_audio;
+    if (audio.request[0] || audio.request[1] || !audio.commands.empty())
+      throw std::runtime_error(
+          "Native room entry requires its sound asset resolver");
+  }
   return result;
 }
 } // namespace ashford

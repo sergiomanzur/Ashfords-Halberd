@@ -32,21 +32,52 @@ Bytes archive_entry(const fs::path &path, size_t index, bool compressed) {
 }
 } // namespace
 RuntimeView::RuntimeView(SDL_Renderer *renderer, const fs::path &rooms,
-                         const fs::path &system)
+                         const fs::path &system, int effects_volume)
     : renderer_(renderer) {
   player_ = decode_player_package(archive_entry(system, 10, false));
   translations_ = decode_player_translation_tables(player_.auxiliary);
-  runtime_ = load_room_runtime(archive_entry(rooms, 1, true), 0, 1, 0,
-                               ScenarioState{}, player_);
+  set_effects_volume(effects_volume);
+  const auto sound_root = rooms.parent_path();
+  runtime_ = load_room_runtime(
+      archive_entry(rooms, 1, true), 0, 1, 0, ScenarioState{}, player_, nullptr,
+      [&](uint8_t stage, uint8_t room, int32_t sound_case) {
+        return read_room_sound_assets(sound_root / "MULTSPQ1.AFS",
+                                      sound_root / "MULTSPQ1.IDX", stage, room,
+                                      sound_case);
+      });
+  audio_ = std::make_unique<RoomAudioPlayback>(runtime_.sound_assets);
+  audio_->apply(runtime_.scenario.background_audio.commands);
+  runtime_.scenario.background_audio.commands.clear();
   tick(0);
   texture_.reset(SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGB24,
                                    SDL_TEXTUREACCESS_STREAMING, 320, 240));
   if (!texture_)
     throw std::runtime_error(SDL_GetError());
+  set_audio_running(true);
 }
 void RuntimeView::tick(uint16_t pad) {
-  tick_room_runtime(runtime_, player_, translations_, pad);
-  ++ticks_;
+  try {
+    tick_room_runtime(runtime_, player_, translations_, pad);
+    audio_->apply(runtime_.scenario.background_audio.commands);
+    runtime_.scenario.background_audio.commands.clear();
+    const auto frames = audio_->tick(effects_volume_);
+    if (audio_running_)
+      output_.queue(frames);
+    ++ticks_;
+  } catch (...) {
+    set_audio_running(false);
+    audio_->stop();
+    throw;
+  }
+}
+void RuntimeView::set_audio_running(bool running) {
+  output_.pause(!running);
+  audio_running_ = running;
+}
+void RuntimeView::set_effects_volume(int volume) {
+  if (volume < 0 || volume > 100)
+    throw std::runtime_error("Invalid effects volume");
+  effects_volume_ = volume;
 }
 void RuntimeView::draw(const SDL_Rect &destination) {
   if (!runtime_.world.cut)
