@@ -26,6 +26,9 @@ void initialize_zombie_work(ScenarioState &state, size_t work);
 // This transactional diagnostic helper also replaces state on success.
 void advance_zombie_motion(ScenarioState &state, size_t work);
 // Original head/arm/leg and hidden parent-manager mode-0 startup. Does not
-// dispatch detached-part damage or manager nearest/stair movement checks.
+// dispatch detached-part damage.
 void initialize_zombie_auxiliary(ScenarioState &state, size_t work);
+// en01sub.c source mode0/1 callbacks for head/arm/leg and parent manager.
+// Root AI updates the cached player distance consumed by manager policy.
+void tick_zombie_auxiliary(ScenarioState &state, size_t work);
 } // namespace ashford

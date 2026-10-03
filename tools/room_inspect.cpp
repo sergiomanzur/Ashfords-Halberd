@@ -83,6 +83,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_startup_links=0, zombie_managers=0;
         size_t zombie_model_work_samples=0, zombie_range_draws=0;
         size_t zombie_player_contacts=0;
+        size_t zombie_auxiliary_frames=0, zombie_manager_frames=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
         size_t facial_lip_ticks=0, facial_lip_changed_frames=0;
@@ -470,6 +471,51 @@ int wmain(int argc,wchar_t** argv) {
                             throw std::runtime_error("Retail native startup allocation count mismatch");
                         zombie_startup_links+=allocated;
                         zombie_managers+=managers;
+                        // Exercise production auxiliary callbacks without claiming
+                        // the separate root movement/damage controller is ready.
+                        auto scheduled_parts=initialized;
+                        for(auto& work:scheduled_parts.enemies) {
+                            if(work.id==1)work.state_flags|=0x40000000;
+                            else if(work.id==31 || work.id==32 || work.id==33 || work.id==38) {
+                                work.modes[0]=0;
+                                work.damage.fill(99);work.combo_timeout=4;
+                                work.combo_flags=0xff;work.secondary_flags|=4;
+                            } else work.flags&=~1u;
+                        }
+                        size_t nearest=roots.front();
+                        const auto origin=records.positions.at(0).position;
+                        for(auto root:roots) {
+                            auto& work=scheduled_parts.enemies[root];
+                            const auto dx=work.position.x-origin.x,dy=work.position.y-origin.y,dz=work.position.z-origin.z;
+                            work.zombie_work->player_distance=std::sqrt(dx*dx+dy*dy+dz*dz);
+                            if(work.zombie_work->player_distance<scheduled_parts.enemies[nearest].zombie_work->player_distance)
+                                nearest=root;
+                        }
+                        const auto seed=scheduled_parts.random_seed;
+                        scheduled_parts.flags[6][0]=2;
+                        for(size_t frame=0;frame<64;++frame) {
+                            tick_scenario_actors(scheduled_parts);
+                            if(scheduled_parts.random_seed!=seed)
+                                throw std::runtime_error("Native auxiliary idle callback consumed RNG");
+                            for(size_t slot=0;slot<scheduled_parts.enemies.size();++slot) {
+                                const auto& work=scheduled_parts.enemies[slot];
+                                if(!(work.flags&1) || (work.id!=31 && work.id!=32 && work.id!=33 && work.id!=38))continue;
+                                const auto owner=work.pose_owner.value();
+                                const auto joints=scheduled_parts.enemies.at(owner).model_work->joints.size();
+                                if(work.modes!=std::array<uint8_t,4>{1,0,0,0} || work.secondary_flags&4 ||
+                                   work.combo_flags!=0x8f || work.combo_timeout!=std::max(0,3-int(frame)) ||
+                                   !(work.model_flags&1) || work.model->model!=initialized.enemies[slot].model->model)
+                                    throw std::runtime_error("Retail auxiliary callback or common frame cleanup mismatch");
+                                for(size_t joint=0;joint<work.damage.size();++joint)
+                                    if(work.damage[joint]!=(joint<joints?0:99))
+                                        throw std::runtime_error("Retail auxiliary damage cleanup owner/count mismatch");
+                                ++zombie_auxiliary_frames;
+                                if(frame && work.id==38)++zombie_manager_frames;
+                            }
+                            if(frame) for(auto root:roots)
+                                if(bool(scheduled_parts.enemies[root].zombie_secondary_flags&2)!=(root==nearest))
+                                    throw std::runtime_error("Retail manager did not select nearest cached root");
+                        }
                         for(auto root:roots) {
                             const auto& zombie=initialized.enemies[root];
                             ContactBody enemy;
@@ -818,6 +864,10 @@ int wmain(int argc,wchar_t** argv) {
             if(zombie_auxiliary_startups!=zombie_parameters*5+2)
                 throw std::runtime_error("Missing retail zombie auxiliary Init coverage");
             std::cout<<"Initialized "<<zombie_auxiliary_startups<<" native head/arm/leg/manager works in pool order\n";
+            if(zombie_auxiliary_frames!=zombie_auxiliary_startups*64 || zombie_manager_frames!=zombie_managers*63)
+                throw std::runtime_error("Missing retail auxiliary/manager scheduler coverage");
+            std::cout<<"Dispatched "<<zombie_auxiliary_frames<<" native auxiliary frames, including "
+                     <<zombie_manager_frames<<" manager policy updates and original post-controller cleanup\n";
             std::cout<<"Verified "<<zombie_player_contacts<<" original player/zombie contacts with initialized retail geometry\n";
             if(zombie_model_work_samples!=zombie_channel_applications || zombie_range_draws!=zombie_parameters*2)
                 throw std::runtime_error("Missing retail zombie model-work coverage");

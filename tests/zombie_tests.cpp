@@ -258,6 +258,10 @@ int main() {
     ck(startup.enemies[0].model_work->joints[8].matrix[7] == 211 &&
        startup.enemies[0].model_work->joints[8].flags == 0);
     const auto startup_seed = startup.random_seed;
+    ck(startup.enemy_callbacks[31]==EnemyCallbackKind::ZombieHead &&
+       startup.enemy_callbacks[32]==EnemyCallbackKind::ZombieArm &&
+       startup.enemy_callbacks[33]==EnemyCallbackKind::ZombieLeg &&
+       startup.enemy_callbacks[38]==EnemyCallbackKind::ZombieManager);
     for (size_t slot : {4u, 5u, 6u, 7u, 8u, 9u}) {
       startup.enemies[slot].state_flags = 0xffffffff;
       initialize_zombie_auxiliary(startup, slot);

@@ -58,6 +58,8 @@ struct ZombieExtendedWork {
   uint32_t material_color = 0;
   uint8_t personality = 0;
   int32_t left_leg_state = 0, right_leg_state = 0;
+  float player_distance =
+      0; // EXP0_F(84), updated by the original Move callback.
 };
 struct ZombiePartExtendedWork {
   // en01sub.c stores 32 bytes for the head, 112 for an arm/leg. Retain
@@ -106,6 +108,7 @@ struct ScenarioEntity {
   EnemyGeometry geometry;
   std::array<int32_t, 64> damage{};
   uint32_t combo_flags = 0;
+  int32_t combo_timeout = 0;
   int32_t look_joint = 0;
 };
 struct ScenarioTask {
@@ -123,6 +126,13 @@ struct ScenarioTask {
   uint32_t motion_mode = 0, model_flags = 0;
   int32_t blend_rate = 0;
 };
+enum class EnemyCallbackKind {
+  Original,
+  ZombieHead,
+  ZombieArm,
+  ZombieLeg,
+  ZombieManager
+};
 struct ScenarioState {
   std::array<std::array<uint32_t, 32>, 17> flags{};
   uint8_t room_case = 0, interaction_index = 0, floor_index = 0;
@@ -133,6 +143,8 @@ struct ScenarioState {
   // allocated-work-slot map produced during room loading.
   std::vector<ScenarioEntity> enemies, objects, items;
   std::vector<size_t> enemy_slots;
+  // bhEne_SetCallFunc replaces shared auxiliary callback slots during startup.
+  std::array<EnemyCallbackKind, 100> enemy_callbacks{};
   std::vector<CollisionRecord> interactions;
   std::optional<RoomCollision> collision;
   std::shared_ptr<const std::vector<std::optional<Motion>>> room_motions;

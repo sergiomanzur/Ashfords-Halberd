@@ -1,5 +1,6 @@
 #include "scenario.hpp"
 #include "room.hpp"
+#include "zombie.hpp"
 #include <limits>
 #include <stdexcept>
 namespace ashford {
@@ -10,6 +11,39 @@ const ActorModel &actor_model(const ScenarioEntity &entity) {
   if (!entity.model)
     throw std::runtime_error("Missing scenario actor model");
   return *entity.model;
+}
+size_t enemy_damage_joints(const ScenarioState &state, size_t index) {
+  const auto &entity = state.enemies.at(index);
+  const auto owner = entity.pose_owner.value_or(index);
+  if (owner >= state.enemies.size())
+    throw std::runtime_error("Damage cleanup model owner outside enemy pool");
+  const auto &work = state.enemies[owner];
+  size_t count = 0;
+  if (work.model_work) {
+    const auto &model = *work.model_work;
+    if (model.first_joint > model.joints.size())
+      throw std::runtime_error("Damage cleanup model range outside work");
+    count = model.joint_count.value_or(model.joints.size() - model.first_joint);
+    if (count > model.joints.size() - model.first_joint)
+      throw std::runtime_error("Damage cleanup model range outside work");
+  } else if (work.model)
+    count = actor_bind_pose(actor_model(work)).size();
+  if (count > entity.damage.size())
+    throw std::runtime_error("Damage cleanup exceeds original joint capacity");
+  return count;
+}
+void finish_enemy_frame(ScenarioEntity &entity, size_t damage_joints) {
+  // zonzon1.c::bhEne_InitDamage after a successful controller callback.
+  for (size_t i = 0; i < damage_joints; ++i)
+    entity.damage[i] = 0;
+  if (entity.combo_timeout) {
+    const uint32_t bits = uint32_t(entity.combo_timeout) - 1;
+    entity.combo_timeout = bits < 0x80000000u
+                               ? int32_t(bits)
+                               : int32_t(int64_t(bits) - 0x100000000ll);
+  }
+  entity.combo_flags &= ~0x70u;
+  entity.secondary_flags &= ~4u;
 }
 void render_actor(ScenarioEntity &entity) {
   const auto &model = actor_model(entity);
@@ -903,9 +937,34 @@ void control_scenario(ScenarioState &state) {
 void tick_scenario_actors(ScenarioState &state) {
   if (!(state.flags[6][0] & 2))
     return;
-  for (auto &entity : state.enemies) {
+  for (size_t work_index = 0; work_index < state.enemies.size(); ++work_index) {
+    auto &entity = state.enemies[work_index];
     if (!(entity.flags & 1) || (entity.state_flags & 0x41000000))
       continue;
+    if (entity.flags & 0x80) {
+      if (!entity.linked_parent ||
+          *entity.linked_parent >= state.enemies.size())
+        throw std::runtime_error("Missing scheduled linked enemy parent");
+      if (state.enemies[*entity.linked_parent].state_flags & 0x1000000)
+        continue;
+    }
+    const auto callback = entity.id < state.enemy_callbacks.size()
+                              ? state.enemy_callbacks[entity.id]
+                              : EnemyCallbackKind::Original;
+    if (callback != EnemyCallbackKind::Original) {
+      if (!((entity.id == 31 && callback == EnemyCallbackKind::ZombieHead) ||
+            (entity.id == 32 && callback == EnemyCallbackKind::ZombieArm) ||
+            (entity.id == 33 && callback == EnemyCallbackKind::ZombieLeg) ||
+            (entity.id == 38 && callback == EnemyCallbackKind::ZombieManager)))
+        throw std::runtime_error(
+            "Unsupported registered enemy callback binding");
+      const auto damage_joints = enemy_damage_joints(state, work_index);
+      entity.previous_position = entity.position;
+      entity.previous_angles = entity.angles;
+      tick_zombie_auxiliary(state, work_index);
+      finish_enemy_frame(entity, damage_joints);
+      continue;
+    }
     if ((entity.id != 67 && entity.id != 91) || entity.modes[0] > 1 ||
         (entity.modes[0] == 1 &&
          (entity.modes[2] != 0 ||
@@ -917,6 +976,7 @@ void tick_scenario_actors(ScenarioState &state) {
     if (!entity.model || !entity.motions || (entity.flags & 0x1080) ||
         (entity.motion_mode & 2) || entity.blend_count < 0)
       throw std::runtime_error("Unsupported scenario actor motion binding");
+    const auto damage_joints = enemy_damage_joints(state, work_index);
     entity.previous_position = entity.position;
     entity.previous_angles = entity.angles;
     if (entity.id == 91 && entity.face)
@@ -948,6 +1008,7 @@ void tick_scenario_actors(ScenarioState &state) {
     }
     if (!update_motion) {
       render_actor(entity);
+      finish_enemy_frame(entity, damage_joints);
       continue;
     }
     if (entity.motion_number >= entity.motions->size())
@@ -991,6 +1052,7 @@ void tick_scenario_actors(ScenarioState &state) {
           entity.frame, entity.frame_direction);
     }
     render_actor(entity);
+    finish_enemy_frame(entity, damage_joints);
   }
 }
 } // namespace ashford

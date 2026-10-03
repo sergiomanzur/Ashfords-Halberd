@@ -330,9 +330,9 @@ dependency is now implemented as described below.
 
 `initialize_zombie_auxiliary` adapts head, arm, leg and manager startup from
 `en01sub.c`, including original extended-work sizes and selective resets on
-reuse. Its damage controllers and the manager's nearest-root/stair movement
-checks are still pending. These helpers are exercised by the developer probe;
-they are not yet dispatched by the runtime enemy scheduler. Transactional
+reuse. Original mode-0 startup, mode-1 empty head/arm/leg callbacks and the
+manager's nearest-root/stair policy now dispatch through the runtime scheduler
+as described below. Detached-part damage controllers remain pending. Transactional
 main startup/motion helpers replace `ScenarioState` on success, so callers
 must reacquire entity references. The motion helper is currently diagnostic;
 per-frame full-state copying needs replacement before gameplay integration.
@@ -342,7 +342,7 @@ copy isolation, variant-10 health, auxiliary reuse and failure rollback. The
 retail runtime probe verifies 20 root/body initializations, 62 allocations and
 52 auxiliary initializations across both graveyard variants, while retaining
 the 480 motion-channel probes. This advances the native enemy startup work.
-AI, combat, ID-91 control and the rest of the Step 1 playable slice remain
+Root AI, combat and the rest of the Step 1 playable slice remain
 incomplete, and New Game remains unavailable.
 
 Zombie skeleton/capsule calculation now retains native `ActorModelWork`
@@ -354,3 +354,40 @@ the original runtime. General selected-range calculation/drawing and linked
 rotation reset are now available in the actor renderer. Detached body logic
 and rebased skin lists remain pending; the runtime scheduler still rejects
 the unsupported graveyard controller rather than exposing a static encounter.
+
+Native auxiliary dispatch now retains the original shared callback registrations
+made by `bhEne01_Init`. IDs 31–33 and 38 can be reused by other enemy types;
+unregistered or unsupported bindings fail instead of being silently assigned
+zombie behavior. Registered callbacks persist with the native scenario state.
+The indexed enemy loop preserves original pool order and suppresses linked
+callbacks when the parent has hidden status flag 0x1000000.
+
+The parent manager selects the first eligible root at the minimum cached
+EXP0 distance84, clearing and setting only the source's nearest bit in extended
+secondary flags. Eligibility preserves active ID1, initialized extended work,
+type not10, unlinked/visible/enabled flags. The stair policy preserves the
+original stage0 **or** room6 condition: two or more eligible roots on floor2
+restrict eligible roots on other floors, while below that limit their restriction
+clears. Unmatched stage/room keeps prior stair bits. The original ten-slot
+scratch capacity is checked; malformed distance or overflow cannot partially
+commit manager flags. Per-frame manager work stages scalar fields without
+copying render geometry or entire scenario state.
+
+Successful represented callbacks now run `zonzon1.c::bhEne_InitDamage` afterward.
+It clears only the current ML_WORK object count's damage entries, decrements
+nonzero combo timeout with native word wrap, clears combo bits 0x70 and flg2
+bit4, and preserves status flags. Model ownership and prepared facial counts
+are respected. Null model work retains damage entries. The cleanup applies to
+startup, held and moving subplayers and auxiliary callbacks; suppressed or
+unsupported callbacks do not perform it.
+
+Tests cover nearest ties and exclusions, cached distance, the original stair
+OR condition, floor counts, scratch overflow, registered/unregistered callbacks,
+hidden-parent suppression, original empty idle behavior, cleanup ownership and
+joint bounds, negative timeout wrap and prepared facial object count. The
+headless retail probe dispatches 3,328 native auxiliary frames, including 126
+manager updates, across both graveyard variants with actual initialized model
+owners and unchanged RNG/raw assets. It isolates these callbacks from the
+pending root AI; it does not claim the full encounter runs. The root zombie
+movement, attacks/damage and player response remain required before travel
+into the graveyard is exposed. Step 1 and New Game remain incomplete.

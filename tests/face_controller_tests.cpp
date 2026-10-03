@@ -365,9 +365,12 @@ int main() {
            loaded.enemies[0].model_bank->mask == mask(),
        "Native binding changed raw assets");
     loaded.flags[6][0] = 2;
+    loaded.enemies[0].damage.fill(99);
     tick_scenario_actors(loaded);
     ck(loaded.enemies[0].rendered_model && loaded.enemies[0].modes[0] == 1,
        "Bound facial actor failed startup");
+    ck(loaded.enemies[0].damage[15] == 0 && loaded.enemies[0].damage[16] == 99,
+       "Facial actor damage cleanup did not use expanded model work");
     loaded.enemies[0].state_flags |= 0x20;
     tick_scenario_actors(loaded);
     ck(loaded.enemies[0].secondary_flags == 0x80 &&

@@ -294,9 +294,12 @@ void initialize_work(ScenarioState &state, size_t work) {
       };
       zombie.zombie_work->body = allocate(1, 1);
       zombie.zombie_work->children[4] = allocate(0, 31);
+      state.enemy_callbacks[31] = EnemyCallbackKind::ZombieHead;
       zombie.zombie_work->children[0] = allocate(0, 32);
+      state.enemy_callbacks[32] = EnemyCallbackKind::ZombieArm;
       zombie.zombie_work->children[1] = allocate(0, 32);
       zombie.zombie_work->children[2] = allocate(0, 33);
+      state.enemy_callbacks[33] = EnemyCallbackKind::ZombieLeg;
       zombie.zombie_work->children[3] = allocate(0, 33);
       bool first = true;
       for (size_t i = 0; i < state.enemies.size(); ++i) {
@@ -311,6 +314,7 @@ void initialize_work(ScenarioState &state, size_t work) {
         auto &manager = state.enemies[allocate(0, 38)];
         manager.linked_parent.reset();
         manager.flags &= ~0x80u;
+        state.enemy_callbacks[38] = EnemyCallbackKind::ZombieManager;
       }
     }
   } else {
@@ -399,5 +403,65 @@ void initialize_zombie_auxiliary(ScenarioState &state, size_t work) {
   }
   replacement.modes = {1, 0, 0, 0};
   state.enemies[work] = std::move(replacement);
+}
+void tick_zombie_auxiliary(ScenarioState &state, size_t work) {
+  if (state.enemies.size() != 128 || work >= state.enemies.size())
+    throw std::runtime_error("Invalid zombie auxiliary work pool");
+  const auto &current = state.enemies[work];
+  if (!(current.flags & 1) ||
+      (current.id != 31 && current.id != 32 && current.id != 33 &&
+       current.id != 38) ||
+      current.modes[0] > 1)
+    throw std::runtime_error("Unsupported zombie auxiliary controller state");
+  if (!current.modes[0]) {
+    initialize_zombie_auxiliary(state, work);
+    return;
+  }
+  if (current.id != 38)
+    return; // Original Head/Arm/Leg_MV00 callbacks are empty.
+  // en01sub.c Parent_Move. Stage only the scalar fields it changes, avoiding
+  // copies of render geometry and unrelated actor state on every frame.
+  std::array<uint32_t, 128> primary{}, secondary{};
+  std::array<size_t, 10> outside_floor{};
+  size_t outside_count = 0, on_floor = 0;
+  std::optional<size_t> nearest;
+  float distance = 0;
+  const bool stair_rule = state.stage == 0 || state.room == 6;
+  for (size_t i = 0; i < state.enemies.size(); ++i) {
+    const auto &root = state.enemies[i];
+    primary[i] = root.flags;
+    secondary[i] = root.zombie_secondary_flags;
+    if (root.id != 1 || !(root.flags & 1) || root.type == 10 ||
+        !root.zombie_work || root.state_flags & 0x1000000 || root.flags & 0x82)
+      continue;
+    const auto value = root.zombie_work->player_distance;
+    if (!std::isfinite(value))
+      throw std::runtime_error("Nonfinite zombie cached player distance");
+    secondary[i] &= ~2u;
+    if (!nearest || distance > value) {
+      nearest = i;
+      distance = value;
+    }
+    if (stair_rule) {
+      primary[i] &= ~0x200000u;
+      if (root.floor == 2)
+        ++on_floor;
+      else {
+        if (outside_count == outside_floor.size())
+          throw std::runtime_error(
+              "Zombie stair policy exceeds original scratch capacity");
+        outside_floor[outside_count++] = i;
+      }
+    }
+  }
+  if (nearest)
+    secondary[*nearest] |= 2;
+  if (stair_rule && on_floor >= 2)
+    for (size_t i = 0; i < outside_count; ++i)
+      primary[outside_floor[i]] |= 0x200000;
+  for (size_t i = 0; i < state.enemies.size(); ++i) {
+    state.enemies[i].flags = primary[i];
+    state.enemies[i].zombie_secondary_flags = secondary[i];
+  }
 }
 } // namespace ashford
