@@ -710,6 +710,20 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
       extent(8);
       state.door = ScenarioDoor{word(pc + 2), program[pc + 4], program[pc + 5],
                                 program[pc + 6], program[pc + 7]};
+      // room.c::bhSetDoorDemo: retain only the event timer while freezing
+      // normal gameplay for the door loader and its presentation sequence.
+      state.flags[6][0] = 0x48 | (state.flags[6][0] & 0x200);
+      state.player_state_flags |= 0x80010000;
+      state.flags[10][0] |= 1;
+      state.flags[5][0] &= ~0x400200u;
+      if ((state.flags[11][0] & 0x40) && (state.flags[5][0] & 0x800000)) {
+        state.flags[11][0] &= ~0x40u;
+        if (!(state.flags[11][0] & 0x1000000))
+          state.flags[11][0] &= ~0x80u;
+        state.flags[5][0] &= ~0x800000u;
+        state.flags[11][0] &= ~0x80000u;
+        state.drawing_flags |= 1;
+      }
       pc += 8;
       break;
     case 55:
@@ -814,7 +828,10 @@ void tick_scenario_actors(ScenarioState &state) {
         (entity.modes[0] == 1 &&
          (entity.modes[2] != 0 ||
           (entity.control2 != 0 && entity.control2 != 10))))
-      throw std::runtime_error("Unsupported scenario actor controller");
+      throw std::runtime_error("Unsupported scenario actor controller: room " +
+                               std::to_string(state.room) + " actor " +
+                               std::to_string(entity.id) + " mode " +
+                               std::to_string(entity.modes[0]));
     if (!entity.model || !entity.motions || (entity.flags & 0x1080) ||
         (entity.motion_mode & 2) || entity.blend_count < 0)
       throw std::runtime_error("Unsupported scenario actor motion binding");

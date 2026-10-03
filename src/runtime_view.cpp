@@ -52,7 +52,7 @@ void RuntimeView::draw(const SDL_Rect &destination) {
   if (!runtime_.world.cut)
     throw std::runtime_error("Native runtime has no active original camera");
   auto image = render_camera(
-      compose_room_runtime(runtime_, 0xffffffff, 0),
+      compose_room_runtime(runtime_, runtime_.scenario.drawing_flags, 0),
       resolve_camera(runtime_.cuts.at(*runtime_.world.cut), 0), 320, 240);
   if (SDL_UpdateTexture(texture_.get(), nullptr, image.rgb.data(), 320 * 3) <
           0 ||

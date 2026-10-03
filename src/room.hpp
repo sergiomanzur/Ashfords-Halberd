@@ -21,6 +21,9 @@ struct RoomRecords {
   std::vector<RoomEntity> enemies, objects, items;
 };
 RoomRecords decode_room_records(const Bytes &data);
+// Original ps2_dvd_image.c::rdx_files ordering. Missing variants are errors,
+// rather than silently loading another room case.
+size_t room_archive_index(uint8_t stage, uint8_t room, uint8_t room_case);
 // Normal door entry from room.c::bhSetRoom and bhInitRoomChangePlayer.
 // Save restoration and scripted introduction entry use separate paths.
 PlayerWorldState enter_room(const RoomRecords &records, size_t position,

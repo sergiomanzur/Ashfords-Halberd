@@ -64,6 +64,22 @@ int main() {
     ck(state.door->stage == 0 && state.door->room == 2 &&
        state.door->position == 0 && state.door->type == 1 &&
        state.door->attribute == 0x80);
+    ck(state.flags[6][0] == 0x48 && (state.flags[10][0] & 1) &&
+       state.player_state_flags == 0x80010000);
+    for (bool event_timer : {false, true})
+      for (bool examination : {false, true}) {
+        ScenarioState door_state;
+        door_state.flags[6][0] = event_timer ? 0xffffffff : 0xfffffdff;
+        door_state.flags[5][0] = 0xffffffff;
+        door_state.flags[11][0] = examination ? 0x800c0 : 0x80000;
+        run_scenario(Bytes{51, 0, 0x80, 0, 0, 2, 0, 1, 0}, door_state);
+        ck(door_state.flags[6][0] == (event_timer ? 0x248u : 0x48u));
+        ck(door_state.flags[5][0] ==
+           (examination ? 0xff3ffdffu : 0xffbffdffu));
+        ck(door_state.flags[11][0] == (examination ? 0u : 0x80000u));
+        ck(door_state.flags[12][0] == 0);
+        ck(bool(door_state.drawing_flags & 1) == examination);
+      }
     code[5] = 1;
     run_scenario(code, state);
     ck(state.room_case == 2 && state.flags[1][0] == 0);

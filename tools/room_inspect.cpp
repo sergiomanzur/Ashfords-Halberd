@@ -25,9 +25,10 @@ Bytes read(std::ifstream& file, uint64_t offset, size_t size) {
 int wmain(int argc,wchar_t** argv) {
     try {
         bool collision_check=argc==4 && std::wstring(argv[3])==L"--collision-check";
-        bool runtime_check=argc==5 && std::wstring(argv[3])==L"--runtime-check";
+        bool transition_check=argc==5 && std::wstring(argv[3])==L"--transition-check";
+        bool runtime_check=transition_check || (argc==5 && std::wstring(argv[3])==L"--runtime-check");
         bool scenario_check=runtime_check || (argc==4 && std::wstring(argv[3])==L"--scenario-check");
-        if(argc!=3 && !runtime_check && !(argc==4 && (std::wstring(argv[3])==L"--scene" || collision_check || scenario_check))) throw std::runtime_error("Usage: AshfordRoomInspect RDX_LNK.AFS report.tsv [--scene | --collision-check | --scenario-check | --runtime-check SYSTEM.AFS]");
+        if(argc!=3 && !runtime_check && !(argc==4 && (std::wstring(argv[3])==L"--scene" || collision_check || scenario_check))) throw std::runtime_error("Usage: AshfordRoomInspect RDX_LNK.AFS report.tsv [--scene | --collision-check | --scenario-check | --runtime-check SYSTEM.AFS | --transition-check SYSTEM.AFS]");
         const std::filesystem::path archive(argv[1]), report(argv[2]);
         if(std::filesystem::exists(report) && std::filesystem::equivalent(archive,report))
             throw std::runtime_error("Report cannot overwrite archive");
@@ -198,6 +199,16 @@ int wmain(int argc,wchar_t** argv) {
                             if(!examined.scenario.door || examined.scenario.door->stage!=0 ||
                                examined.scenario.door->room!=2 || examined.scenario.door->position!=0)
                                 throw std::runtime_error("Retail examined door request mismatch");
+                            if(transition_check) {
+                                if(examined.scenario.room_case>1)
+                                    throw std::runtime_error("Unexpected graveyard case");
+                                const auto next=entries.at(room_archive_index(
+                                    examined.scenario.door->stage,examined.scenario.door->room,
+                                    examined.scenario.room_case));
+                                transition_room_runtime(examined,expand(read(file,next.offset,next.size)),player);
+                                if(examined.scenario.room!=2 || examined.scenario.door)
+                                    throw std::runtime_error("Retail destination entry mismatch");
+                            }
                             auto running=runtime;
                             auto translations=decode_player_translation_tables(player.auxiliary);
                             for(size_t tick=0;tick<240;++tick) {

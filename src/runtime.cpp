@@ -2,6 +2,19 @@
 #include <algorithm>
 #include <stdexcept>
 namespace ashford {
+void transition_room_runtime(RoomRuntime &runtime, const Bytes &destination,
+                             const PlayerPackage &player) {
+  if (!runtime.scenario.door || !(runtime.scenario.flags[10][0] & 1))
+    throw std::runtime_error("No pending native room transition");
+  const auto door = *runtime.scenario.door;
+  auto replacement = load_room_runtime(destination, door.stage, door.room,
+                                       door.position, runtime.scenario, player);
+  // bhStartDoorDemo completes after the destination is ready. Door graphics
+  // and sound have separate owners; this consumes only the loading request.
+  replacement.scenario.flags[10][0] &= ~1u;
+  replacement.scenario.flags[6][0] = 0xffffffff;
+  runtime = std::move(replacement);
+}
 Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
                            uint32_t camera_flags) {
   Scene result;
@@ -128,6 +141,7 @@ RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
   persistent.flags[11][0] = (persistent.flags[11][0] | 2u) & 0x9b8c00cb;
   persistent.flags[5][0] = 0;
   persistent.flags[4][0] = 0;
+  persistent.drawing_flags = 0xffffffff;
   persistent.flags[10][0] &= 0xaf8000bb;
   persistent.door.reset();
   persistent.stage = stage;

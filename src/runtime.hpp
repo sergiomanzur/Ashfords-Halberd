@@ -17,6 +17,10 @@ struct RoomRuntime {
 RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
                               size_t entry, ScenarioState persistent,
                               const PlayerPackage &player);
+// Consume an authored door request after destination assets validate. Failure
+// retains the old runtime, progress and pending request for recovery.
+void transition_room_runtime(RoomRuntime &runtime, const Bytes &destination,
+                             const PlayerPackage &player);
 // Represented baseline frame sequence. Unsupported entity controllers fail
 // explicitly; effect/light/audio and interaction dispatch remain pending.
 void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,

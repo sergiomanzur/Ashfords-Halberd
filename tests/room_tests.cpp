@@ -31,6 +31,15 @@ void flt(Bytes &b, size_t p, float v) {
 }
 int main() {
   try {
+    ck(room_archive_index(0, 1, 0) == 1);
+    ck(room_archive_index(0, 2, 0) == 2);
+    ck(room_archive_index(0, 2, 1) == 3);
+    ck(room_archive_index(1, 0, 2) == 21);
+    ck(room_archive_index(9, 37, 0) == 204);
+    bad([&] { room_archive_index(0, 1, 1); });
+    bad([&] { room_archive_index(10, 0, 0); });
+    bad([&] { room_archive_index(0, 100, 0); });
+    bad([&] { room_archive_index(0, 0, 10); });
     Bytes b(1500);
     flt(b, 0, 10);
     put(b, 16, 128);
@@ -157,6 +166,32 @@ int main() {
     });
     ck(persistent.door && persistent.tasks[3].active &&
        persistent.flags[4][0] == 0xffffffff);
+    auto transition = runtime;
+    transition.scenario.door = ScenarioDoor{0x80, 2, 3, 0, 1};
+    transition.scenario.flags[10][0] |= 1;
+    transition.previous_pad = 0x200;
+    transition.scenario.random_seed = 42;
+    bad([&] { transition_room_runtime(transition, Bytes{}, entry_player); });
+    ck(transition.scenario.room == 1 && transition.scenario.door &&
+       transition.world.player.position.x == -10 &&
+       transition.scenario.inventory[0] == 99 && transition.previous_pad == 0x200);
+    transition_room_runtime(transition, runtime_data, entry_player);
+    ck(transition.scenario.stage == 2 && transition.scenario.room == 3 &&
+       !transition.scenario.door && !(transition.scenario.flags[10][0] & 1) &&
+       transition.scenario.inventory[0] == 99 &&
+       transition.scenario.flags[1][0] == 123 &&
+       transition.scenario.random_seed == 42 && transition.previous_pad == 0 &&
+       transition.scenario.flags[6][0] == 0xffffffff &&
+       transition.scenario.drawing_flags == 0xffffffff &&
+       transition.world.player.position.x == 15);
+    bad([&] { transition_room_runtime(transition, runtime_data, entry_player); });
+    auto& scheduled = transition.scenario.tasks[1];
+    scheduled.program = transition.scenario.scenario->program(0);
+    scheduled.active = true;
+    scheduled.pc = 0;
+    const auto before_timer = transition.scenario.event_timer;
+    tick_scenario_tasks(transition.scenario);
+    ck(scheduled.pc == 8 && transition.scenario.event_timer == before_timer + 1);
     auto saved_entry = persistent;
     saved_entry.flags[10][0] |= 0x800000;
     bad([&] {

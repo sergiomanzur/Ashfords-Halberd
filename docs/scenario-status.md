@@ -231,3 +231,22 @@ Stairs, ledges, kneeling pickups, item boxes and examination camera/message
 interfaces still require their original controllers and fail explicitly.
 Physical examine input, confirmation UI, inventory awards and room transition
 consumption remain pending in the application preview.
+
+Scripted door calls now reproduce the represented `bhSetDoorDemo` state changes:
+freeze normal gameplay, retain the event timer gate, set player/door control
+state, and leave examination mode using separate drawing flags. Successful
+`transition_room_runtime` loading consumes the pending door only after the
+destination validates, restores subsystem gates, and preserves inventory,
+progress and the random seed. Invalid destination data leaves the old runtime
+and door request intact. Synthetic checks cover destination position, atomic
+failure, persistent state and actual scheduler advancement after loading.
+`room_archive_index` resolves all 205 pinned USA room variants, including cases,
+and rejects missing identities without substituting another variant.
+
+Retail corridor examination/control checks continue to pass. The optional
+`AshfordRoomInspect RDX_LNK.AFS report.tsv --transition-check SYSTEM.AFS`
+currently fails explicitly at graveyard initialization: room 2, actor ID 1,
+mode 0. `en01.c::bhEne01_Init` requires the zombie controller and linked enemy
+work for body parts before the destination can run. Porting that controller
+is the next room-travel dependency; application travel remains unavailable.
+Door presentation, audio and a complete two-room playable slice remain pending.
