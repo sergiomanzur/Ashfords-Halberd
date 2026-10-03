@@ -315,8 +315,9 @@ hardware reference acceptance remain outside this increment's completion.
 
 Validate the native synthesis/effects candidate against original-game reference
 and implement remaining active instrument branches where required by the slice.
-Complete the newly exposed47/67 initialization services, actual graveyard
-entry/gameplay, original bank3 reuse and room-change fade orchestration.
+The native room-effect increment now handles47/67 and the actual initializers
+reach145/34; see native-room-effects-status.md. Complete these next operations,
+actual graveyard entry/gameplay, original bank3 reuse and room-change fade orchestration.
 Integrate shot/footstep/enemy sounds and decode required ADX music/voices with
 working separate controls. Then prove audio through actual two-room gameplay,
 along with combat, inventory, cross-room saves and original-game acceptance.

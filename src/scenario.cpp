@@ -1,4 +1,5 @@
 #include "scenario.hpp"
+#include "effects.hpp"
 #include "room.hpp"
 #include "zombie.hpp"
 #include <limits>
@@ -839,6 +840,16 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
     case 66:
       extent(4);
       indexed(state.items, program[pc + 1]).angular_speed = program[pc + 2];
+      pc += 4;
+      break;
+    case 67:
+      extent(4);
+      set_room_effect_visibility(state, program[pc + 1], program[pc + 2] != 0);
+      pc += 4;
+      break;
+    case 47:
+      extent(4);
+      request_enemy_shadow(state, program[pc + 1], program[pc + 2]);
       pc += 4;
       break;
     case 51:

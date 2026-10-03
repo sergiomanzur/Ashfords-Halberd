@@ -58,22 +58,23 @@ struct ZombieExtendedWork {
   std::array<std::optional<size_t>, 9> children{};
   std::optional<size_t> body;
   std::optional<EnemyShadow> shadow;
+  std::optional<size_t> shadow_effect; // EXP0_I(0x24), absent on full-pool -1.
   uint32_t material_color = 0;
   uint8_t personality = 0;
-  uint8_t awareness = 0, awareness_timeout = 0; // EXP0_UC(0x28/0x29).
-  uint8_t route_id = 0, route_timer = 0;        // EXP0_UC(0x2a/0x2b).
-  uint8_t damage_rotation_frame = 0;            // EXP0_UC(0x2c).
-  int8_t attack_delay = 0;                      // EXP0_C(0x2f).
-  int8_t stair_start_floor = 0, stair_step = 0; // EXP0_C(0x2d/0x2e).
+  uint8_t awareness = 0, awareness_timeout = 0;   // EXP0_UC(0x28/0x29).
+  uint8_t route_id = 0, route_timer = 0;          // EXP0_UC(0x2a/0x2b).
+  uint8_t damage_rotation_frame = 0;              // EXP0_UC(0x2c).
+  int8_t attack_delay = 0;                        // EXP0_C(0x2f).
+  int8_t stair_start_floor = 0, stair_step = 0;   // EXP0_C(0x2d/0x2e).
   int32_t frame_timer_30 = 0, frame_timer_34 = 0; // EXP0_I(48/52), decimal.
-  int32_t pursuit_phase_word = 0;               // EXP0_I/F(0x94), shared bits.
-  int32_t pursuit_transition_timer = 0;         // EXP0_I(0x98).
-  float target_x = 0, target_z = 0;             // EXP0_F(0x58/0x60).
-  Vec3 action_anchor{};                         // EXP0_F(0x64/0x68/0x6c).
-  bool path_blocked = false;                    // Nonzero EXP0 pointer(0x70).
-  std::optional<size_t> stair_target;           // EXP0 pointer(0x74).
-  int32_t neck_yaw = 0;                         // EXP0_I(0x50).
-  int32_t head_damage = 0;                      // EXP0_I(0x78); CutHead=-1.
+  int32_t pursuit_phase_word = 0;       // EXP0_I/F(0x94), shared bits.
+  int32_t pursuit_transition_timer = 0; // EXP0_I(0x98).
+  float target_x = 0, target_z = 0;     // EXP0_F(0x58/0x60).
+  Vec3 action_anchor{};                 // EXP0_F(0x64/0x68/0x6c).
+  bool path_blocked = false;            // Nonzero EXP0 pointer(0x70).
+  std::optional<size_t> stair_target;   // EXP0 pointer(0x74).
+  int32_t neck_yaw = 0;                 // EXP0_I(0x50).
+  int32_t head_damage = 0;              // EXP0_I(0x78); CutHead=-1.
   // Separate source limb accumulators; CalcEnemy reads only88/8c.
   int32_t damage_80 = 0, damage_84 = 0, damage_88 = 0, damage_8c = 0;
   float player_distance =
@@ -87,11 +88,11 @@ struct ZombiePartExtendedWork {
 struct PlayerExtendedWork {
   uint32_t status_flags = 0; // Player EXP1_I(0), distinct from BH_PWORK flags.
   Vec3 movement_anchor{}; // Player EXP0_F(0x48/0x4c/0x50), separate from EXP1.
-  Vec3 normal_anchor{}; // EXP_WORK nlxb/nlyb/nlzb (0x6c/0x70/0x74).
+  Vec3 normal_anchor{};   // EXP_WORK nlxb/nlyb/nlzb (0x6c/0x70/0x74).
 };
 struct ScenarioEntity {
   uint32_t flags = 0, state_flags = 0, secondary_flags = 0;
-  int32_t push_count = 0; // BH_PWORK::psh_ct.
+  int32_t push_count = 0;                      // BH_PWORK::psh_ct.
   std::optional<size_t> push_index, step_area; // merged wall/ATR indices.
   int32_t angular_speed = 0;
   int32_t health = 0;
@@ -122,14 +123,14 @@ struct ScenarioEntity {
   int32_t frame = 0, blend_count = 0, control1 = 0, control2 = 0;
   int32_t control0 = 0; // Original ct0, distinct from ct1/ct2/ct3.
   int32_t control3 = 0, highlight_yaw = 0;
-  int32_t yaw_correction = 0;  // BH_PWORK::ayp.
-  int32_t pitch_correction = 0; // BH_PWORK::axp; MV08 stores target yaw here.
+  int32_t yaw_correction = 0;    // BH_PWORK::ayp.
+  int32_t pitch_correction = 0;  // BH_PWORK::axp; MV08 stores target yaw here.
   float floor_target_height = 0; // BH_PWORK::yn.
-  int16_t grab_yaw_offset = 0; // BH_PWORK::waxp.
-  int16_t torso_yaw = 0;       // BH_PWORK::wax.
-  int16_t turn_speed = 0;      // BH_PWORK::way.
-  int16_t roll_speed = 0;      // BH_PWORK::waz.
-  float speed = 0;             // BH_PWORK::spd.
+  int16_t grab_yaw_offset = 0;   // BH_PWORK::waxp.
+  int16_t torso_yaw = 0;         // BH_PWORK::wax.
+  int16_t turn_speed = 0;        // BH_PWORK::way.
+  int16_t roll_speed = 0;        // BH_PWORK::waz.
+  float speed = 0;               // BH_PWORK::spd.
   float shape_count = 0; // BH_PWORK::shp_ct, consumed by draw-time morphology.
   uint32_t frame_direction = 0;
   uint16_t motion_attribute = 0;
@@ -207,6 +208,8 @@ struct ScenarioState {
   std::vector<CollisionRecord> dynamic_floors;        // sys->mflrp.
   // Immutable native effect state: active events replace only this pool value.
   std::shared_ptr<const NativeEffectPool> effect_pool;
+  std::vector<size_t> effect_slots; // sys->efid: authored effect -> work slot.
+  uint32_t shadow_flags = 0xffffffff; // system.c sys->pt_flg initial value.
   std::vector<EnemySoundRequest> pending_enemy_sounds;
   std::vector<int32_t> pending_player_voices; // CallPlayerVoice source tokens.
   std::vector<EnemyVibrationRequest> pending_enemy_vibrations;
@@ -243,7 +246,8 @@ void run_scenario(const Bytes &program, ScenarioState &state);
 void run_scenario(const ScenarioProgram &program, ScenarioState &state);
 size_t start_scenario_event(ScenarioState &state, size_t level, size_t event);
 void tick_scenario_tasks(ScenarioState &state);
-void tick_scenario_actors(ScenarioState &state, ScenarioEntity *player = nullptr);
+void tick_scenario_actors(ScenarioState &state,
+                          ScenarioEntity *player = nullptr);
 // Native simple object controllers and pickup highlight timing. Linked,
 // animated-special, collision/fade objects require their separate controllers.
 void tick_scenario_props(ScenarioState &state);
@@ -251,7 +255,8 @@ void tick_scenario_props(ScenarioState &state);
 uint32_t scenario_random(ScenarioState &state);
 // bhInitEvent's native state/script ordering. Sound commands 3/4 are pending
 // the audio backend. All room resources must already be bound.
-void initialize_scenario(ScenarioState &state, ScenarioEntity *player = nullptr);
+void initialize_scenario(ScenarioState &state,
+                         ScenarioEntity *player = nullptr);
 // bhControlEvent: room control uses the current command context, then runs
 // the event scheduler if the room script enables it.
 void control_scenario(ScenarioState &state);

@@ -1,5 +1,6 @@
 // Native startup parameters from MIT recvx-decomp en01.c.
 #include "zombie.hpp"
+#include "effects.hpp"
 #include "enemy_navigation.hpp"
 #include "zombie_motion_internal.hpp"
 #include <cmath>
@@ -285,6 +286,7 @@ void initialize_work(ScenarioState &state, size_t work) {
       zombie.zombie_work->children[i] = previous.children[i];
     zombie.zombie_work->body = previous.body;
     zombie.zombie_work->shadow = previous.shadow;
+    zombie.zombie_work->shadow_effect = previous.shadow_effect;
   }
   zombie.zombie_flags = zombie.zombie_secondary_flags = 0;
   zombie.zombie_walk_choice = 0;
@@ -326,6 +328,8 @@ void initialize_work(ScenarioState &state, size_t work) {
                            : std::vector<int8_t>{0, 3, 4, 10, -1},
                     linked ? 10 : 1,
                     {6, 5, 5}};
+    zombie.zombie_work->shadow_effect =
+        create_enemy_shadow(state, work, *zombie.zombie_work->shadow);
     zombie.flags |= 0x800;
   }
   initialize_zombie_type(state, work);

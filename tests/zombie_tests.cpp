@@ -1,3 +1,4 @@
+#include "effects.hpp"
 #include "zombie.hpp"
 #include <cmath>
 #include <iostream>
@@ -222,6 +223,10 @@ int main() {
     ck(root.zombie_work->shadow->joints ==
            std::vector<int8_t>({0, 3, 4, 10, -1}) &&
        root.zombie_work->shadow->anchor_joint == 1);
+    ck(root.zombie_work->shadow_effect && startup.effect_pool &&
+       startup.effect_pool->works[*root.zombie_work->shadow_effect].id == 1 &&
+       startup.effect_pool->works[*root.zombie_work->shadow_effect]
+               .linked_parent == 0);
     initialize_zombie_work(startup, 2);
     ck(startup.enemies[2].zombie_work->body == 10 &&
        startup.enemies[2].zombie_walk_choice ==
@@ -239,6 +244,13 @@ int main() {
     ck(startup.enemies[3].zombie_work->shadow->joints ==
            std::vector<int8_t>({8, 10, -1}) &&
        startup.enemies[3].zombie_work->shadow->anchor_joint == 10);
+    ck(startup.enemies[3].zombie_work->shadow_effect &&
+       startup.effect_pool
+               ->works[*startup.enemies[3].zombie_work->shadow_effect]
+               .linked_parent == 3 &&
+       startup.effect_pool
+               ->works[*startup.enemies[3].zombie_work->shadow_effect]
+               .linked_joint == 10);
     ck(startup.enemies[0].geometry.capsule_start.y == 213 &&
        startup.enemies[0].geometry.capsule_end.y == 205.5f &&
        startup.enemies[0].geometry.capsule_radius == 2);
@@ -267,10 +279,10 @@ int main() {
     ck(leg_damage.enemies[0].geometry.capsule_start.y == 215.5f &&
        leg_damage.enemies[0].geometry.capsule_end.y == 206);
     const auto startup_seed = startup.random_seed;
-    ck(startup.enemy_callbacks[31]==EnemyCallbackKind::ZombieHead &&
-       startup.enemy_callbacks[32]==EnemyCallbackKind::ZombieArm &&
-       startup.enemy_callbacks[33]==EnemyCallbackKind::ZombieLeg &&
-       startup.enemy_callbacks[38]==EnemyCallbackKind::ZombieManager);
+    ck(startup.enemy_callbacks[31] == EnemyCallbackKind::ZombieHead &&
+       startup.enemy_callbacks[32] == EnemyCallbackKind::ZombieArm &&
+       startup.enemy_callbacks[33] == EnemyCallbackKind::ZombieLeg &&
+       startup.enemy_callbacks[38] == EnemyCallbackKind::ZombieManager);
     for (size_t slot : {4u, 5u, 6u, 7u, 8u, 9u}) {
       startup.enemies[slot].state_flags = 0xffffffff;
       initialize_zombie_auxiliary(startup, slot);
@@ -327,7 +339,8 @@ int main() {
     startup.enemies[0].stair_index = 0;
     startup.collision->miscellaneous.resize(2);
     startup.collision->miscellaneous[0].parameters[3] = 1;
-    for (auto& r : startup.collision->miscellaneous) r.attribute = 0x400123;
+    for (auto &r : startup.collision->miscellaneous)
+      r.attribute = 0x400123;
     startup.enemies[0].zombie_flags = 0x7fffffff;
     initialize_zombie_work(startup, 0);
     ck(startup.enemies[0].zombie_work->body == 3 &&

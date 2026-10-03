@@ -21,6 +21,16 @@ struct RoomRecords {
   std::vector<RoomEntity> enemies, objects, items;
 };
 RoomRecords decode_room_records(const Bytes &data);
+// On-disc EF_WRK is68 bytes; signed fields and console link indices are values.
+struct RoomEffectRecord {
+  uint32_t flags = 0;
+  uint16_t id = 0, type = 0, model_version = 0;
+  int16_t floor = 0;
+  Vec3 position{}, scale{}, offset{};
+  std::array<int16_t, 2> angles{};
+  int32_t link_type = 0, link_index = 0, linked_joint = 0, parameter = 0;
+};
+std::vector<RoomEffectRecord> decode_room_effects(const Bytes &data);
 struct RoomRoutes {
   std::vector<CollisionRecord> regions;
   Bytes next_hops;

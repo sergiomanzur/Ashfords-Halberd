@@ -2,15 +2,17 @@
 #include "scenario.hpp"
 #include <functional>
 namespace ashford {
-// Original bhEne01 frame sequence. Unimplemented ordinary states fail explicitly.
+// Original bhEne01 frame sequence. Unimplemented ordinary states fail
+// explicitly.
 void tick_zombie_controller(ScenarioState &state, size_t work,
                             ScenarioEntity &player);
 // en01.c PlayerLink's authored XZ trajectory for four characters/clips1/2/4/5.
 // Frame is an integer authored frame index; returned Y is zero.
 Vec3 zombie_player_link_offset(uint8_t player_id, uint32_t motion_number,
-                              int32_t frame);
+                               int32_t frame);
 // Complete en01.c PlayerLink anchor/offset/per-work matrix and Wall2 response.
-void link_zombie_player(ScenarioState &state, size_t root, ScenarioEntity &player);
+void link_zombie_player(ScenarioState &state, size_t root,
+                        ScenarioEntity &player);
 struct ZombiePersonality {
   float attack_distance = 0, notice_distance = 0;
   int32_t view_angle = 0, health_percent = 0, attack_bonus = 0;
@@ -29,7 +31,7 @@ uint32_t zombie_walk_motion(int32_t choice, bool linked_body);
 // work allocation, health roll, cloned-body setup, pose and collision init.
 void initialize_zombie_type(ScenarioState &state, size_t work);
 // Main Init state/linked allocation/motion/capsule path for the selected
-// graveyard models. Startup shadow requests are retained as native metadata.
+// graveyard models. Startup shadows allocate real shared native effect slots.
 // Movement, damage, detached drawing and the wider scheduler remain separate.
 // On success this transactional startup replaces state; reacquire references.
 void initialize_zombie_work(ScenarioState &state, size_t work);

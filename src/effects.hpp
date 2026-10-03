@@ -2,6 +2,7 @@
 #include "collision.hpp"
 namespace ashford {
 struct ScenarioState;
+struct EnemyShadow;
 struct NativeEffectTemplate {
   uint32_t flags = 0;
   uint16_t id = 0, type = 0;
@@ -29,6 +30,8 @@ struct NativeEffectWork {
   int32_t control0 = 0, control1 = 0; // O_WRK::ct0/ct1 birth counters.
   bool particle_sprite = false;
   std::optional<std::array<size_t, 2>> particle_storage;
+  std::array<uint8_t, 4> modes{};
+  std::array<int8_t, 15> shadow_joints{};
 };
 struct NativeEffectPool {
   std::array<NativeEffectWork, 512> works{};
@@ -38,4 +41,16 @@ struct NativeEffectPool {
 // effect.c control gate for wall timers, effsub1.c::bhEff029. Runs after player
 // and before objects. Other particle playback remains a separate service.
 void tick_wall_damage_timers(ScenarioState &state);
+// room.c bhSetEffectTable / event.c bhEffDispSet. Authored links beyond0
+// require their separate original model/link service and reject explicitly.
+void bind_room_effects(const Bytes &data, ScenarioState &state);
+void set_room_effect_visibility(ScenarioState &state, size_t authored,
+                                bool visible);
+// effect.c bhSetShadow / event.c bhInitSetKage / effsub1.c bhEff001.
+// Uses real shared pool slots; modifier-volume drawing remains separate.
+std::optional<size_t> create_enemy_shadow(ScenarioState &state, size_t work,
+                                          const EnemyShadow &shadow);
+void request_enemy_shadow(ScenarioState &state, size_t authored,
+                          uint8_t variant);
+void tick_shadow_effects(ScenarioState &state);
 } // namespace ashford

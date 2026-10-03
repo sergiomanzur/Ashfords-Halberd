@@ -245,6 +245,7 @@ void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
       examine_room_interaction(runtime);
   }
   scenario.player_frame = runtime.world.player.frame;
+  tick_shadow_effects(scenario);
   tick_wall_damage_timers(scenario);
   tick_scenario_props(scenario);
   control_scenario(scenario);
@@ -324,6 +325,7 @@ RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
     result.player_work.geometry = previous_player->geometry;
   }
   synchronize_runtime_player(result, player);
+  bind_room_effects(data, result.scenario);
   initialize_scenario(result.scenario, &result.player_work);
   if (sounds) {
     result.sound_assets = sounds(stage, room, result.scenario.room_sound_case);
