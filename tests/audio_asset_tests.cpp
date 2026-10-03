@@ -1,4 +1,5 @@
 #include "audio_assets.hpp"
+#include "audio_room.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -310,6 +311,66 @@ void sequence_budget_tests() {
             sequences[1]->events.size() == 9,
         "SCEI must retain valid aliased sequence indices within budget");
 }
+void room_pack_tests() {
+  struct Record {
+    uint32_t type, bank;
+    Bytes bytes;
+  };
+  auto pack = [](const std::vector<Record> &records) {
+    Bytes out((records.size() + 1) * 16);
+    for (size_t i = 0; i < records.size(); ++i) {
+      put(out, i * 16, uint32_t(out.size()));
+      put(out, i * 16 + 4, uint32_t(records[i].bytes.size()));
+      put(out, i * 16 + 8, records[i].type);
+      put(out, i * 16 + 12, records[i].bank);
+      out.insert(out.end(), records[i].bytes.begin(), records[i].bytes.end());
+    }
+    return out;
+  };
+  auto seq = sequence_fixture();
+  put(seq, 68, 32);    // Two distinct indices alias the nine-event block.
+  Bytes env(64, 0xaa); // Transport padding is not environment fields.
+  env[0] = 0xff;
+  env[9] = 16;
+  env[10] = 0;
+  const auto data = pack({{1, 3, bank_fixture()},
+                          {2, 3, bank_fixture()},
+                          {0, 3, seq},
+                          {0, 4, seq},
+                          {5, 0xcccccccc, env}});
+  const auto decoded = decode_room_sound_pack(data, 112, 36);
+  check(decoded.programs[3] && decoded.shots[3] &&
+            decoded.programs[3] != decoded.shots[3] && !decoded.programs[2],
+        "Room bank/type identities must remain distinct and sparse");
+  check(decoded.sequences[3] && decoded.sequences[4] &&
+            (*decoded.sequences[3])[1]->events.size() == 9,
+        "Room sequence bank and index identity");
+  check(decoded.has_environment && decoded.environment[0] == -1 &&
+            decoded.environment[9] == 16 && decoded.environment[15] == -86,
+        "Room signed sixteen-byte environment excludes transport padding");
+  rejects([&] { decode_room_sound_pack(data, 111, 36); },
+          "Room aggregate PCM budget must include every bank/type");
+  rejects([&] { decode_room_sound_pack(data, 112, 35); },
+          "Room aggregate event budget must include all sequence banks");
+  rejects(
+      [&] {
+        decode_room_sound_pack(
+            pack({{1, 3, bank_fixture()}, {1, 3, bank_fixture()}}));
+      },
+      "Room duplicate bank/type must reject rather than replace");
+  rejects([&] { decode_room_sound_pack(pack({{0, 3, seq}, {0, 3, seq}})); },
+          "Room duplicate sequence bank");
+  rejects([&] { decode_room_sound_pack(pack({{5, 0, env}, {5, 1, env}})); },
+          "Room duplicate environment ignores its meaningless bank field");
+  rejects([&] { decode_room_sound_pack(pack({{5, 0, Bytes(15)}})); },
+          "Room truncated environment");
+  rejects([&] { decode_room_sound_pack(pack({{5, 0, Bytes(80)}})); },
+          "Room excessive environment transport padding");
+  rejects([&] { decode_room_sound_pack(pack({{3, 0, Bytes(16)}})); },
+          "Room unsupported pack service must reject explicitly");
+  check(!decode_room_sound_pack(pack({{1, 0, bank_fixture()}})).has_environment,
+        "Missing environment must remain distinguishable from authored zero");
+}
 void adpcm_tests() {
   Bytes block(16);
   block[0] = 0x0c;
@@ -429,6 +490,8 @@ int main(int argc, char **argv) {
       bank_budget_tests();
     if (mode == "all" || mode == "budget-sequence")
       sequence_budget_tests();
+    if (mode == "all" || mode == "room-pack")
+      room_pack_tests();
     std::cout << "Native sound asset checks passed: " << mode << '\n';
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';

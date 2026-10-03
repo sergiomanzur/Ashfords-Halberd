@@ -164,11 +164,79 @@ and a regression with retained channel state/release tails spanning a sequence
 loop. Current tests and original-asset proofs do not establish those additional
 independent checks or hardware parity.
 
+## Room sound binding, fades and Hall candidate
+
+`RoomSoundAssets` retains separate16-index program, shot and sequence banks
+with immutable ownership. Duplicate type/bank identities and multiple
+environments reject before expansion. One aggregate PCM/event budget covers
+the whole pack, including aliased indices decoded by the existing readers;
+remaining budgets are passed to each decoder before allocating samples/events.
+The16 signed `RM_SNDENV` fields exclude transport padding; an absent environment
+remains distinguishable from an authored zero-depth environment.
+
+`MidiVolumeFade` follows matching `sdc.c` manager arithmetic, rather than
+interpreting the source timer as milliseconds. Timer120 uses21 manager ticks;
+400 uses60 and250 uses45. Completion occurs on the following tick after the
+counter reaches zero. Float volume is truncated before the signed driver
+conversion: source-127 maps to driver1 and requests a stop only at fade-out
+completion. `RoomEffectDepth` follows `sdSysServer`'s16-tick integer ramp,
+including interrupted ramps, signed depths and exact final targets.
+
+The high-level effect wrappers are inert in the pinned game source, but
+`sdSysServer` actually requests Hall mode5 via `SdrSetRev`. The independent
+`HallReverb` implements the documented Hall reflections, four comb terms and
+two all-pass stages with22256 PCM16 feedback words, signed Q15 products,
+saturation and39-tap input/output rate conversion between48kHz and24kHz.
+Depth scales only the wet output; zero depth retains feedback/filter history.
+Dry buses use widened arithmetic before final PCM16 clipping. Reset clears
+all feedback/filter/decimation state; a block cannot exceed48000 frames.
+
+Hardware mathematical coefficients and formulas use the pinned primary SPU
+documentation above. PS2 mode5, buffer size and address mapping were confirmed
+against [open ps2sdk effect data](https://github.com/ps2dev/ps2sdk/blob/ac92a9f657d2e531dd8f060250b07f2a5ac6dea5/iop/sound/libsd/src/effect.c),
+commit `ac92a9f657d2e531dd8f060250b07f2a5ac6dea5`. No SDK implementation is
+copied or compiled. **Paired-channel24kHz processing, filter alignment and
+intermediate rounding remain a native DSP candidate requiring PS2 reference
+acceptance.** Passing these tests does not establish bit-exact hardware parity.
+
+New literal tests cover aggregate caps/identity/environment bounds, source
+fade quantization/completion, depth endpoints, independent FIR impulse vectors,
+delayed cross-channel Hall tails, extreme buses, exact odd-sized block
+partitions/wraparound, zero-depth retained state and reset.
+
+Private production-library audit `local/audio_room_services_retail_audit.cpp`
+decoded keys10/20/21 through the new pack binding, confirming authored depths
+16/0/0 and respectively944692/2592940/2604252 PCM frames across their typed
+banks. Both original ambient sequences in both graveyard cases then passed
+36-second joined mixer/fade/depth/Hall checks:1728000 frames per sequence,
+two loops, nonzero direct output, exact PCM across17/783-frame partitions and
+clean reset. A separate depth16 override produced nonzero wet differences;
+that override is explicitly a stress candidate, not authored graveyard audio.
+The audit applies linear driver-volume gain as a synthesis candidate; original
+driver gain curves remain subject to reference acceptance. No audio device or
+WAV player was opened. Evidence: `local/audio-room-services-original36.log`.
+
+The complete build/package passed83/83 headless CTests. A fresh packaged
+dummy-SDL profile passed241 ticks/240 renders/53 movement ticks, ten focus
+blocks, menu return and INI persistence. The current actual-entry probe still
+rejects148 at offset10 in both graveyard cases, preserving the explicit
+runtime boundary; it also verified ten roots/ten bodies/52 auxiliaries and120
+corridor updates. The ZIP contains only the EXE, README and four license notices.
+Evidence: `local/native-room-audio-services-full-build.log`,
+`local/native-room-audio-services-ui-smoke.log`,
+`local/room-audio-services-entry-audit.log`.
+
+One fresh read-only review found no Critical/Important issues. Deferred Minor:
+compare the subsequent tail against an identically primed untouched processor
+after oversized rejection or empty rendering. Existing assertions prove the
+error/empty result; state preservation is visible in the implementation but
+does not yet have that independent regression.
+
 ## Next required integration
 
-Complete required native effects/reverb and source fades, validate synthesis
-against original-game reference, and implement remaining active instrument
-branches where required by the slice. Connect the sequenced PCM buses to
+Validate the native synthesis/effects candidate against original-game reference
+and implement remaining active instrument branches where required by the slice.
+Connect the sequenced PCM buses and source fade/depth controls to
 native SDL audio with separate music/voice/effects volumes, verified using the
 dummy driver. Preserve original148 request timing and room fade-in behavior.
 Decode required ADX music/voices separately. Then prove audio through actual
