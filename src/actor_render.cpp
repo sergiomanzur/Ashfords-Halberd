@@ -72,40 +72,32 @@ void write(Bytes &b, size_t p, float f) {
   for (size_t i = 0; i < 4; ++i)
     b.at(p + i) = uint8_t(v >> (i * 8));
 }
-} // namespace
-std::vector<JointPose> actor_bind_pose(const ActorModel &actor) {
-  Reader r{actor.model};
-  r.range(0, 16);
-  if (actor.model[0] != 'M' || actor.model[1] != 'D' || actor.model[2] != 'L' ||
-      !(actor.model[3] & 128))
-    throw std::runtime_error("Unsupported actor bind model");
-  size_t base = r.u16(4), count = r.u16(6);
-  if (base < 16 || count > 4096)
-    throw std::runtime_error("Invalid actor bind skeleton");
-  size_t table = base + size_t(r.u32(12));
-  r.range(table, count * 52);
-  std::vector<JointPose> pose(count);
-  for (size_t i = 0; i < count; ++i) {
-    size_t p = table + i * 52;
-    pose[i].position = r.vec(p + 8);
-    pose[i].angles = std::array<uint16_t, 3>{uint16_t(r.u32(p + 20)),
-                                             uint16_t(r.u32(p + 24)),
-                                             uint16_t(r.u32(p + 28))};
-  }
-  return pose;
+void validate_matrix(const Matrix &m) {
+  for (double value : m)
+    if (!std::isfinite(value))
+      throw std::runtime_error("Non-finite actor matrix");
+  if (m[12] != 0 || m[13] != 0 || m[14] != 0 || m[15] != 1)
+    throw std::runtime_error("Actor matrix is not affine");
 }
-Scene pose_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
-                 Vec3 position, uint16_t yaw) {
-  return pose_actor_rotated(actor, pose, position, {0, int32_t(yaw), 0});
-}
-Scene pose_actor_rotated(const ActorModel &actor,
-                         const std::vector<JointPose> &pose, Vec3 position,
-                         std::array<int32_t, 3> angles) {
-  if (actor.model.size() > 64 * 1024 * 1024)
-    throw std::runtime_error("Actor model exceeds limit");
+Matrix placement_matrix(Vec3 position, std::array<int32_t, 3> angles) {
   if (!std::isfinite(position.x) || !std::isfinite(position.y) ||
       !std::isfinite(position.z))
     throw std::runtime_error("Non-finite actor position");
+  auto m = translate(position);
+  for (int axis : {2, 1, 0})
+    m = multiply(m, rotate(axis, angles[axis]));
+  return m;
+}
+struct SkeletonTransforms {
+  size_t base = 0, count = 0, table = 0;
+  std::vector<Matrix> world, unrotated;
+  std::vector<Vec3> bind;
+};
+SkeletonTransforms calculate_skeleton(const ActorModel &actor,
+                                      const std::vector<JointPose> &pose,
+                                      const Matrix &placement) {
+  if (actor.model.size() > 64 * 1024 * 1024)
+    throw std::runtime_error("Actor model exceeds limit");
   Reader r{actor.model};
   r.range(0, 16);
   if (actor.model[0] != 'M' || actor.model[1] != 'D' || actor.model[2] != 'L' ||
@@ -118,8 +110,14 @@ Scene pose_actor_rotated(const ActorModel &actor,
     return {};
   size_t table = base + size_t(r.u32(12));
   r.range(table, count * 52);
-  std::vector<Matrix> world(count), unrotated(count);
-  std::vector<Vec3> bind(count);
+  SkeletonTransforms result{base,
+                            count,
+                            table,
+                            std::vector<Matrix>(count),
+                            std::vector<Matrix>(count),
+                            std::vector<Vec3>(count)};
+  auto &world = result.world, &unrotated = result.unrotated;
+  auto &bind = result.bind;
   std::vector<bool> visited(count);
   auto index = [&](uint32_t off) {
     size_t p = base + size_t(off);
@@ -127,9 +125,6 @@ Scene pose_actor_rotated(const ActorModel &actor,
       throw std::runtime_error("Invalid actor joint link");
     return (p - table) / 52;
   };
-  auto placement = multiply(translate(position), rotate(2, angles[2]));
-  placement = multiply(placement, rotate(1, angles[1]));
-  placement = multiply(placement, rotate(0, angles[0]));
   std::function<void(size_t, const Matrix &, Vec3, size_t)> visit =
       [&](size_t i, const Matrix &parent, Vec3 origin, size_t depth) {
         if (depth > 256 || visited[i])
@@ -152,6 +147,7 @@ Scene pose_actor_rotated(const ActorModel &actor,
         for (int axis : {2, 1, 0})
           local = multiply(local, rotate(axis, angles[axis]));
         world[i] = multiply(parent, local);
+        validate_matrix(world[i]);
         unrotated[i] = world[i];
         for (int axis : {0, 1, 2})
           unrotated[i] =
@@ -166,6 +162,18 @@ Scene pose_actor_rotated(const ActorModel &actor,
   for (bool found : visited)
     if (!found)
       throw std::runtime_error("Unreachable actor joint");
+  return result;
+}
+Scene draw_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
+                 const Matrix &placement) {
+  const auto skeleton = calculate_skeleton(actor, pose, placement);
+  const auto base = skeleton.base, count = skeleton.count,
+             table = skeleton.table;
+  if (!count)
+    return {};
+  const auto &world = skeleton.world, &unrotated = skeleton.unrotated;
+  const auto &bind = skeleton.bind;
+  Reader r{actor.model};
   Bytes posed = actor.model;
   auto drawing_matrices = world;
   if (!actor.skin.empty()) {
@@ -250,4 +258,51 @@ Scene pose_actor_rotated(const ActorModel &actor,
   }
   return result;
 }
+} // namespace
+std::vector<JointPose> actor_bind_pose(const ActorModel &actor) {
+  Reader r{actor.model};
+  r.range(0, 16);
+  if (actor.model[0] != 'M' || actor.model[1] != 'D' || actor.model[2] != 'L' ||
+      !(actor.model[3] & 128))
+    throw std::runtime_error("Unsupported actor bind model");
+  size_t base = r.u16(4), count = r.u16(6);
+  if (base < 16 || count > 4096)
+    throw std::runtime_error("Invalid actor bind skeleton");
+  size_t table = base + size_t(r.u32(12));
+  r.range(table, count * 52);
+  std::vector<JointPose> pose(count);
+  for (size_t i = 0; i < count; ++i) {
+    size_t p = table + i * 52;
+    pose[i].position = r.vec(p + 8);
+    pose[i].angles = std::array<uint16_t, 3>{uint16_t(r.u32(p + 20)),
+                                             uint16_t(r.u32(p + 24)),
+                                             uint16_t(r.u32(p + 28))};
+  }
+  return pose;
+}
+Scene pose_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
+                 Vec3 position, uint16_t yaw) {
+  return pose_actor_rotated(actor, pose, position, {0, int32_t(yaw), 0});
+}
+Scene pose_actor_rotated(const ActorModel &actor,
+                         const std::vector<JointPose> &pose, Vec3 position,
+                         std::array<int32_t, 3> angles) {
+  return draw_actor(actor, pose, placement_matrix(position, angles));
+}
+std::vector<ModelMatrix>
+actor_joint_matrices(const ActorModel &actor,
+                     const std::vector<JointPose> &pose, Vec3 position,
+                     std::array<int32_t, 3> angles) {
+  return calculate_skeleton(actor, pose, placement_matrix(position, angles))
+      .world;
+}
+Scene pose_actor_linked(const ActorModel &actor,
+                        const std::vector<JointPose> &pose,
+                        const ModelMatrix &parent_joint, Vec3 offset,
+                        std::array<int32_t, 3> angles) {
+  validate_matrix(parent_joint);
+  return draw_actor(actor, pose,
+                    multiply(parent_joint, placement_matrix(offset, angles)));
+}
+
 } // namespace ashford

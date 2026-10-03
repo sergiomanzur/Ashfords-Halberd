@@ -36,6 +36,18 @@ Scene pose_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
 Scene pose_actor_rotated(const ActorModel &actor,
                          const std::vector<JointPose> &pose, Vec3 position,
                          std::array<int32_t, 3> angles);
+// Same validated skeleton traversal as rendering, in actor joint order.
+std::vector<ModelMatrix>
+actor_joint_matrices(const ActorModel &actor,
+                     const std::vector<JointPose> &pose, Vec3 position = {},
+                     std::array<int32_t, 3> angles = {});
+// bhCalcTree baseline linked placement: parent joint, local offset, XYZ angles.
+// Poses the supplied whole model; subtree selection and the optional 0x1000
+// rotation-reset flag remain controller work.
+Scene pose_actor_linked(const ActorModel &actor,
+                        const std::vector<JointPose> &pose,
+                        const ModelMatrix &parent_joint, Vec3 offset = {},
+                        std::array<int32_t, 3> angles = {});
 struct PlayerPackage {
   std::vector<ActorModel> models;
   std::vector<std::optional<Motion>> motions;

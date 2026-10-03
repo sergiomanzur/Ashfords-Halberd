@@ -316,6 +316,65 @@ int main() {
     ck(std::abs(rotated_point.x - 100) < 0.0001 &&
        std::abs(rotated_point.y - 203) < 0.0001 &&
        std::abs(rotated_point.z - 288) < 0.0001);
+    // Joint output must use the same hierarchy and placement as rendering.
+    const auto original_model = a.model, original_skin = a.skin;
+    auto joints = actor_joint_matrices(a, pose, {100, 0, 0}, {0, 16384, 0});
+    ck(joints.size() == 2);
+    ck(std::abs(joints[0][3] - 100) < 0.0001 &&
+       std::abs(joints[0][7]) < 0.0001 &&
+       std::abs(joints[0][11] + 10) < 0.0001);
+    ck(std::abs(joints[1][3] - 100) < 0.0001 &&
+       std::abs(joints[1][7] - 2) < 0.0001 &&
+       std::abs(joints[1][11] + 10) < 0.0001 &&
+       std::abs(joints[1][4] - 1) < 0.0001);
+    // Parent rotation transforms the local offset too; XYZ order matters.
+    auto linked =
+        pose_actor_linked(a, pose, joints[0], {2, 4, 6}, {16384, 16384, 16384});
+    auto linked_point = linked.meshes[0].triangles[0].corners[0].position;
+    ck(std::abs(linked_point.x - 94) < 0.0001 &&
+       std::abs(linked_point.y - 7) < 0.0001 &&
+       std::abs(linked_point.z + 12) < 0.0001);
+    ck(a.model == original_model && a.skin == original_skin);
+    auto rigid = a;
+    rigid.skin.clear();
+    auto rigid_joints =
+        actor_joint_matrices(rigid, pose, {100, 0, 0}, {0, 16384, 0});
+    auto rigid_point = pose_actor(rigid, pose, {100, 0, 0}, 16384)
+                           .meshes[0]
+                           .triangles[0]
+                           .corners[0]
+                           .position;
+    // This fixture's first rigid vertex is (1,0,0) owned by joint zero.
+    ck(std::abs(rigid_point.x - (rigid_joints[0][0] + rigid_joints[0][3])) <
+           0.0001 &&
+       std::abs(rigid_point.z - (rigid_joints[0][8] + rigid_joints[0][11])) <
+           0.0001);
+    auto siblings = multiple_groups();
+    auto sibling_joints = actor_joint_matrices(siblings, {});
+    ck(sibling_joints.size() == 3 && sibling_joints[1][3] == 10 &&
+       sibling_joints[1][7] == 2 && sibling_joints[2][3] == 13 &&
+       sibling_joints[2][7] == 0);
+    // Matrix-only queries must not need skin or texture decoding.
+    rigid.skin = {1};
+    rigid.textures = {1};
+    ck(actor_joint_matrices(rigid, pose) == actor_joint_matrices(a, pose));
+    bad([&] { actor_joint_matrices(a, std::vector<JointPose>(3)); });
+    auto invalid_joint_model = a;
+    put(invalid_joint_model.model, 60, 0);
+    bad([&] { actor_joint_matrices(invalid_joint_model, pose); });
+    put(invalid_joint_model.model, 60, 0xffffffff);
+    bad([&] { actor_joint_matrices(invalid_joint_model, pose); });
+    bad([&] { actor_joint_matrices(a, pose, {NAN, 0, 0}); });
+    auto invalid_parent = joints[0];
+    invalid_parent[0] = NAN;
+    bad([&] { pose_actor_linked(a, pose, invalid_parent); });
+    invalid_parent = joints[0];
+    invalid_parent[12] = 1;
+    bad([&] { pose_actor_linked(a, pose, invalid_parent); });
+    invalid_parent = joints[0];
+    invalid_parent[15] = 0;
+    bad([&] { pose_actor_linked(a, pose, invalid_parent); });
+    bad([&] { pose_actor_linked(a, pose, joints[0], {INFINITY, 0, 0}); });
     auto moving = pose;
     moving[1].position = Vec3{0, 4, 0};
     p = pose_actor(fixture(), moving)

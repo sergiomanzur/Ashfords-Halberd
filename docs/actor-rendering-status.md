@@ -83,3 +83,20 @@ movement, animated actors and original room cameras to application input and
 rendering. Interactions, connected-room transitions, enemies/combat, inventory,
 decoded audio and versioned save/load across the selected room pair remain to
 implement before the complete playable slice is ready.
+
+`actor_joint_matrices` now exposes world matrices in model joint order, using
+the same validated hierarchy traversal as rendering. Matrix-only queries do
+not decode meshes, skin buffers or textures. `pose_actor_linked` follows
+`bhCalcTree`'s baseline parent-joint matrix, local translation and Z–Y–X
+rotation composition. It accepts finite affine parent matrices and preserves
+cached model/skin bytes. The optional work flag `0x1000` rotation reset,
+subtree selection and mirrored/partial-body motion application remain pending.
+This API poses a supplied whole model; it does not initialize zombie body-part
+controllers or make the graveyard playable.
+
+Synthetic checks verify noncommuting parent/local transforms, combined-axis
+rotation, child/sibling hierarchy, rigid drawing agreement, immutable inputs
+and malformed parent/skeleton rejection. The headless retail runtime probe
+verified 30 skeleton samples and 180 whole-model linked placements for ten
+graveyard zombie roots across both room variants, comparing every triangle
+corner with its parent joint placement and checking cached asset immutability.

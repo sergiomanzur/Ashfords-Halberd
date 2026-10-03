@@ -291,3 +291,10 @@ enemy encounter. Surrounding model/linked-part setup, shadows, pose/collision,
 movement, attacks/damage and full controller dispatch remain required before
 the application can enter the graveyard. Actual room travel still rejects the
 unimplemented zombie controller explicitly.
+
+The linked transform prerequisite is now available through the actor renderer:
+world joint queries and baseline parent-joint/local-offset/XYZ placement share
+one skeleton traversal. Retail coverage includes 30 graveyard skeleton samples
+and 180 whole-model linked poses. Partial-body skeleton/motion selection,
+rotation-reset flags and the complete enemy controller remain required; the
+diagnostic poses do not enable application travel or an enemy encounter.

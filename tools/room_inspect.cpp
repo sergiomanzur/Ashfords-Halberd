@@ -10,6 +10,7 @@
 #include "zombie.hpp"
 #include "render.hpp"
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -72,6 +73,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t prop_models=0, prop_skins=0;
         size_t zombie_linked_work=0;
         size_t zombie_parameters=0;
+        size_t zombie_joint_samples=0, zombie_linked_poses=0;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
@@ -115,6 +117,22 @@ int wmain(int argc,wchar_t** argv) {
                                     sample_motion(*(*zombie.motions)[motion],0,true);
                                 }
                                 ++zombie_parameters;
+                                const auto& startup=*(*zombie.motions)[zombie.motion_number];
+                                std::vector<std::vector<JointPose>> startup_poses;
+                                std::vector<std::vector<ModelMatrix>> startup_joints;
+                                std::vector<Scene> local_scenes;
+                                const auto original_model=zombie.model->model;
+                                const auto original_skin=zombie.model->skin;
+                                for(uint32_t frame:{0u,startup.frames/2,startup.frames-1}) {
+                                    startup_poses.push_back(sample_motion(startup,int64_t(frame)*65536,true));
+                                    startup_joints.push_back(actor_joint_matrices(*zombie.model,startup_poses.back(),zombie.position,zombie.angles));
+                                    if(startup_joints.back().size()<2)
+                                        throw std::runtime_error("Retail zombie skeleton has no linked body joint");
+                                    local_scenes.push_back(pose_actor(*zombie.model,startup_poses.back()));
+                                    if(local_scenes.back().meshes.empty())
+                                        throw std::runtime_error("Retail zombie startup pose has no geometry");
+                                    ++zombie_joint_samples;
+                                }
                                 for(const auto part:std::array<std::pair<int,uint16_t>,6>{
                                     {{1,1},{0,31},{0,32},{0,32},{0,33},{0,33}}}) {
                                     auto slot=link_zombie_enemy(linked,root,part.first,part.second);
@@ -124,7 +142,36 @@ int wmain(int argc,wchar_t** argv) {
                                         throw std::runtime_error("Retail linked zombie work mismatch");
                                     ++zombie_linked_work;
                                     ++bindings;
+                                    const auto& child=linked.enemies[*slot];
+                                    // Whole-model placement probe, not partial-body
+                                    // sampling or complete controller initialization.
+                                    for(size_t frame=0;frame<startup_poses.size();++frame) {
+                                        const auto& parent=startup_joints[frame].at(size_t(child.linked_joint));
+                                        auto posed=pose_actor_linked(*child.model,startup_poses[frame],parent,child.linked_offset,child.angles);
+                                        const auto& local=local_scenes[frame];
+                                        if(posed.meshes.size()!=local.meshes.size() || posed.textures.size()!=local.textures.size())
+                                            throw std::runtime_error("Retail linked pose changed geometry or texture count");
+                                        size_t corners=0;
+                                        for(size_t mesh=0;mesh<posed.meshes.size();++mesh) {
+                                            if(posed.meshes[mesh].triangles.size()!=local.meshes[mesh].triangles.size())
+                                                throw std::runtime_error("Retail linked pose changed triangle count");
+                                            for(size_t triangle=0;triangle<posed.meshes[mesh].triangles.size();++triangle)
+                                                for(size_t corner=0;corner<3;++corner) {
+                                                    const auto p=local.meshes[mesh].triangles[triangle].corners[corner].position;
+                                                    const auto q=posed.meshes[mesh].triangles[triangle].corners[corner].position;
+                                                    if(std::abs(q.x-(parent[0]*p.x+parent[1]*p.y+parent[2]*p.z+parent[3]))>.05 ||
+                                                       std::abs(q.y-(parent[4]*p.x+parent[5]*p.y+parent[6]*p.z+parent[7]))>.05 ||
+                                                       std::abs(q.z-(parent[8]*p.x+parent[9]*p.y+parent[10]*p.z+parent[11]))>.05)
+                                                        throw std::runtime_error("Retail linked pose differs from parent joint placement");
+                                                    ++corners;
+                                                }
+                                        }
+                                        if(!corners)throw std::runtime_error("Retail linked pose has no triangle corners");
+                                        ++zombie_linked_poses;
+                                    }
                                 }
+                                if(zombie.model->model!=original_model || zombie.model->skin!=original_skin)
+                                    throw std::runtime_error("Retail linked posing mutated cached assets");
                             }
                         if(!parents || bindings!=parents*6)
                             throw std::runtime_error("Missing retail linked zombie work coverage");
@@ -399,6 +446,9 @@ int wmain(int argc,wchar_t** argv) {
             std::cout<<"Decoded "<<prop_models<<" room object/item models, including "<<prop_skins<<" skinned objects\n";
             std::cout<<"Verified "<<zombie_linked_work<<" linked zombie work bindings against graveyard assets\n";
             std::cout<<"Verified "<<zombie_parameters<<" graveyard zombie health/type/walking parameters and motion pairs\n";
+            if(zombie_joint_samples!=zombie_parameters*3 || zombie_linked_poses!=zombie_linked_work*3)
+                throw std::runtime_error("Missing retail zombie linked pose coverage");
+            std::cout<<"Verified "<<zombie_joint_samples<<" graveyard skeleton samples and "<<zombie_linked_poses<<" whole-model linked placements\n";
             if(runtime_check)std::cout<<"Loaded "<<runtime_entries<<" native corridor runtime entries with Claire pose and initialized scenario state\n";
             if(runtime_check)std::cout<<"Advanced "<<runtime_ticks<<" joined player/actor/prop/scenario runtime ticks\n";
             if(runtime_check)std::cout<<"Applied player displacement on "<<runtime_movement_ticks<<" runtime ticks\n";
