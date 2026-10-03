@@ -539,3 +539,28 @@ updates against cached Claire joint5. It sampled the selected actual idle
 root/body channels once per root; full SetMtn effects and fix offsets were not
 substituted with that sampler. All205-room and previous route/pursuit/awareness
 checks remain passing.
+
+Native MV01 walking now selects original paired motions0/200,40/240,41/241 or
+type5's125/325, retains startup RNG order/fallthrough and short way turning,
+and applies the source attack/distance, avoidance and authored stop-window
+transitions. Forward/side wall queries use original ar/ah, Ninja trig, static
+then dynamic walls, types0–7 and exact source boundaries. They preserve ignored
+floor/attribute data, odd-type primary400 gating and raw type7 heights. Current
+room loading clears dynamic wall work. Sound requests retain both attack and
+cadence calls in a single tick, with scalar/body/RNG updates staged before commit.
+
+Original ikou/ikou3 preserve linked80 no-ops, signed word yaw arithmetic and
+negative target reversal. GetTranslateMtn and GetTranslateMtn2 now consume the
+selected motion's root position keys, retain the inactive frame/step gate,
+mode0 vertical removal, Ninja float ZYX transformation and truncating Y
+quantization. The second helper sets scalar spd without moving the actor.
+These do not advance motion or replace SetMtn's root-joint zeroing, foot fix,
+effects or motion tables. Full Move/action/attack/damage and the playable
+Step1 encounter remain pending; root dispatch still rejects unsupported states.
+
+The headless retail scan passes1,200 isolated MV01 policy ticks at retained
+frame0/distance100 across ten initialized roots, using actual room walls and
+original selected motion pairs. It probes1,272 actual root/body walking keys
+through both displacement and speed helpers. This checks decoded channel
+compatibility and controller state, without claiming full encounter movement.
+All205-room decoding and prior corridor/route/awareness/idle/neck checks pass.

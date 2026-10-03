@@ -14,6 +14,8 @@
 #include "zombie.hpp"
 #include "enemy_targeting.hpp"
 #include "enemy_navigation.hpp"
+#include "enemy_movement.hpp"
+#include "enemy_wall.hpp"
 #include "render.hpp"
 #include <algorithm>
 #include <cmath>
@@ -92,6 +94,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t enemy_stair_probes=0, zombie_brain_roots=0, zombie_brain_ticks=0;
         size_t zombie_idle_ticks=0, zombie_idle_transitions=0, zombie_idle_sound_requests=0;
         size_t zombie_search_neck_ticks=0;
+        size_t zombie_walk_ticks=0, zombie_root_displacements=0, zombie_speed_samples=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
         size_t facial_lip_ticks=0, facial_lip_changed_frames=0;
@@ -593,6 +596,39 @@ int wmain(int argc,wchar_t** argv) {
                                             throw std::runtime_error("Retail idle sound request lost source slot/code/RNG policy");
                                         ++zombie_idle_sound_requests;
                                     }
+                                    auto walking=initialized;
+                                    walking.enemies[root].modes[2]=1;walking.enemies[root].modes[3]=0;
+                                    walking.enemies[root].zombie_work->player_distance=100;
+                                    ScenarioEntity walk_target;
+                                    walk_target.position=player_entry.player.position;
+                                    const auto original_position=walking.enemies[root].position;
+                                    const auto expected_motion=zombie_walk_motion(*walking.enemies[root].zombie_walk_choice,false);
+                                    const auto expected_body_motion=zombie_walk_motion(*walking.enemies[root].zombie_walk_choice,true);
+                                    // Isolated MV01 policy at retained frame0/distance100,
+                                    // with actual room walls. Full Move/SetMtn is pending.
+                                    for(size_t tick=0;tick<120;++tick) {
+                                        tick_zombie_walk(walking,root,walk_target);++zombie_walk_ticks;
+                                        const auto& moved=walking.enemies[root];
+                                        if(moved.motion_number!=expected_motion || walking.enemies[body].motion_number!=expected_body_motion ||
+                                           moved.position.x!=original_position.x || moved.position.y!=original_position.y ||
+                                           moved.position.z!=original_position.z || moved.model->model!=raw || moved.modes[2]!=1)
+                                            throw std::runtime_error("Retail isolated MV01 changed assets/position or lost walking selection");
+                                    }
+                                    for(auto slot:{root,body}) {
+                                        const auto& actor=walking.enemies[slot];
+                                        const auto& motion=*actor.motions->at(actor.motion_number);
+                                        ScenarioEntity probe;
+                                        probe.motions=actor.motions;probe.motion_number=actor.motion_number;
+                                        for(uint32_t frame=0;frame<motion.frames;++frame) {
+                                            probe.position=original_position;
+                                            measure_enemy_motion_speed(probe,int32_t(frame),0);++zombie_speed_samples;
+                                            translate_enemy_motion(probe,int32_t(frame),0);++zombie_root_displacements;
+                                            if(!std::isfinite(probe.speed) || probe.speed<0 ||
+                                               !std::isfinite(probe.position.x) || !std::isfinite(probe.position.y) ||
+                                               !std::isfinite(probe.position.z))
+                                                throw std::runtime_error("Retail original walking root key produced invalid displacement/speed");
+                                        }
+                                    }
                                 }
                                 auto search_neck=initialized;
                                 auto& searching=search_neck.enemies[body];
@@ -1077,6 +1113,10 @@ int wmain(int argc,wchar_t** argv) {
                 std::cout<<"Advanced "<<zombie_idle_ticks<<" isolated MV00 ticks through "<<zombie_idle_transitions
                          <<" idle-to-walk transitions with "<<zombie_idle_sound_requests<<" retained native sound requests\n";
                 std::cout<<"Advanced "<<zombie_search_neck_ticks<<" native linked-body SearchNeck updates\n";
+                if(zombie_walk_ticks!=zombie_brain_roots*120 || !zombie_root_displacements || zombie_speed_samples!=zombie_root_displacements)
+                    throw std::runtime_error("Missing retail native MV01/root displacement coverage");
+                std::cout<<"Advanced "<<zombie_walk_ticks<<" isolated MV01 ticks with actual room walls; probed "
+                         <<zombie_root_displacements<<" walking root-key displacements and "<<zombie_speed_samples<<" speed samples\n";
             }
             if(zombie_model_work_samples!=zombie_channel_applications || zombie_range_draws!=zombie_parameters*2)
                 throw std::runtime_error("Missing retail zombie model-work coverage");

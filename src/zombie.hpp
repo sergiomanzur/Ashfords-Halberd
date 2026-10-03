@@ -45,6 +45,9 @@ std::optional<int32_t> choose_zombie_sound(const ScenarioEntity &enemy,
                                            uint32_t &seed, int32_t code,
                                            bool already_playing);
 void tick_zombie_idle(ScenarioState &state, size_t work);
+// en01.c::MV01 walking state callback; full Move/SetMtn dispatch is separate.
+void tick_zombie_walk(ScenarioState &state, size_t work,
+                      const ScenarioEntity &player);
 void tick_zombie_neck(ScenarioState &state, size_t work,
                       const ActorModelWork &player);
 } // namespace ashford

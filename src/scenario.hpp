@@ -102,6 +102,8 @@ struct ScenarioEntity {
   int32_t control0 = 0; // Original ct0, distinct from ct1/ct2/ct3.
   int32_t control3 = 0, highlight_yaw = 0;
   int16_t torso_yaw = 0; // BH_PWORK::wax.
+  int16_t turn_speed = 0; // BH_PWORK::way.
+  float speed = 0; // BH_PWORK::spd.
   uint32_t frame_direction = 0;
   uint16_t motion_attribute = 0;
   int motion_boundary = 0;
@@ -163,6 +165,7 @@ struct ScenarioState {
   std::vector<CollisionRecord> interactions;
   std::optional<RoomCollision> collision;
   std::vector<CollisionRecord> dynamic_miscellaneous; // sys->metcp.
+  std::vector<CollisionRecord> dynamic_walls; // sys->mwalp.
   std::vector<EnemySoundRequest> pending_enemy_sounds;
   std::shared_ptr<const RoomRoutes> routes;
   std::shared_ptr<const std::vector<std::optional<Motion>>> room_motions;

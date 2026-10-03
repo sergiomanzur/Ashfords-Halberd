@@ -177,6 +177,7 @@ RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
       (persistent.player_work_flags & 0x20119) | 0x118;
   persistent.collision = result.collision;
   persistent.dynamic_miscellaneous.clear();
+  persistent.dynamic_walls.clear();
   persistent.pending_enemy_sounds.clear();
   persistent.routes =
       std::make_shared<const RoomRoutes>(decode_room_routes(data));
