@@ -44,6 +44,13 @@ int change_enemy_motion(ScenarioEntity &enemy, uint32_t number, int32_t frame,
 std::optional<int32_t> choose_zombie_sound(const ScenarioEntity &enemy,
                                            uint32_t &seed, int32_t code,
                                            bool already_playing);
+// Current slot's active sound codes. ChechPlayEnemySe suppresses positive
+// queries whenever any sound occupies that slot; other queries match the code.
+std::optional<int32_t> choose_zombie_sound(const ScenarioEntity &enemy,
+                                           uint32_t &seed, int32_t code,
+                                           const std::vector<int32_t> &playing);
+void tick_zombie_motion_table(ScenarioState &state, size_t work, int32_t frame,
+                              const std::vector<int32_t> &playing = {});
 void tick_zombie_idle(ScenarioState &state, size_t work);
 // en01.c::MV01 walking state callback; full Move/SetMtn dispatch is separate.
 void tick_zombie_walk(ScenarioState &state, size_t work,

@@ -48,6 +48,14 @@ ActorModelWork calculate_actor_model_work(const ActorModel &actor,
                                           const std::vector<JointPose> &pose,
                                           ActorModelWork work = {},
                                           const ActorPlacement &placement = {});
+// Motion.c::bhCalcFixOffset. Signed path ends with-1; trailing padding is
+// ignored. Uses complete current object poses and the prior terminal cache.
+// Unlike bhCalcModel this operation ignores placement flag1000.
+Vec3 calculate_actor_fix_offset(const std::vector<JointPose> &pose,
+                                const ActorModelWork &cached,
+                                const ActorPlacement &placement,
+                                const std::vector<int8_t> &path,
+                                Vec3 offset = {});
 // Draw selected objects with their cached matrices and original full-model
 // skin bindings. Controllers which rebase skin lists require their own path.
 Scene pose_actor_model_work(const ActorModel &actor,

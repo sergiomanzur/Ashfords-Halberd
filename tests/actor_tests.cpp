@@ -350,6 +350,11 @@ int main() {
        std::abs(rigid_point.z - (rigid_joints[0][8] + rigid_joints[0][11])) <
            0.0001);
     auto siblings = multiple_groups();
+    ActorPlacement ninja_placement;
+    ninja_placement.angles[1] = 8192;
+    auto ninja_work = calculate_actor_model_work(siblings, {}, {}, ninja_placement);
+    ck(std::abs(ninja_work.base_matrix[0] - .7070387) < .000001 &&
+       std::abs(ninja_work.base_matrix[2] - .7071065) < .000001);
     auto sibling_joints = actor_joint_matrices(siblings, {});
     ck(sibling_joints.size() == 3 && sibling_joints[1][3] == 10 &&
        sibling_joints[1][7] == 2 && sibling_joints[2][3] == 13 &&

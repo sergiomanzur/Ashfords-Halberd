@@ -564,3 +564,30 @@ original selected motion pairs. It probes1,272 actual root/body walking keys
 through both displacement and speed helpers. This checks decoded channel
 compatibility and controller state, without claiming full encounter movement.
 All205-room decoding and prior corridor/route/awareness/idle/neck checks pass.
+
+Native bhCalcFixOffset now rebuilds the current signed object path with Ninja
+float transforms and subtracts the previous terminal cached joint, including
+linked parent/local offsets and source primary1000 behavior. Cached model work
+and root-key translation share that arithmetic; renderer-only double transforms
+remain separate. Identical current/cached poses produce exactly zero drift,
+including the original nonzero ankle offset.
+
+CheckMtnTbl now retains the original fix, sound and vibration tables, verified
+against all1,008 integers in pinned MIT source. The callback preserves room-bank
+pointer identity, primary40000, motion2/80000, mirror mapping, motion125 scaling,
+inclusive windows, leg/parent fix routing and captured pre-sampling event frames.
+Corrections, RNG and request queues are staged before commitment. SePlay feedback
+is per enemy slot: any active sound suppresses a positive queried code before
+consuming RNG; nonpositive queries require matching codes. Room loading clears
+sound and vibration requests. These queues still require audio/device output.
+
+The headless retail scan now passes1,610 isolated motion-table calls against
+ten initialized roots, retaining28 sound and10 vibration requests. It checks
+4,800 exact zero-drift foot paths after fresh caches and480 linear work samples
+against an independent child/sibling traversal using source float math. These
+checks combine existing diagnostic pose sampling with the table callback;
+they do not claim the full source Move/SetMtn/effects/CalcEnemy scheduler.
+SetMtn effects and complete enemy action/combat integration remain pending.
+The complete Windows build,39 headless tests and package creation pass. A fresh
+packaged dummy-SDL profile passes241 runtime ticks,240 rendered frames,
+53 movement ticks,10 focus-blocked ticks and return to the main menu.

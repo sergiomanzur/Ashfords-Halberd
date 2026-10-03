@@ -1,5 +1,6 @@
 #include "enemy_motion_internal.hpp"
 #include "zombie.hpp"
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 // Native adaptation of MIT recvx-decomp en01.c::MV00/SePlay and ChgMtn.
@@ -25,9 +26,11 @@ int change_enemy_motion(ScenarioEntity &enemy, uint32_t number, int32_t frame,
                         int32_t rate) {
   return change(enemy, number, frame, rate);
 }
-std::optional<int32_t> choose_zombie_sound(const ScenarioEntity &enemy,
+namespace {
+template <class Playing>
+std::optional<int32_t> select_zombie_sound(const ScenarioEntity &enemy,
                                            uint32_t &seed, int32_t code,
-                                           bool already_playing) {
+                                           Playing playing) {
   static constexpr int32_t offsets[27] = {28, 32, 16, 0, 4,  8,  32, 36, 0,
                                           8,  20, 24, 8, 12, 8,  12, 16, 4,
                                           40, 36, 40, 0, 8,  24, 20, 28, 8};
@@ -42,7 +45,7 @@ std::optional<int32_t> choose_zombie_sound(const ScenarioEntity &enemy,
     zombie_personality_at(personality);
     selected = add(selected, offsets[personality]);
     if (uint8_t(code) == 20 || uint8_t(code) == 21) {
-      if (already_playing)
+      if (playing(selected))
         return std::nullopt;
       if (!(random(next_seed) % 2)) {
         seed = next_seed;
@@ -60,6 +63,22 @@ std::optional<int32_t> choose_zombie_sound(const ScenarioEntity &enemy,
   }
   seed = next_seed;
   return selected;
+}
+} // namespace
+std::optional<int32_t> choose_zombie_sound(const ScenarioEntity &enemy,
+                                           uint32_t &seed, int32_t code,
+                                           bool already_playing) {
+  return select_zombie_sound(enemy, seed, code,
+                             [&](int32_t) { return already_playing; });
+}
+std::optional<int32_t>
+choose_zombie_sound(const ScenarioEntity &enemy, uint32_t &seed, int32_t code,
+                    const std::vector<int32_t> &playing) {
+  return select_zombie_sound(enemy, seed, code, [&](int32_t selected) {
+    if (selected > 0)
+      return !playing.empty();
+    return std::find(playing.begin(), playing.end(), selected) != playing.end();
+  });
 }
 void tick_zombie_idle(ScenarioState &state, size_t work) {
   if (state.enemies.size() != 128 || work >= state.enemies.size())

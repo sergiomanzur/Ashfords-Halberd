@@ -16,15 +16,59 @@
 #include "enemy_navigation.hpp"
 #include "enemy_movement.hpp"
 #include "enemy_wall.hpp"
+#include "zombie_motion_tables.hpp"
+#include "ninja_matrix.hpp"
 #include "render.hpp"
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 using namespace ashford;
+// Independent child/sibling traversal checks the production linear work-cache
+// traversal using the same source float arithmetic, rather than render math.
+std::vector<ModelMatrix> source_hierarchy_matrices(
+    const ActorModel& actor, const std::vector<JointPose>& pose) {
+    const auto bind=actor_bind_pose(actor);
+    if(pose.size()!=bind.size())
+        throw std::runtime_error("Retail hierarchy probe requires a complete pose");
+    const auto& bytes=actor.model;
+    auto u16=[&](size_t at) {
+        return uint16_t(bytes.at(at)) | uint16_t(bytes.at(at+1))<<8;
+    };
+    auto u32=[&](size_t at) {
+        return uint32_t(u16(at)) | uint32_t(u16(at+2))<<16;
+    };
+    const size_t base=u16(4),table=base+size_t(u32(12));
+    auto index=[&](uint32_t offset) {
+        const size_t at=base+size_t(offset);
+        if(at<table || (at-table)%52 || (at-table)/52>=bind.size())
+            throw std::runtime_error("Invalid retail hierarchy joint link");
+        return (at-table)/52;
+    };
+    std::vector<ModelMatrix> result(bind.size());
+    std::vector<bool> visited(bind.size());
+    std::function<void(size_t,detail::NinjaMatrix,size_t)> visit=
+        [&](size_t joint,detail::NinjaMatrix matrix,size_t depth) {
+            if(depth>256 || visited.at(joint))
+                throw std::runtime_error("Cyclic retail hierarchy probe");
+            visited[joint]=true;
+            const auto parent=matrix;
+            detail::ninja_translate(matrix,pose[joint].position.value_or(*bind[joint].position));
+            detail::ninja_rotate(matrix,pose[joint].angles.value_or(std::array<int32_t,3>{}));
+            result[joint]=detail::ninja_store(matrix);
+            const auto child=u32(table+joint*52+44),sibling=u32(table+joint*52+48);
+            if(child!=0xffffffffu)visit(index(child),matrix,depth+1);
+            if(sibling!=0xffffffffu)visit(index(sibling),parent,depth+1);
+        };
+    if(!bind.empty())visit(0,detail::ninja_identity(),0);
+    if(std::find(visited.begin(),visited.end(),false)!=visited.end())
+        throw std::runtime_error("Unreachable retail hierarchy joint");
+    return result;
+}
 Bytes read(std::ifstream& file, uint64_t offset, size_t size) {
     if(size>64*1024*1024) throw std::runtime_error("Archive read exceeds limit");
     Bytes bytes(size);file.seekg(std::streamoff(offset));
@@ -95,6 +139,8 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_idle_ticks=0, zombie_idle_transitions=0, zombie_idle_sound_requests=0;
         size_t zombie_search_neck_ticks=0;
         size_t zombie_walk_ticks=0, zombie_root_displacements=0, zombie_speed_samples=0;
+        size_t zombie_motion_table_ticks=0, zombie_foot_zero_probes=0;
+        size_t zombie_motion_sound_requests=0, zombie_motion_vibration_requests=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
         size_t facial_lip_ticks=0, facial_lip_changed_frames=0;
@@ -371,13 +417,13 @@ int wmain(int argc,wchar_t** argv) {
                                                     options.mirror_map=flip;
                                                     if(blended)options.blend_rate=.35f;
                                                     auto applied=apply_motion_pose(bind,motion,int64_t(frame)*65536,options);
-                                                    auto expected_matrices=actor_joint_matrices(*zombie.model,applied.pose);
+                                                    auto expected_matrices=source_hierarchy_matrices(*zombie.model,applied.pose);
                                                     auto native_work=calculate_actor_model_work(*zombie.model,applied.pose);
                                                     if(applied.pose.size()!=bind.size() || expected_matrices.size()!=bind.size() || native_work.joints.size()!=bind.size())
                                                         throw std::runtime_error("Retail zombie motion application changed joint count");
                                                     for(size_t joint=0;joint<bind.size();++joint)
                                                         for(size_t element=0;element<16;++element)
-                                                            if(std::abs(native_work.joints[joint].matrix[element]-expected_matrices[joint][element])>.0001)
+                                                            if(native_work.joints[joint].matrix[element]!=expected_matrices[joint][element])
                                                                 throw std::runtime_error("Retail linear model work differs from hierarchy matrix");
                                                     ++zombie_model_work_samples;
                                                     if(body)
@@ -629,6 +675,42 @@ int wmain(int argc,wchar_t** argv) {
                                                 throw std::runtime_error("Retail original walking root key produced invalid displacement/speed");
                                         }
                                     }
+                                    // Isolated sampled channels -> original motion tables
+                                    // -> fresh full native cache. This does not substitute
+                                    // for Move/SetMtn effects or the CalcEnemy scheduler.
+                                    auto planted=walking;
+                                    for(size_t tick=0;tick<80;++tick) {
+                                        const auto root_frame=planted.enemies[root].frame/65536;
+                                        const auto body_frame=planted.enemies[body].frame/65536;
+                                        advance_zombie_motion(planted,root);advance_zombie_motion(planted,body);
+                                        const auto before_sounds=planted.pending_enemy_sounds.size();
+                                        tick_zombie_motion_table(planted,root,root_frame);++zombie_motion_table_ticks;
+                                        tick_zombie_motion_table(planted,body,body_frame);++zombie_motion_table_ticks;
+                                        zombie_motion_sound_requests+=planted.pending_enemy_sounds.size()-before_sounds;
+                                        auto& current=planted.enemies[root];
+                                        ActorPlacement cached_placement;
+                                        cached_placement.flags=current.flags;cached_placement.position=current.position;
+                                        cached_placement.angles=current.angles;
+                                        current.model_work=calculate_actor_model_work(*current.model,current.joint_pose,{},cached_placement);
+                                        for(size_t path:{0,1,2,3,6,7}) {
+                                            const auto delta=calculate_actor_fix_offset(current.joint_pose,*current.model_work,
+                                                cached_placement,detail::zombie_fix_paths[path],{0,-1,-1.9f});
+                                            if(delta.x!=0 || delta.y!=0 || delta.z!=0)
+                                                throw std::runtime_error("Retail unchanged current pose/cache has foot-lock drift");
+                                            ++zombie_foot_zero_probes;
+                                        }
+                                    }
+                                    auto vibration=initialized;
+                                    auto& attack=vibration.enemies[root];
+                                    if(!attack.motions->at(8) || attack.motions->at(8)->frames<=24)
+                                        throw std::runtime_error("Retail original attack motion missing vibration frame24");
+                                    attack.motion_number=8;attack.modes[0]=1;
+                                    tick_zombie_motion_table(vibration,root,24);++zombie_motion_table_ticks;
+                                    if(vibration.pending_enemy_vibrations.size()!=1 ||
+                                       vibration.pending_enemy_vibrations[0].preset!=9 ||
+                                       vibration.pending_enemy_vibrations[0].channel!=1)
+                                        throw std::runtime_error("Retail original motion-table vibration request changed");
+                                    zombie_motion_vibration_requests+=vibration.pending_enemy_vibrations.size();
                                 }
                                 auto search_neck=initialized;
                                 auto& searching=search_neck.enemies[body];
@@ -1117,6 +1199,12 @@ int wmain(int argc,wchar_t** argv) {
                     throw std::runtime_error("Missing retail native MV01/root displacement coverage");
                 std::cout<<"Advanced "<<zombie_walk_ticks<<" isolated MV01 ticks with actual room walls; probed "
                          <<zombie_root_displacements<<" walking root-key displacements and "<<zombie_speed_samples<<" speed samples\n";
+                if(zombie_motion_table_ticks!=zombie_brain_roots*161 || zombie_foot_zero_probes!=zombie_brain_roots*80*6 ||
+                   !zombie_motion_sound_requests || zombie_motion_vibration_requests!=zombie_brain_roots)
+                    throw std::runtime_error("Missing retail native foot-lock/motion-table coverage");
+                std::cout<<"Applied "<<zombie_motion_table_ticks<<" isolated native motion-table callbacks with "
+                         <<zombie_motion_sound_requests<<" sound requests and "<<zombie_motion_vibration_requests
+                         <<" vibration requests; verified "<<zombie_foot_zero_probes<<" exact zero-drift cached foot paths\n";
             }
             if(zombie_model_work_samples!=zombie_channel_applications || zombie_range_draws!=zombie_parameters*2)
                 throw std::runtime_error("Missing retail zombie model-work coverage");

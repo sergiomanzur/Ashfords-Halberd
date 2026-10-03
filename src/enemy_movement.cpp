@@ -1,6 +1,6 @@
 #include "enemy_movement.hpp"
 #include "enemy_targeting.hpp"
-#include "ninja_math.hpp"
+#include "ninja_matrix.hpp"
 #include <cmath>
 #include <stdexcept>
 // Native adaptation of MIT recvx-decomp zonzon.c and ps2_NaMatrix.c.
@@ -73,26 +73,10 @@ void translate_enemy_motion(ScenarioEntity &enemy, int32_t frame, int mode) {
   const auto delta = root_delta(enemy, frame, mode);
   // Source rotates matrix columns Z,Y,X, retaining float operations and
   // Ninja table rounding, then multiplies the point X,Y,Z and translation.
-  std::array<Vec3, 3> columns{{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};
-  auto rotate = [&](size_t a, size_t b, int32_t angle, bool reverse) {
-    const auto sc = ninja_sin_cos(uint16_t(angle));
-    const float sine = reverse ? -sc[0] : sc[0], cosine = sc[1];
-    const auto ca = columns[a], cb = columns[b];
-    columns[a] = {ca.x * cosine + cb.x * sine, ca.y * cosine + cb.y * sine,
-                  ca.z * cosine + cb.z * sine};
-    columns[b] = {ca.x * (-sine) + cb.x * cosine,
-                  ca.y * (-sine) + cb.y * cosine,
-                  ca.z * (-sine) + cb.z * cosine};
-  };
-  rotate(0, 1, enemy.angles[2], false);
-  rotate(0, 2, enemy.angles[1], true);
-  rotate(1, 2, enemy.angles[0], false);
-  auto point = [&](float a, float b, float c, float origin) {
-    return finite(((a * delta.x + b * delta.y) + c * delta.z) + finite(origin));
-  };
-  Vec3 next{point(columns[0].x, columns[1].x, columns[2].x, enemy.position.x),
-            point(columns[0].y, columns[1].y, columns[2].y, enemy.position.y),
-            point(columns[0].z, columns[1].z, columns[2].z, enemy.position.z)};
+  auto matrix = detail::ninja_identity();
+  detail::ninja_translate(matrix, enemy.position);
+  detail::ninja_rotate(matrix, enemy.angles);
+  auto next = detail::ninja_point(matrix, delta);
   const float quantized = finite(100.f * (0.001f + next.y));
   if (double(quantized) < -2147483648. || double(quantized) >= 2147483648.)
     throw std::runtime_error(

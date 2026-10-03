@@ -189,6 +189,14 @@ int main() {
     ck(choose_zombie_sound(z, seed, 21, false) == 53 && seed == 2524885223,
        "Odd voice roll/offset failed");
     z.state_flags = 0x100000;
+    const auto voice_seed = seed;
+    ck(!choose_zombie_sound(z, seed, 21, std::vector<int32_t>{53}) &&
+           seed == voice_seed,
+       "Resolved active voice code must bypass RNG");
+    ck(!choose_zombie_sound(z, seed, 21, std::vector<int32_t>{8963}) &&
+           seed == voice_seed,
+       "Any active sound in the same slot must suppress a positive voice query "
+       "without RNG");
     ck(choose_zombie_sound(z, seed, 70414, false) == 70416 &&
            choose_zombie_sound(z, seed, 70415, false) == 70417 &&
            !choose_zombie_sound(z, seed, 8963, false),

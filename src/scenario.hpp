@@ -150,6 +150,10 @@ struct EnemySoundRequest {
   Vec3 position;
   int32_t code = 0;
 };
+struct EnemyVibrationRequest {
+  size_t work = 0;
+  uint8_t channel = 1, preset = 9;
+};
 struct ScenarioState {
   std::array<std::array<uint32_t, 32>, 17> flags{};
   uint8_t room_case = 0, interaction_index = 0, floor_index = 0;
@@ -167,6 +171,7 @@ struct ScenarioState {
   std::vector<CollisionRecord> dynamic_miscellaneous; // sys->metcp.
   std::vector<CollisionRecord> dynamic_walls; // sys->mwalp.
   std::vector<EnemySoundRequest> pending_enemy_sounds;
+  std::vector<EnemyVibrationRequest> pending_enemy_vibrations;
   std::shared_ptr<const RoomRoutes> routes;
   std::shared_ptr<const std::vector<std::optional<Motion>>> room_motions;
   std::shared_ptr<const std::vector<Bytes>> face_masks;

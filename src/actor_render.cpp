@@ -1,4 +1,5 @@
 #include "actor.hpp"
+#include "ninja_matrix.hpp"
 // Adapted from MIT recvx-decomp MdlPut.c::bhCalcTree and
 // njplus.c::npSkinConvPreparation/npSkinConvSub/npInitCalcSkin/npCalcSkin.
 #include <cmath>
@@ -305,27 +306,30 @@ ActorModelWork calculate_actor_model_work(const ActorModel &actor,
   if (work.joints.empty())
     work.joints.resize(skeleton.count);
   const auto selected = work_count(work, skeleton.count);
+  auto base = detail::ninja_identity();
   if (placement.flags & 0x80) {
     if (!placement.parent_joint)
       throw std::runtime_error(
           "Linked actor model work requires parent matrix");
     validate_matrix(*placement.parent_joint);
-    work.base_matrix = multiply(*placement.parent_joint,
-                                placement_matrix(placement.linked_offset, {}));
+    base = detail::ninja_load(*placement.parent_joint);
+    detail::ninja_translate(base, placement.linked_offset);
     if (placement.flags & 0x1000)
       for (size_t row = 0; row < 3; ++row)
         for (size_t column = 0; column < 3; ++column)
-          work.base_matrix[row * 4 + column] = row == column ? 1 : 0;
-    for (int axis : {2, 1, 0})
-      work.base_matrix =
-          multiply(work.base_matrix, rotate(axis, placement.angles[axis]));
-  } else if (!(placement.flags & 0x1000))
-    work.base_matrix = placement_matrix(placement.position, placement.angles);
+          base[row * 4 + column] = row == column ? 1 : 0;
+    detail::ninja_rotate(base, placement.angles);
+  } else if (!(placement.flags & 0x1000)) {
+    detail::ninja_translate(base, placement.position);
+    detail::ninja_rotate(base, placement.angles);
+  } else
+    base = detail::ninja_load(work.base_matrix);
+  work.base_matrix = detail::ninja_store(base);
   validate_matrix(work.base_matrix);
   Reader r{actor.model};
-  auto current = work.base_matrix;
+  auto current = base;
   // The final leaf restores the caller's matrix, which is unused afterward.
-  std::vector<Matrix> stack{current};
+  std::vector<detail::NinjaMatrix> stack{current};
   for (size_t i = work.first_joint; i < work.first_joint + selected; ++i) {
     const size_t o = skeleton.table + i * 52;
     if (r.u32(o + 48) != 0xffffffff)
@@ -337,12 +341,11 @@ ActorModelWork calculate_actor_model_work(const ActorModel &actor,
       p = pose[i].position.value_or(p);
       angles = pose[i].angles.value_or(std::array<int32_t, 3>{});
     }
-    current = multiply(current,
-                       placement_matrix(p, {angles[0], angles[1], angles[2]}));
+    detail::ninja_translate(current, p);
+    detail::ninja_rotate(current, angles);
     if (work.joints[i].flags & 1)
-      current = work.joints[i].matrix;
-    validate_matrix(current);
-    work.joints[i].matrix = current;
+      current = detail::ninja_load(work.joints[i].matrix);
+    work.joints[i].matrix = detail::ninja_store(current);
     if (r.u32(o + 44) == 0xffffffff) {
       if (stack.empty())
         throw std::runtime_error(
