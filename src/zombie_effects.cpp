@@ -41,21 +41,27 @@ float cached_float(double value) {
     throw std::runtime_error("Effect cached coordinate outside float range");
   return float(value);
 }
-const ModelMatrix &joint(const ScenarioState &s, size_t work, int index) {
+size_t texture_owner(const ScenarioState &s, size_t work) {
   const size_t owner = s.enemies[work].pose_owner.value_or(work);
   if (owner >= s.enemies.size() || !(s.enemies[owner].flags & 1) ||
       (owner != work && s.enemies[owner].pose_owner) ||
-      !s.enemies[owner].model_work || index < 0 ||
-      size_t(index) >= s.enemies[owner].model_work->joints.size())
+      !s.enemies[owner].model_work)
+    throw std::runtime_error("Missing effect model/texture owner");
+  return owner;
+}
+const ModelMatrix &joint(const ScenarioState &s, size_t work, int index) {
+  const size_t owner = texture_owner(s, work);
+  if (index < 0 || size_t(index) >= s.enemies[owner].model_work->joints.size())
     throw std::runtime_error("Missing cached effect joint");
   return s.enemies[owner].model_work->joints[index].matrix;
 }
-void table_effect(NativeEffectPool &pool, std::optional<size_t> parent,
-                  int joint_index, Vec3 offset = {}) {
+std::optional<size_t> table_effect(NativeEffectPool &pool,
+                                   std::optional<size_t> parent,
+                                   int joint_index, Vec3 offset = {}) {
   size_t cursor = 0;
   const auto slot = allocate(pool, cursor);
   if (!slot)
-    return; // Source exhaustion does not consume initializer values.
+    return {}; // Source exhaustion does not consume initializer values.
   auto &w = pool.works[*slot];
   const auto &ef = pool.scratch;
   w.flags = ef.flags;
@@ -74,6 +80,54 @@ void table_effect(NativeEffectPool &pool, std::optional<size_t> parent,
   w.linked_joint = joint_index;
   if (parent)
     w.flags |= 0x80;
+  return slot;
+}
+int texture_id(uint8_t model, int base) {
+  switch (model) {
+  case 2:
+  case 3:
+  case 9:
+  case 10:
+  case 32:
+  case 33:
+  case 39:
+  case 43:
+    return base;
+  case 4:
+  case 21:
+  case 34:
+    return base + 1;
+  case 7:
+  case 8:
+  case 31:
+  case 37:
+  case 38:
+  case 42:
+    return base + 2;
+  case 0:
+  case 1:
+  case 5:
+  case 6:
+  case 22:
+  case 35:
+  case 36:
+    return base + 3;
+  case 40:
+    return base + 4;
+  default:
+    return base + 5;
+  }
+}
+void model_texture_effect(NativeEffectPool &pool, const ScenarioState &s,
+                          size_t work, std::optional<size_t> slot, int texture,
+                          Vec3 direction) {
+  if (!slot)
+    return;
+  auto &w = pool.works[*slot];
+  w.texture_owner = texture_owner(s, work);
+  w.state_flags |= 0x20;
+  w.texture_id = texture;
+  w.direction = finite(direction);
 }
 void ring(NativeEffectPool &pool, const ScenarioState &s, size_t work,
           int size) {
@@ -228,5 +282,64 @@ void tick_zombie_water_effect(ScenarioState &s, size_t work, int32_t frame) {
 }
 ZombieMotionEffects native_zombie_motion_effects() {
   return {tick_zombie_kami_effect, tick_zombie_water_effect};
+}
+void tick_zombie_neck_blood_effect(ScenarioState &s, size_t work, int type) {
+  // Source nonzero types do not consume any work or template fields.
+  if (type != 0)
+    return;
+  const auto &e = enemy_work(s, work);
+  auto pool = stage(s);
+  for (int i = 0; i < 4; ++i) {
+    const auto yaw = ninja_sin_cos(uint16_t(8192 + i * 16384));
+    for (int angle : {10240, 4096}) {
+      const bool upper = angle == 10240;
+      const auto elevation = ninja_sin_cos(uint16_t(angle));
+      const Vec3 direction = {-yaw[0] * elevation[1], elevation[0],
+                              -yaw[1] * elevation[1]};
+      auto &ef = pool->scratch;
+      ef.id = 370;
+      ef.flags = 1;
+      ef.type = upper ? 1 : 3;
+      ef.scale = {3.5f, 3.5f, 0};
+      ef.position = {};
+      const auto slot = table_effect(*pool, work, 10);
+      model_texture_effect(*pool, s, work, slot, texture_id(e.model_version, 6),
+                           direction);
+      if (slot) {
+        pool->works[*slot].control0 = i;
+        pool->works[*slot].control1 = upper ? 6 : 3;
+      }
+    }
+  }
+  s.effect_pool = std::move(pool);
+}
+void tick_zombie_head_fragment_effect(ScenarioState &s, size_t work, int) {
+  const auto &e = enemy_work(s, work);
+  const auto point =
+      detail::ninja_point(detail::ninja_load(joint(s, work, 10)), {0, .5f, -1});
+  auto pool = stage(s);
+  auto seed = s.random_seed;
+  for (int i = 0; i < 4; ++i) {
+    const auto yaw = ninja_sin_cos(
+        uint16_t(uint32_t(e.angles[1]) + 8192u + uint32_t(i) * 16384u));
+    const auto elevation = ninja_sin_cos(4096);
+    const Vec3 direction = {-yaw[0] * elevation[1], elevation[0],
+                            -yaw[1] * elevation[1]};
+    auto &ef = pool->scratch;
+    ef.flags = 1;
+    ef.id = 362;
+    ef.type = 0;
+    ef.position = point;
+    // USA rand's wrapped LCG; source consumes it before allocation.
+    seed = seed * 1103515245u + 12345u;
+    const int32_t roll = int32_t(seed & 0x7fffffffu);
+    ef.scale = {2.f + float(-roll) / -2.1474836E9f, 0, 0};
+    ef.scale.y = ef.scale.x;
+    const auto slot = table_effect(*pool, {}, 0);
+    model_texture_effect(*pool, s, work, slot, texture_id(e.model_version, 5),
+                         direction);
+  }
+  s.effect_pool = std::move(pool);
+  s.random_seed = seed;
 }
 } // namespace ashford

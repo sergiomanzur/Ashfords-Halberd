@@ -900,3 +900,32 @@ full build hit the recurring permission-denied recovery scratch-folder rename;
 an independent core check and full rerun pass, with both results preserved.
 The responsible process is unverified; controlled sharing-lock recovery
 coverage and bounded handling are the next foundation correction. Step1 active.
+
+The Windows asset-cache sharing correction is now verified and committed:
+controlled transient/persistent directory-lock tests,57/57checks,205rooms,
+native real ISO import/reimport and fresh packaged headless smoke pass.
+
+Native en01.c::NeckBloodEffect and ExpHeadEffect now create complete original
+birth state through the existing512-slot effect pool. Blood emits eight joint10
+links with original directions, types, counts and texture remapping. Fragments
+transform the original cached joint10 point and consume four source random
+scale rolls before allocation, even when the pool is full. Template retention,
+first-free allocation and reserved slots match the existing source services.
+Model-texture ownership follows the shared cache separately from effect linkage.
+Pool and RNG commit after validation; source model assets and caches stay intact.
+
+Focused source tests cover all256model versions, source asymmetric sine-table
+directions, translated/rotated joints, full/partial allocation, unused context,
+shared ownership and malformed consumed-cache rollback. Original graveyard
+probes cover ten root/body pairs and240births. These are creation callbacks;
+particle playback/drawing and NG02 timing/head-cut state remain separate work.
+Complete encounter routing/combat, decoded audio, inventory and versioned saves
+are still required for Step1; New Game remains disabled.
+
+Final head-effect verification:58/58headless checks,205original rooms,
+ten root/body birth probes/240effects and all prior grab/corridor checks pass.
+Fresh packaged dummy-SDL smoke passes241ticks/240renders/53moves/
+10focus-blocked ticks/main-menu return/INI creation. EXE/ZIP refreshed.
+Source review found no material defects. Deferred Minor: the effect file's
+older header says birth consumes no RNG; fragment creation correctly consumes
+four rolls, explicitly preserved by its local source comment and these tests.

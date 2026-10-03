@@ -67,6 +67,11 @@ struct ZombieMotionEffects {
 };
 void tick_zombie_kami_effect(ScenarioState &state, size_t work, int32_t frame);
 void tick_zombie_water_effect(ScenarioState &state, size_t work, int32_t frame);
+// Complete source NeckBloodEffect/ExpHeadEffect births used by NG02.
+// Particle updates and drawing remain separate source callbacks.
+void tick_zombie_neck_blood_effect(ScenarioState &state, size_t work, int type);
+void tick_zombie_head_fragment_effect(ScenarioState &state, size_t work,
+                                      int type);
 ZombieMotionEffects native_zombie_motion_effects();
 int tick_zombie_motion(ScenarioState &state, size_t work,
                        const ZombieMotionEffects &effects = {},

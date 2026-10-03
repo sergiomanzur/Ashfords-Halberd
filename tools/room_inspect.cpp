@@ -145,6 +145,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_model_ticks=0,zombie_cache_draws=0,zombie_cache_changed_draws=0;
         size_t zombie_mouth_draws=0,zombie_mouth_changed_draws=0;
         size_t zombie_blood_birth_probes=0,zombie_water_birth_probes=0;
+        size_t zombie_head_birth_probes=0,zombie_head_birth_works=0;
         size_t zombie_close_pursuit_ticks=0,zombie_walk_phase_boundaries=0;
         size_t zombie_lunge_ticks=0,zombie_capture_probes=0;
         size_t player_grab_ticks=0,player_grab_samples=0,player_grab_releases=0,player_grab_deaths=0;
@@ -1206,6 +1207,58 @@ int wmain(int argc,wchar_t** argv) {
                                         if(bitten.model_work->joints[joint].matrix!=cached.joints[joint].matrix)
                                             throw std::runtime_error("Retail blood birth changed cached model");
                                     ++zombie_blood_birth_probes;
+                                    auto heads=initialized;
+                                    std::vector<size_t> head_sources{root};
+                                    if(heads.enemies[root].zombie_work->body)
+                                        head_sources.push_back(*heads.enemies[root].zombie_work->body);
+                                    auto head_rng=initialized;
+                                    size_t head_slot=0;
+                                    for(const auto source:head_sources) {
+                                        const auto& actor=heads.enemies[source];
+                                        const auto owner=actor.pose_owner.value_or(source);
+                                        const auto point=detail::ninja_point(detail::ninja_load(
+                                            heads.enemies[owner].model_work->joints.at(10).matrix),{0,.5f,-1});
+                                        const auto seed_before=heads.random_seed;
+                                        tick_zombie_neck_blood_effect(heads,source,0);
+                                        if(heads.random_seed!=seed_before)
+                                            throw std::runtime_error("Retail neck blood consumed RNG");
+                                        for(size_t i=0;i<8;++i) {
+                                            const auto& effect=heads.effect_pool->works.at(head_slot+i);
+                                            if(effect.flags!=0x81 || effect.id!=370 || effect.linked_parent!=source ||
+                                               effect.linked_joint!=10 || effect.texture_owner!=owner ||
+                                               effect.state_flags!=0x20 || effect.control0!=int(i/2) ||
+                                               effect.control1!=((i&1)?3:6) || effect.texture_id<6 || effect.texture_id>11)
+                                                throw std::runtime_error("Retail neck blood cached-owner birth mismatch");
+                                        }
+                                        head_slot+=8;
+                                        tick_zombie_head_fragment_effect(heads,source,1);
+                                        for(size_t i=0;i<4;++i) {
+                                            const auto roll=scenario_random(head_rng);
+                                            const float scale=2.f+float(-int32_t(roll))/-2.1474836E9f;
+                                            const auto& effect=heads.effect_pool->works.at(head_slot+i);
+                                            if(effect.flags!=1 || effect.id!=362 || effect.type!=0 || effect.linked_parent ||
+                                               effect.texture_owner!=owner || effect.state_flags!=0x20 ||
+                                               effect.texture_id<5 || effect.texture_id>10 ||
+                                               effect.position.x!=point.x || effect.position.y!=point.y || effect.position.z!=point.z ||
+                                               effect.scale.x!=scale || effect.scale.y!=scale || effect.scale.z!=0 ||
+                                               !std::isfinite(effect.direction.x+effect.direction.y+effect.direction.z))
+                                                throw std::runtime_error("Retail head fragment original joint/RNG birth mismatch");
+                                        }
+                                        head_slot+=4;
+                                        if(heads.random_seed!=head_rng.random_seed ||
+                                           heads.enemies[owner].model->model!=initialized.enemies[owner].model->model ||
+                                           actor.damage_velocity.x!=initialized.enemies[source].damage_velocity.x)
+                                            throw std::runtime_error("Retail head births changed assets or RNG order");
+                                        const auto& before=*initialized.enemies[owner].model_work;
+                                        for(size_t j=0;j<before.joints.size();++j)
+                                            if(heads.enemies[owner].model_work->joints[j].matrix!=before.joints[j].matrix)
+                                                throw std::runtime_error("Retail head births changed original cached matrices");
+                                    }
+                                    size_t head_active=0;
+                                    for(const auto& effect:heads.effect_pool->works)head_active+=bool(effect.flags&1);
+                                    if(head_active!=head_slot)
+                                        throw std::runtime_error("Retail head birth allocation count mismatch");
+                                    ++zombie_head_birth_probes;zombie_head_birth_works+=head_slot;
                                     auto water=initialized;
                                     auto& wet=water.enemies[root];
                                     wet.motion_number=33;wet.state_flags|=0x100000;
@@ -1745,6 +1798,11 @@ int wmain(int argc,wchar_t** argv) {
                     throw std::runtime_error("Retail native effect birth coverage mismatch");
                 std::cout<<"Verified "<<zombie_blood_birth_probes<<" blood/particle and "<<zombie_water_birth_probes
                          <<" duplicate step birth probes using original cached models and room ground/water\n";
+                if(zombie_head_birth_probes!=zombie_brain_roots ||
+                   zombie_head_birth_works!=zombie_brain_roots*24)
+                    throw std::runtime_error("Retail standing-grab head birth coverage mismatch");
+                std::cout<<"Verified "<<zombie_head_birth_probes<<" standing-grab neck blood/head fragment probes and "
+                         <<zombie_head_birth_works<<" births using original root/body cached joints and texture owners\n";
                 if(zombie_close_pursuit_ticks!=zombie_brain_roots*18 || zombie_walk_phase_boundaries!=zombie_brain_roots)
                     throw std::runtime_error("Retail close-pursuit source state coverage mismatch");
                 std::cout<<"Applied "<<zombie_close_pursuit_ticks<<" isolated source close-pursuit states and "
