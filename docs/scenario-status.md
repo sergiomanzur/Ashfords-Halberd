@@ -872,3 +872,31 @@ Final corrected verification:56/56headless checks,205retail rooms,
 and all previous joined bite/escape/fatal/corridor probes pass. Fresh packaged
 dummy-SDL smoke passes241ticks/240renders/53moves/10focus-blocked ticks,
 main-menu return and INI creation. Executable/ZIP refreshed; Step1 stays active.
+
+Native en01.c::NG01 now implements complete failed-grab recovery states0..4:
+7/207 startup at authored frame16 with retained same-motion counters,
+frames18..30 recoil using original double constants, Zulzul/Gakeoti wall/cliff
+checks, 12/212 frame7 ordinary recovery, frame20 sound requests, five-step
+correction, paired walking stop or authored cliff death. It preserves NG01's
+flags and avoids adding NG00 cap-flight/Z100/flag40 side effects. Small scalar
+Work staging shares the existing native wall/cliff services; late invalid
+context rolls back root/body, sound queues and RNG.
+
+Original graveyard dependency probes advance both animation works and source
+caches through complete NG01, accepting the original ordinary, wall or cliff
+branches selected by the actual room data. The source root/Nage dispatcher
+remains a separate caller dependency. NG02/head cutting/effects, PlayerLink,
+complete combat, decoded audio, inventory and versioned cross-room saves
+remain pending; New Game stays disabled and Step1 remains in progress.
+
+Final NG01 verification:57/57headless checks;205original rooms;436failed-grab
+states,852paired original motion/cache samples and10recoveries (no retail
+cliff deaths). All previous bite/escape/fatal/standing/corridor probes retained.
+Fresh packaged dummy-SDL smoke passes241ticks/240renders/53moves/
+10focus-blocked ticks/main-menu return/INI creation; executable/ZIP refreshed.
+Source review found no Critical/Important defects. Deferred Minor coverage:
+consumed missing motion-bank rollback after staged motions or sound. The first
+full build hit the recurring permission-denied recovery scratch-folder rename;
+an independent core check and full rerun pass, with both results preserved.
+The responsible process is unverified; controlled sharing-lock recovery
+coverage and bounded handling are the next foundation correction. Step1 active.

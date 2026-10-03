@@ -151,6 +151,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_grab_ticks=0,zombie_grab_bites=0,zombie_grab_escapes=0,zombie_grab_fatals=0;
         size_t zombie_grab_player_samples=0,zombie_grab_enemy_samples=0;
         size_t standing_grab_ticks=0,standing_grab_samples=0,standing_grab_releases=0;
+        size_t failed_grab_ticks=0,failed_grab_samples=0,failed_grab_recoveries=0,failed_grab_falls=0;
         size_t zombie_motion_sound_requests=0, zombie_motion_vibration_requests=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
@@ -865,6 +866,50 @@ int wmain(int argc,wchar_t** argv) {
                                        tracker.geometry.capsule_radius!=2)
                                         throw std::runtime_error("Retail terminal collision cache invalid");
                                     ++zombie_walk_phase_boundaries;
+                                    // Complete NG01 with actual room walls and original paired clips.
+                                    // Root/Nage routing remains separate from this callback probe.
+                                    auto failed_grab=initialized;
+                                    auto& recoiling=failed_grab.enemies[root];
+                                    recoiling.modes={2,0,1,0};
+                                    bool saw_recovery=false,failed_grab_finished=false;
+                                    for(size_t tick=0;tick<240;++tick) {
+                                        tick_zombie_failed_grab(failed_grab,root);++failed_grab_ticks;
+                                        if(!tick && (recoiling.motion_number!=7 ||
+                                           failed_grab.enemies[body].motion_number!=207 ||
+                                           recoiling.frame!=16*65536 ||
+                                           failed_grab.enemies[body].frame!=16*65536))
+                                            throw std::runtime_error("Retail NG01 paired frame16 startup mismatch");
+                                        uint32_t paired=0;
+                                        if(recoiling.motion_number==12)paired=212;
+                                        else if(recoiling.motion_number==50)paired=250;
+                                        else if(recoiling.motion_number==124)paired=324;
+                                        if(paired) {
+                                            saw_recovery=true;
+                                            if(failed_grab.enemies[body].motion_number!=paired)
+                                                throw std::runtime_error("Retail NG01 paired recovery motion mismatch");
+                                        }
+                                        const bool fell=recoiling.modes==std::array<uint8_t,4>{4,0,3,0};
+                                        const bool recovered=recoiling.modes==std::array<uint8_t,4>{1,0,4,0};
+                                        if(fell || recovered) {
+                                            if(!saw_recovery || recoiling.motion_step ||
+                                               failed_grab.enemies[body].motion_step ||
+                                               failed_grab.enemies[body].modes!=recoiling.modes ||
+                                               (fell?recoiling.health!=-1:!(recoiling.zombie_flags&0x40000)))
+                                                throw std::runtime_error("Retail NG01 complete recovery/fall cleanup mismatch");
+                                            if(fell)++failed_grab_falls;else ++failed_grab_recoveries;
+                                            failed_grab_finished=true;break;
+                                        }
+                                        tick_zombie_motion(failed_grab,root,boundary_effects);
+                                        calculate_zombie_model(failed_grab,root);
+                                        tick_zombie_motion(failed_grab,body,boundary_effects);
+                                        calculate_zombie_model(failed_grab,body);failed_grab_samples+=2;
+                                        for(const auto& joint:recoiling.model_work->joints)
+                                            for(double value:joint.matrix)
+                                                if(!std::isfinite(value))
+                                                    throw std::runtime_error("Retail NG01 original paired cache is nonfinite");
+                                    }
+                                    if(!failed_grab_finished)
+                                        throw std::runtime_error("Retail NG01 failed to finish original recovery sequence");
                                     auto lunging=initialized;
                                     auto& lunging_root=lunging.enemies[root];
                                     lunging_root.modes={1,0,5,0};
@@ -1728,6 +1773,12 @@ int wmain(int argc,wchar_t** argv) {
                 std::cout<<"Advanced "<<standing_grab_ticks<<" standing player grab states and "
                          <<standing_grab_samples<<" original Claire motion samples; "
                          <<standing_grab_releases<<" cached-root/base42 releases across both facings and startup paths\n";
+                if(failed_grab_recoveries+failed_grab_falls!=zombie_brain_roots ||
+                   failed_grab_samples<zombie_brain_roots*2 || failed_grab_ticks<=zombie_brain_roots)
+                    throw std::runtime_error("Retail NG01 failed-grab coverage mismatch");
+                std::cout<<"Advanced "<<failed_grab_ticks<<" native failed-grab states and "
+                         <<failed_grab_samples<<" paired original motion/cache samples; "
+                         <<failed_grab_recoveries<<" recoveries and "<<failed_grab_falls<<" cliff deaths\n";
                 if(zombie_model_ticks!=zombie_set_motion_ticks || zombie_cache_draws!=zombie_brain_roots*3 ||
                    zombie_cache_changed_draws!=zombie_brain_roots*2)
                     throw std::runtime_error("Retail CalcEnemy/cache drawing coverage mismatch");

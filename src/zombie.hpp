@@ -102,6 +102,10 @@ void push_zombie_grab_neighbors(ScenarioState &state, size_t work,
 // Caller runs player control, motion sampling and cached model updates after.
 void tick_zombie_grab(ScenarioState &state, size_t work, ScenarioEntity &player,
                       const std::vector<int32_t> &playing = {});
+// Complete en01.c::NG01 failed-grab recoil, wall/cliff recovery and paired
+// stop.
+void tick_zombie_failed_grab(ScenarioState &state, size_t work,
+                             const std::vector<int32_t> &playing = {});
 void tick_zombie_neck(ScenarioState &state, size_t work,
                       const ActorModelWork &player);
 } // namespace ashford

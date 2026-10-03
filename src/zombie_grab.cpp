@@ -5,7 +5,7 @@
 #include "zombie.hpp"
 #include <cmath>
 #include <stdexcept>
-// Native adaptation of MIT recvx-decomp en01.c::NG00/ZulzulCheck/
+// Native adaptation of MIT recvx-decomp en01.c::NG00/NG01/ZulzulCheck/
 // GakeotiCheck/FlyingCap and zonzon.c::LeverCheck/AngleCheck.
 namespace ashford {
 namespace {
@@ -413,6 +413,147 @@ void tick_zombie_grab(ScenarioState &s, size_t work, ScenarioEntity &player,
   player.health = player_health;
   player.state_flags = player_state;
   player.control1 = player_timer;
+  s.random_seed = seed;
+  if (sound)
+    s.pending_enemy_sounds.push_back(*sound);
+}
+void tick_zombie_failed_grab(ScenarioState &s, size_t work,
+                             const std::vector<int32_t> &playing) {
+  const auto &original = root(s, work);
+  Work e(original);
+  std::optional<size_t> body;
+  std::optional<Work> linked;
+  auto link = [&] {
+    if (linked || !original.zombie_work->body)
+      return;
+    body = original.zombie_work->body;
+    if (*body == work)
+      throw std::runtime_error("Failed-grab body aliases root");
+    linked.emplace(root(s, *body));
+  };
+  auto change = [&](uint32_t main, uint32_t paired, int32_t frame,
+                    int32_t blend) {
+    detail::change(e.motion, main, frame, blend);
+    e.zflags &= ~0x3000000u;
+    link();
+    if (linked) {
+      detail::change(linked->motion, paired, frame, blend);
+      linked->zflags &= ~0x3000000u;
+    }
+  };
+  auto last_frame = [&] {
+    if (!original.motions ||
+        e.motion.motion_number >= original.motions->size() ||
+        !original.motions->at(e.motion.motion_number) ||
+        !original.motions->at(e.motion.motion_number)->frames)
+      throw std::runtime_error("Missing failed-grab authored frame count");
+    return int64_t(e.motion.frame / 65536) ==
+           int64_t(original.motions->at(e.motion.motion_number)->frames) - 1;
+  };
+  auto low_flags = [&](uint32_t flags) {
+    e.zflags = (e.zflags & ~0xfu) | flags;
+  };
+  auto correction = [&] {
+    if (e.timer) {
+      if (e.timer < 5)
+        e.yaw = add(e.yaw, e.turn);
+      e.position.x = finite(e.position.x + finite(e.anchor.x) / 5.f);
+      e.position.z = finite(e.position.z + finite(e.anchor.z) / 5.f);
+      e.timer = add(e.timer, -1);
+    }
+  };
+  auto stop = [&](std::array<uint8_t, 4> modes) {
+    e.motion.motion_step = 0;
+    e.modes = modes;
+    link();
+    if (linked) {
+      linked->motion.motion_step = 0;
+      linked->modes = modes;
+    }
+  };
+  auto seed = s.random_seed;
+  std::optional<EnemySoundRequest> sound;
+  switch (e.modes[3]) {
+  case 0:
+    change(7, 207, 16 * 65536, 5);
+    e.motion.flags |= 0x40000;
+    low_flags(6);
+    e.timer = 0;
+    ++e.modes[3];
+    [[fallthrough]];
+  case 1: {
+    const int32_t frame = e.motion.frame / 65536;
+    if (frame > 17 && frame < 31) {
+      e.speed = finite(float(1.5 - double(e.timer) * .14));
+      if (e.speed < 0)
+        e.speed = .05f;
+      e.position =
+          player_add_speed(e.position, uint16_t(e.yaw), e.speed, 32768);
+      e.timer = add(e.timer, 1);
+    }
+    if (frame > 17 && wall_recoil(s, e, 32768, 4.5f)) {
+      e.timer = 5;
+      e.turn /= e.timer;
+      if (cliff(s, original, e)) {
+        change(124, 324, 0, 2);
+        e.motion.flags &= ~0x20u;
+        low_flags(0);
+        e.modes[3] = 4;
+        break;
+      }
+      change(50, 250, 0, 4);
+      low_flags(3);
+      e.modes[3] = 3;
+      break;
+    }
+    if (last_frame()) {
+      change(12, 212, 7 * 65536, 0);
+      e.motion.flags |= 0x40000;
+      low_flags(6);
+      ++e.modes[3];
+    }
+    break;
+  }
+  case 2:
+    if (e.motion.frame / 65536 == 20 && (original.state_flags & 0x100000)) {
+      if (auto code = choose_zombie_sound(original, seed, 8964, playing))
+        sound = EnemySoundRequest{work, vector(e.position), *code};
+    }
+    if (last_frame()) {
+      low_flags(6);
+      e.zflags |= 0x40000;
+      e.zsecondary |= 0x40;
+      stop({1, 0, 4, 0});
+    }
+    break;
+  case 3:
+    correction();
+    if (last_frame()) {
+      e.zflags &= ~0x200u;
+      e.zflags |= 0x40000;
+      stop({1, 0, 4, 0});
+    }
+    break;
+  case 4:
+    correction();
+    if (e.motion.frame / 65536 >= 5 && e.motion.frame / 65536 < 32) {
+      e.speed = .5f;
+      e.position =
+          player_add_speed(e.position, uint16_t(e.yaw), e.speed, 32768);
+    }
+    if (last_frame()) {
+      e.health = -1;
+      stop({4, 0, 3, 0});
+    }
+    break;
+  default:
+    break;
+  }
+  if (sound)
+    s.pending_enemy_sounds.reserve(s.pending_enemy_sounds.size() + 1);
+  e.commit(s.enemies[work]);
+  if (linked)
+    linked->commit(s.enemies[*body]);
   s.random_seed = seed;
   if (sound)
     s.pending_enemy_sounds.push_back(*sound);
