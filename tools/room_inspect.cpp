@@ -8,6 +8,7 @@
 #include "actor.hpp"
 #include "face_model.hpp"
 #include "face_parameters.hpp"
+#include "face_deformation.hpp"
 #include "runtime.hpp"
 #include "zombie.hpp"
 #include "render.hpp"
@@ -103,21 +104,55 @@ int wmain(int argc,wchar_t** argv) {
                                          <<" mask_bytes="<<actor.model_bank->mask.size()<<'\n';
                                 const auto facial=prepare_face_model(*actor.model,actor.model_bank->mask);
                                 const auto expanded=actor_bind_pose(facial.actor);
-                                const auto facial_scene=pose_actor(facial.actor,expanded,actor.position,uint16_t(actor.angles[1]));
+                                const auto facial_scene=pose_actor_rotated(facial.actor,expanded,actor.position,actor.angles);
                                 if(raw_skin.size()!=27 || expanded.size()!=31 || facial_scene.meshes.empty())
                                     throw std::runtime_error("Graveyard facial preparation differs from selected model");
                                 std::cout<<"Prepared subplayer joints="<<expanded.size()
-                                         <<" meshes="<<facial_scene.meshes.size()<<'\n';
+                                         <<" meshes="<<facial_scene.meshes.size()
+                                         <<" tooth="<<facial.tooth.parent<<" tongue="<<facial.tongue.parent
+                                         <<" eyes="<<(facial.eyes[0]?std::to_string(facial.eyes[0]->parent):"absent")
+                                         <<","<<(facial.eyes[1]?std::to_string(facial.eyes[1]->parent):"absent")<<'\n';
                                 const auto track=decode_face_track(actor.model_bank->mask);
+                                const auto deformation=decode_face_deformation(actor.model_bank->mask,facial);
                                 if(track.empty())throw std::runtime_error("Selected facial model has no shape keys");
                                 const auto first=sample_face_track(track,0);
                                 const auto last=sample_face_track(track,float(track.back().frame));
                                 (void)first;(void)last;
                                 size_t sampled_shapes=0;
+                                size_t deformed_geometry_frames=0;
+                                auto animated=facial;
                                 for(float frame=0;frame<=track.back().frame;frame+=0.5f) {
-                                    (void)sample_face_track(track,frame);
+                                    const auto parameters=sample_face_track(track,frame);
+                                    try {
+                                        deform_face(animated,deformation,parameters);
+                                        const auto pose=actor_bind_pose(animated.actor);
+                                        ActorPlacement placement;
+                                        placement.position=actor.position;placement.angles=actor.angles;
+                                        auto work=calculate_actor_model_work(animated.actor,pose,animated.work,placement);
+                                        const auto meshes=pose_actor_model_work(animated.actor,pose,work);
+                                        if(meshes.meshes.size()!=facial_scene.meshes.size())
+                                            throw std::runtime_error("Facial animation changed visible owner count");
+                                        bool moved=false;
+                                        for(size_t mesh=0;mesh<meshes.meshes.size();++mesh) {
+                                            const auto& current=meshes.meshes[mesh].triangles;
+                                            const auto& original=facial_scene.meshes[mesh].triangles;
+                                            if(current.size()!=original.size())throw std::runtime_error("Facial triangle count changed");
+                                            for(size_t triangle=0;triangle<current.size();++triangle)
+                                                for(size_t corner=0;corner<3;++corner) {
+                                                    const auto a=current[triangle].corners[corner].position;
+                                                    const auto b=original[triangle].corners[corner].position;
+                                                    if(std::abs(a.x-b.x)+std::abs(a.y-b.y)+std::abs(a.z-b.z)>0.0001f)moved=true;
+                                                }
+                                        }
+                                        if(moved)++deformed_geometry_frames;
+                                    } catch(const std::exception& error) {
+                                        throw std::runtime_error("Facial deformation frame "+std::to_string(frame)+
+                                            " eye="+std::to_string(parameters.eye.x)+","+std::to_string(parameters.eye.y)+","+
+                                            std::to_string(parameters.eye.z)+": "+error.what());
+                                    }
                                     ++sampled_shapes;
                                 }
+                                if(!deformed_geometry_frames)throw std::runtime_error("Facial parameters produced no geometric change");
                                 for(const auto& key:track) {
                                     const auto exact=sample_face_track(track,float(key.frame));
                                     if(exact.muscle!=key.parameters.muscle)
@@ -125,7 +160,8 @@ int wmain(int argc,wchar_t** argv) {
                                 }
                                 std::cout<<"Selected facial shape keys="<<track.size()
                                          <<" last_frame="<<track.back().frame
-                                         <<" samples="<<sampled_shapes<<'\n';
+                                         <<" samples="<<sampled_shapes
+                                         <<" deformed_geometry_frames="<<deformed_geometry_frames<<'\n';
                             }
                         }
                         auto linked=bound_enemies;

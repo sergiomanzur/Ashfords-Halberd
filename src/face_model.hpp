@@ -20,6 +20,8 @@ struct PreparedFaceModel {
   FaceGeometry face_geometry, tongue_geometry;
   FacePart tooth, tongue;
   std::array<std::optional<FacePart>, 9> eyes;
+  // Captured during eye wrapping, before jaw alignment; includes XYZ scale.
+  std::array<std::optional<ModelMatrix>, 9> eye_matrices;
   Vec3 jaw_anchor{};
   std::array<int32_t, 2> jaw_angles{}; // Source parent Y and Z angles.
 };

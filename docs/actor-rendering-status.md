@@ -170,8 +170,8 @@ IDs/tables/graphs/vertices, four-object expansion, fractional rotation blending,
 angled jaw anchors, and translated/rotated world placement. The headless retail
 probe prepares room archive entry 2 slot 4 from 27 to 31 joints and draws six
 meshes. This preparation intentionally supports the selected four-added-object
-skin layout. Facial deformation, eye matrices, lip shapes and MASK/controller
-updates still require their own source port before ID 91 runs in gameplay.
+skin layout. Facial deformation and eye matrices are described below. Lip
+shapes and MASK/controller updates remain required before ID 91 runs in gameplay.
 
 Normal facial shape keys now decode from the original MASK variable-table
 layout into native `FaceParameters`. Sampling follows the source unsigned-frame
@@ -179,6 +179,26 @@ selection and first/last clamping. The five interpolation modes preserve
 selective muscle updates, jaw/tongue level scaling and unscaled eye coordinates.
 Cosine interpolation uses the existing Ninja quarter-wave table and its 16383
 reflection, including integer angle truncation. The graveyard MASK has 24
-normal shape keys ending at frame 46. Packed lip keys, deformation, eye matrices
-and controller integration remain pending; normal parameter sampling alone
-does not animate the model.
+normal shape keys ending at frame 46. Packed lip keys and controller integration
+remain pending. These normal parameters feed the deformation path below.
+
+Selected mode-1 facial deformation now decodes native muscle connections and
+weighted jaw/tongue bindings. It resets only the source's designated vertices,
+accumulates muscle contributions in the PS2 assembly's reverse scratch order,
+and applies aligned jaw rotation and translation. Fractional jaw rates scale
+rotation while retaining the full jaw translation. Tongue Z stretch precedes
+its per-rate X/Y rotation. Eye matrices are captured during original wrapping,
+with XYZ scale, before jaw alignment; eye pitch/yaw retain signed 32-bit stores.
+The original selected mode 1 keeps source normals.
+
+Updates stage all model bytes before committing, so malformed parameters or a
+late eye failure cannot commit earlier muscle/jaw writes. Aggregate MASK byte
+extents are checked before native list allocation. Tests verify signed eye
+angles, captured scale, tongue stretch, repeated-frame stability, immutable
+source vertices, world placement and failures with constrained allocation.
+
+The retail probe samples the full 24-key shape track at half-frame intervals,
+deforms and draws each of 93 frames with native persistent model work, and
+checks actual triangle movement. This is the `fmCnkCalcFace` dependency, not
+the complete `bhControlMask` path: scheduler gating, lip data and its specific
+copies/inverted eye angles into the runtime joint table remain to be adapted.

@@ -1,4 +1,5 @@
 #include "face_model.hpp"
+#include "face_math.hpp"
 // Adapted from MIT recvx-decomp face_bh.c fmCnkInitContext/_fmCnkSet*
 // and njplus.c npSkinConvert. Retail input is immutable; offsets replace
 // the original 32-bit pointers in private native-owned model storage.
@@ -52,6 +53,24 @@ struct Node {
   std::array<uint8_t, 52> bytes;
   uint32_t model = none, child = none, sibling = none;
 };
+ModelMatrix eye_matrix(const std::vector<Node> &nodes, uint32_t target) {
+  using namespace face_math;
+  ModelMatrix result{};
+  bool found = false;
+  std::function<void(uint32_t,const ModelMatrix &)> visit =
+      [&](uint32_t i,const ModelMatrix &parent) {
+    if(i==none || found)return;
+    Bytes bytes(nodes[i].bytes.begin(),nodes[i].bytes.end());Reader r{bytes};
+    auto m=multiply(parent,translation(r.vec(8)));
+    for(int axis:{2,1,0}) m=multiply(m,rotation(axis,uint16_t(r.u32(20+axis*4))));
+    m=multiply(m,scaling(r.vec(32)));
+    if(i==target) {result=m;found=true;return;}
+    visit(nodes[i].child,m);visit(nodes[i].sibling,parent);
+  };
+  visit(0,identity());
+  if(!found)throw std::runtime_error("Eye object is unreachable");
+  return result;
+}
 struct Geometry {
   size_t descriptor, vertices, count, end;
 };
@@ -289,8 +308,10 @@ PreparedFaceModel prepare_face_model(const ActorModel &actor,
   out.tongue = wrap(tongue);
   for (size_t i = 0; i < 9; ++i) {
     auto eye = search(mask[0x37 + i]);
-    if (eye != none)
+    if (eye != none) {
       out.eyes[i] = wrap(eye);
+      out.eye_matrices[i] = eye_matrix(nodes, eye);
+    }
   }
   if (nodes.size() != count + 4)
     throw std::runtime_error(
