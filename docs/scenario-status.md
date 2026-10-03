@@ -991,6 +991,23 @@ main-menu return/INI creation. EXE/ZIP refreshed; source review found no issues.
 This verifies the providers; complete PlayerLink and the playable slice remain
 in progress.
 
+Complete native en01.c::CollCheck/CollCheckPush/CollCheckWall now preserves
+linked-body parent selection, original player/pool contacts, forced secondary1,
+push state/facing/mode changes and the source pusher-body mode0 write. All seven
+wall shapes consume the exact current-pose path and prior-cache probes, source
+part dimensions, sequential displacement, line blockage and prior-Y overrides.
+First-match floor shading and incoming-work water flags retain original gates.
+
+Compact contact/scalar staging and copied wall metadata defer root/other/player/
+effect/room mutation until all consumed inputs validate; retained assets, poses
+and caches are read by reference. Player normal contact anchors at EXP0+6c/70/74
+remain distinct from motion anchors at+48/4c/50. Focused4/4 checks and original
+205room scan pass160callbacks/20originalroot-body/140posture0..6/10roots/
+50displacedpositions without changing model/pose/cache/RNG ownership. These
+complete collision dependencies; ordinary encounter scheduling, armed combat,
+inventory/audio/saves and the complete selected two-room acceptance remain
+unfinished Step1 work. New Game remains disabled.
+
 Stateful native hitchk.c::bhCheckWallEx and zonzon.c::CollisionCheckWall2 now
 consume static and dynamic walls in original order, source step limits, push
 counts/directional masks, attr20000/index stamping, rounded resets, special
@@ -1074,3 +1091,13 @@ Final stair verification:67/67headless checks,205original rooms,3270MV08states/
 10focus-blocked ticks/main-menu return/INI creation. EXE/ZIP refreshed. Fresh
 source review found no defects in this increment; all verification processes
 exited0 before commit. This completes the callback, not the playable slice.
+
+Final zombie frame collision verification:68/68headless checks,205original
+rooms,160callbacks/20original root-body/140posture paths across10roots and
+50displacements. Fresh packaged smoke passes241ticks/240renders/53moves/
+10focus-blocked ticks/main-menu return/INI creation; EXE/ZIP refreshed.
+Source review found no Critical/Important defects. Deferred Minor: add an
+asymmetric pose fixture to strengthen joint-path regression sensitivity.
+Ordinary encounter scheduling, armed combat, inventory, decoded audio,
+versioned saves and actual two-room/reference acceptance remain unfinished.
+New Game remains disabled.

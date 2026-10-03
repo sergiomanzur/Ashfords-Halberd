@@ -107,6 +107,9 @@ void tick_zombie_turn(ScenarioState &state, size_t work,
 // Complete en01.c::MV08 reserved stair traversal and walking handoff.
 void tick_zombie_stairs(ScenarioState &state, size_t work,
                         const ScenarioEntity &player);
+// Complete en01.c frame contact/push/posture wall/floor/water collision.
+void tick_zombie_collision(ScenarioState &state, size_t work,
+                           ScenarioEntity &player);
 // PlayerControl: mode2=0 PlyDG00 states0..8, mode2=1 PlyDG01 states0..5.
 // Clips share the enemy bank; escape restores the player's retained base bank.
 void tick_zombie_player_grab(ScenarioState &state, size_t work,

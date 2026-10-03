@@ -85,6 +85,7 @@ struct ZombiePartExtendedWork {
 struct PlayerExtendedWork {
   uint32_t status_flags = 0; // Player EXP1_I(0), distinct from BH_PWORK flags.
   Vec3 movement_anchor{}; // Player EXP0_F(0x48/0x4c/0x50), separate from EXP1.
+  Vec3 normal_anchor{}; // EXP_WORK nlxb/nlyb/nlzb (0x6c/0x70/0x74).
 };
 struct ScenarioEntity {
   uint32_t flags = 0, state_flags = 0, secondary_flags = 0;

@@ -13,6 +13,7 @@
 #include "runtime.hpp"
 #include "zombie.hpp"
 #include "zombie_stair_probe.hpp"
+#include "zombie_collision_probe.hpp"
 #include "effects.hpp"
 #include "enemy_targeting.hpp"
 #include "enemy_navigation.hpp"
@@ -241,6 +242,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t joined_player_links=0,joined_player_link_corrections=0;
         std::vector<diagnostic::StairProbeSource> stair_probe_sources;
         std::vector<diagnostic::StairProbeActors> stair_probe_actors;
+        std::vector<diagnostic::ZombieCollisionProbeActors> zombie_collision_probe_actors;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
@@ -671,6 +673,7 @@ int wmain(int argc,wchar_t** argv) {
                         zombie_managers+=managers;
                         if(runtime_check) {
                             stair_probe_actors.push_back({initialized,roots});
+                            zombie_collision_probe_actors.push_back({initialized,roots,records.positions.at(0).position});
                             // Isolated native targeting dependencies against actual
                             // cached body/Claire joints, not full root AI frames.
                             auto targeting=initialized;
@@ -2014,6 +2017,7 @@ int wmain(int argc,wchar_t** argv) {
         if(!output) throw std::runtime_error("Could not write room report");
         std::cout<<"Validated "<<entries.size()<<" rooms and "<<scenario_entries<<" scenario entry slots\n";
         if(runtime_check)diagnostic::run_zombie_stair_probes(stair_probe_sources,stair_probe_actors);
+        if(runtime_check)diagnostic::run_zombie_collision_probes(zombie_collision_probe_actors);
         std::cout<<"Decoded "<<lip_clips<<" resident lip clips in "<<lip_rooms
                  <<" rooms with "<<lip_segments<<" validated segments\n";
         if(scenario_check)std::cout<<"Initialized "<<facial_actor_startups
