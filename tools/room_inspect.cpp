@@ -82,6 +82,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_startups=0, zombie_auxiliary_startups=0;
         size_t zombie_startup_links=0, zombie_managers=0;
         size_t zombie_model_work_samples=0, zombie_range_draws=0;
+        size_t zombie_player_contacts=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
         size_t facial_lip_ticks=0, facial_lip_changed_frames=0;
@@ -469,6 +470,28 @@ int wmain(int argc,wchar_t** argv) {
                             throw std::runtime_error("Retail native startup allocation count mismatch");
                         zombie_startup_links+=allocated;
                         zombie_managers+=managers;
+                        for(auto root:roots) {
+                            const auto& zombie=initialized.enemies[root];
+                            ContactBody enemy;
+                            enemy.position=zombie.position;
+                            enemy.offset=zombie.collision_offset;
+                            enemy.flags=zombie.flags;
+                            enemy.state_flags=zombie.state_flags;
+                            enemy.secondary_flags=zombie.secondary_flags;
+                            enemy.radius=zombie.geometry.collision_radius;
+                            enemy.height=zombie.geometry.collision_height;
+                            ContactBody player_contact;
+                            player_contact.flags=8;
+                            player_contact.position=zombie.position;
+                            player_contact.position.z+=1;
+                            player_contact.radius=2.5f;player_contact.height=15.5f;
+                            if(!collide_enemy_player(enemy,player_contact) || !(enemy.state_flags&4) ||
+                               !(player_contact.state_flags&2) ||
+                               std::abs(enemy.position.z-(zombie.position.z-2))>.002f ||
+                               std::abs(player_contact.position.z-(zombie.position.z+3))>.002f)
+                                throw std::runtime_error("Retail native player/zombie contact differs from source");
+                            ++zombie_player_contacts;
+                        }
                         for(auto root:roots) for(bool upper:{false,true}) {
                             const auto& owner=initialized.enemies[root];
                             if(!owner.model_work)throw std::runtime_error("Missing retail zombie model work");
@@ -795,6 +818,7 @@ int wmain(int argc,wchar_t** argv) {
             if(zombie_auxiliary_startups!=zombie_parameters*5+2)
                 throw std::runtime_error("Missing retail zombie auxiliary Init coverage");
             std::cout<<"Initialized "<<zombie_auxiliary_startups<<" native head/arm/leg/manager works in pool order\n";
+            std::cout<<"Verified "<<zombie_player_contacts<<" original player/zombie contacts with initialized retail geometry\n";
             if(zombie_model_work_samples!=zombie_channel_applications || zombie_range_draws!=zombie_parameters*2)
                 throw std::runtime_error("Missing retail zombie model-work coverage");
             std::cout<<"Verified "<<zombie_model_work_samples<<" linear model-work samples and "<<zombie_range_draws<<" frozen prefix/suffix drawing ranges\n";

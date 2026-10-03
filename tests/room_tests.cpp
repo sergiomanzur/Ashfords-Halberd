@@ -208,6 +208,30 @@ int main() {
        running.world.player.sampled_frame == 0 &&
        !running.world.player.entering &&
        running.scenario.player_frame == running.world.player.frame);
+    auto touching = running;
+    touching.scenario.flags[6][0] &= ~2u; // Isolate the original player contact pass.
+    auto &obstacle = touching.scenario.enemies[0];
+    obstacle.flags = 0x49;
+    obstacle.state_flags = 0;
+    obstacle.secondary_flags = 1;
+    obstacle.geometry.collision_radius = 2.5f;
+    obstacle.geometry.collision_height = 10;
+    obstacle.position = touching.world.player.position;
+    obstacle.position.x -= 2;
+    obstacle.position.z += 1;
+    obstacle.collision_offset.x = 2;
+    const auto before_contact = touching.world.player.position;
+    tick_room_runtime(touching, entry_player, entry_tables, 0);
+    ck(std::abs(touching.world.player.position.z - (before_contact.z - 4)) < .002f &&
+       obstacle.state_flags == 4 && obstacle.secondary_flags == 1);
+    auto immovable = running;
+    immovable.scenario.flags[6][0] &= ~2u;
+    immovable.scenario.enemies[0] = obstacle;
+    immovable.scenario.enemies[0].state_flags = 0;
+    immovable.scenario.player_secondary_flags = 1;
+    tick_room_runtime(immovable, entry_player, entry_tables, 0);
+    ck(immovable.world.player.position.z == before_contact.z &&
+       immovable.scenario.enemies[0].state_flags == 0);
     auto frozen = running.world.player.frame;
     running.scenario.flags[6][0] &= ~1u;
     tick_room_runtime(running, entry_player, entry_tables, 0);

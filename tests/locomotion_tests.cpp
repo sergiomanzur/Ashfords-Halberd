@@ -215,6 +215,22 @@ int main() {
                                    {first, second}, 1);
     ck(std::fabs(world.player.position.z + 3.5f) < .001f &&
        std::fabs(world.front_anchor.z + 5.5f) < .001f);
+    // Removing the pre-wall contact call must fail displacement and flags.
+    ActorContacts contacts;
+    contacts.player.flags=8;
+    contacts.player.radius=2.5f;contacts.player.height=15.5f;
+    ContactBody enemy;
+    enemy.flags=0x49;enemy.radius=2;enemy.height=10;enemy.position.z=1;
+    contacts.enemies={enemy};
+    world={};room.walls.clear();room.floors.clear();
+    world=advance_player_world(world,package,tables,room,{},0,&contacts);
+    ck(std::abs(world.player.position.z+3.5f)<.002f &&
+       world.front_anchor.z==0 && contacts.enemies[0].state_flags==4);
+    ck(std::abs(contacts.player.position.z-world.player.position.z)<.00001f);
+    contacts.enemies={enemy};contacts.player.position={};
+    world={};world.floor=127;
+    bad([&]{advance_player_world(world,package,tables,room,{},0,&contacts);});
+    ck(contacts.enemies[0].state_flags==0 && contacts.player.position.z==0);
     package.motions[0].reset();
     bad([&] { advance_player_locomotion({}, package, tables, 1); });
     std::cout << "Locomotion checks passed\n";

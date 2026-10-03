@@ -240,6 +240,8 @@ game-flag override and final-loop gating. Lip groups shift the source shape
 base by six records. Tooth/tongue X and inverted eye X/Y copy into the runtime
 pose; eye Z remains unchanged. Runtime copies honor the stored model header
 size. Late failures cannot partially commit geometry, pose, counters or flags.
+The actor integration stores the source's `flg2` separately from `stflg`;
+facial idle suppression updates only `flg2`, preserving status flags.
 
 Facial updates precede the selected subplayer callback. Prepared geometry and
 persistent O_WORK supply body motion and rendering; joints 6–14 retain their

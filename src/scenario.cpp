@@ -921,7 +921,7 @@ void tick_scenario_actors(ScenarioState &state) {
     entity.previous_angles = entity.angles;
     if (entity.id == 91 && entity.face)
       tick_face_runtime(*entity.face, entity.joint_pose, entity.id,
-                        entity.state_flags, state.flags[11][0]);
+                        entity.secondary_flags, state.flags[11][0]);
     entity.flags = (entity.flags | 0x8100) & ~2u;
     bool update_motion = true;
     if (!entity.modes[0]) {

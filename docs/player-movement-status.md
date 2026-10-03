@@ -95,3 +95,34 @@ records and reports active shape counts. `--scene` retains full scene validation
 
 Step 1 remains incomplete. These changes provide core primitives and offline
 validation; New Game remains disabled until the playable mode is integrated.
+
+Native actor contacts now adapt `hitchk.c::bhCheckPlayer` and `bhCheckEnemies`.
+Pair response preserves separate primary, status and secondary flags, collision
+offsets, the player's normal-anchor fallback, inclusive vertical overlap and
+strict horizontal overlap. Fixed-player response uses the original truncated
+atan angle and Ninja table; ordinary response splits the separation between
+player and enemy. Coincident ordinary bodies retain a zero direction, as in
+the source VU normalization, while contact status flags still update.
+
+Pool response skips self, inactive/nonphysical/hidden work and linked work with
+a hidden parent. The player-only flag0x40 gate is distinct from enemy-subject
+response. Every candidate is calculated from the original subject position;
+multiple candidates are averaged in original work order. Late malformed data
+cannot partially commit contact positions or flags.
+
+The native player frame now computes the front probe before contacts, applies
+pool contact displacement, then performs the original upper/lower wall passes.
+Contact context commits only after successful wall response. Runtime supplies
+enemy collision dimensions, offsets, flags and parent indices. Claire contact
+dimensions are 2.5/15.5 from `PlyInfo - 1`; wall dimensions remain 3.5/16.5.
+Normal door entry retains the original player primary-flag mask.
+
+Synthetic checks exercise pair/pool gates, offset geometry, height/tangency
+boundaries, coincidence, multiple contacts, hidden parents, alias-safe enemy
+subjects, nonfinite/late-parent rollback, frame ordering and failed wall rollback.
+Angled response checks use literal source-table coordinates and fail if the
+atan angle is rounded. A runtime check verifies the actual enemy flag commit
+and player secondary-flag suppression. The private retail probe verifies ten
+player/zombie contacts using initialized graveyard collision geometry. This
+contact dependency does not yet enable the full zombie movement/damage
+controller or graveyard travel.

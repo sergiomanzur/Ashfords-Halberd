@@ -368,6 +368,11 @@ int main() {
     tick_scenario_actors(loaded);
     ck(loaded.enemies[0].rendered_model && loaded.enemies[0].modes[0] == 1,
        "Bound facial actor failed startup");
+    loaded.enemies[0].state_flags |= 0x20;
+    tick_scenario_actors(loaded);
+    ck(loaded.enemies[0].secondary_flags == 0x80 &&
+           loaded.enemies[0].state_flags == 0x20,
+       "Facial idle control confused flg2 with stflg");
     auto no_mask = loaded;
     bind_room_enemies(room_fixture(raw, false), RoomCollision{}, no_mask);
     ck(!no_mask.enemies[0].face && !(no_mask.enemies[0].model_flags & 0x100) &&

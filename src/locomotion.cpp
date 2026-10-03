@@ -235,7 +235,7 @@ PlayerWorldState advance_player_world(PlayerWorldState s,
                                       const PlayerTranslationTables &tables,
                                       const RoomCollision &room,
                                       const std::vector<RoomCut> &cuts,
-                                      uint16_t pad) {
+                                      uint16_t pad, ActorContacts *contacts) {
   Vec3 previous = s.player.position;
   auto next = advance_player_locomotion(s.player, package, tables, pad);
   float target = next.motion == 0    ? 2.f
@@ -245,6 +245,14 @@ PlayerWorldState advance_player_world(PlayerWorldState s,
   s.front_offset += .5f * (target - s.front_offset);
   Vec3 front = player_add_speed(next.position, next.yaw, s.front_offset);
   front.y = next.position.y + 12.5f;
+  std::optional<ActorContacts> staged_contacts;
+  if (contacts) {
+    staged_contacts = *contacts;
+    staged_contacts->player.position = next.position;
+    if (staged_contacts->player.flags & 8)
+      collide_actor_pool(staged_contacts->player, staged_contacts->enemies);
+    next.position = staged_contacts->player.position;
+  }
   CollisionBody upper;
   upper.position = front;
   upper.floor = s.floor;
@@ -266,6 +274,10 @@ PlayerWorldState advance_player_world(PlayerWorldState s,
       select_camera_cut(cuts, s.cut, next.position.x, next.position.z, s.floor);
   s.wall_hits = upper_result.hits + lower_result.hits;
   s.player = next;
+  if (staged_contacts) {
+    staged_contacts->player.position = next.position;
+    *contacts = std::move(*staged_contacts);
+  }
   return s;
 }
 } // namespace ashford

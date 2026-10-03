@@ -1,5 +1,6 @@
 #pragma once
 #include "actor.hpp"
+#include "actor_contacts.hpp"
 #include "camera.hpp"
 #include "collision.hpp"
 #include "player.hpp"
@@ -45,11 +46,13 @@ struct PlayerWorldState {
   size_t wall_hits = 0;
 };
 // Normal baseline sequence: motion-linked displacement, smoothed front probe,
-// two previous-position collision passes, floor effects and camera selection.
+// optional original actor contacts, two previous-position wall passes, floor
+// effects and camera selection. Contact context commits after wall validation.
 PlayerWorldState advance_player_world(PlayerWorldState state,
                                       const PlayerPackage &package,
                                       const PlayerTranslationTables &tables,
                                       const RoomCollision &room,
                                       const std::vector<RoomCut> &cuts,
-                                      uint16_t pad);
+                                      uint16_t pad,
+                                      ActorContacts *contacts = nullptr);
 } // namespace ashford

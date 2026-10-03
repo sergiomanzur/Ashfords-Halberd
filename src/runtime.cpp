@@ -97,8 +97,29 @@ void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
   if (scenario.flags[6][0] & 1) {
     if (scenario.equipped_weapon != 0)
       throw std::runtime_error("Armed runtime requires its player controller");
-    runtime.world = advance_player_world(runtime.world, player, translations,
-                                         runtime.collision, runtime.cuts, pad);
+    ActorContacts contacts;
+    contacts.player.flags = scenario.player_work_flags;
+    contacts.player.state_flags = scenario.player_state_flags;
+    contacts.player.secondary_flags = scenario.player_secondary_flags;
+    contacts.player.radius = 2.5f;
+    contacts.player.height = scenario.player_id == 0 ? 15.5f : 16.5f;
+    for (const auto &entity : scenario.enemies) {
+      ContactBody body;
+      body.position = entity.position;
+      body.offset = entity.collision_offset;
+      body.radius = entity.geometry.collision_radius;
+      body.height = entity.geometry.collision_height;
+      body.flags = entity.flags;
+      body.state_flags = entity.state_flags;
+      body.secondary_flags = entity.secondary_flags;
+      body.linked_parent = entity.linked_parent;
+      contacts.enemies.push_back(body);
+    }
+    runtime.world =
+        advance_player_world(runtime.world, player, translations,
+                             runtime.collision, runtime.cuts, pad, &contacts);
+    for (size_t slot = 0; slot < scenario.enemies.size(); ++slot)
+      scenario.enemies[slot].state_flags = contacts.enemies[slot].state_flags;
     runtime.player_pose = sample_player_locomotion_pose(
         player, runtime.world.player, runtime.player_pose,
         &scenario.motion_angle_scratch);
@@ -151,6 +172,9 @@ RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
   persistent.floor_index = 0;
   persistent.player_frame = result.world.player.frame;
   persistent.player_state_flags &= 0x78280000;
+  // player.c::bhInitRoomChangePlayer primary collision/movement flags.
+  persistent.player_work_flags =
+      (persistent.player_work_flags & 0x20119) | 0x118;
   persistent.collision = result.collision;
   persistent.interactions = result.collision.miscellaneous;
   bind_room_enemies(data, result.collision, persistent);

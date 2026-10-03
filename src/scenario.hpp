@@ -65,10 +65,11 @@ struct ZombiePartExtendedWork {
   std::vector<uint32_t> words;
 };
 struct ScenarioEntity {
-  uint32_t flags = 0, state_flags = 0;
+  uint32_t flags = 0, state_flags = 0, secondary_flags = 0;
   int32_t angular_speed = 0;
   int32_t health = 0;
   Vec3 position{}, previous_position{};
+  Vec3 collision_offset{};
   std::array<int32_t, 3> angles{}, previous_angles{};
   int8_t floor = 0;
   uint32_t motion_mode = 0, model_flags = 0;
@@ -154,6 +155,7 @@ struct ScenarioState {
   uint16_t selected_item_id = 0;
   uint32_t player_state_flags = 0;
   uint32_t player_work_flags = 0;
+  uint32_t player_secondary_flags = 0;
   uint32_t drawing_flags = 0;
 };
 // Native control and event scheduling subset. Unsupported instructions fail
