@@ -3,6 +3,7 @@
 #include "enemy_targeting.hpp"
 #include "ninja_matrix.hpp"
 #include "zombie.hpp"
+#include "zombie_attack_internal.hpp"
 #include <cmath>
 #include <stdexcept>
 // Native adaptation of MIT recvx-decomp en01.c::MV05/EatCheck and
@@ -126,6 +127,17 @@ bool zombie_capture_check(const ScenarioState &s, size_t work,
                           const ScenarioEntity &player, int32_t cone,
                           float distance, int mode) {
   return eat(s, root(s, work), player, cone, distance, mode);
+}
+bool detail::zombie_capture_yaw(const ScenarioState &s, size_t work,
+                               const ScenarioEntity &player, int32_t yaw,
+                               int32_t cone, float distance, int mode) {
+  const auto &e = root(s, work);
+  ScenarioEntity probe;
+  probe.position = e.position;
+  probe.angles[1] = yaw;
+  probe.zombie_flags = e.zombie_flags;
+  probe.pose_owner = e.pose_owner.value_or(work);
+  return eat(s, probe, player, cone, distance, mode);
 }
 void tick_zombie_lunge(ScenarioState &s, size_t work, ScenarioEntity &player,
                        const std::vector<int32_t> &playing) {

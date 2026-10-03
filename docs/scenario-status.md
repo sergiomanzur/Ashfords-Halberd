@@ -1029,3 +1029,25 @@ creation; EXE/ZIP refreshed. Source review found no material defects. Deferred
 minors: clear effect_flags during room initialization when adding its currently
 unreachable override; add focused late-circle-birth rollback and outer enemy
 correction overflow fixtures. Complete playable slice remains in progress.
+
+Complete native en01.c::MV06 capture retry and MV07 authored turn are now
+available to the future ordinary root dispatcher. Retry preserves49/249,
+45frame/blend15/one RNG roll,910steering and changed-yaw4551/5.5capture gates,
+packed root/body grab states, player flags and lunge fallback. Turn preserves
+127/327, signed ayp division22 and half-turn threshold, paired reverse bit,
+frames17..39yaw increments and exact40return. Same-motion shortcuts and
+unused dependencies retain source behavior. Root/body motion and scalars
+are staged; no model/pose copies or partial late-failure state.
+
+Focused source fixtures pass with existing lunge/capture/displacement checks.
+Original205room scan covers820turn states/1600paired samples/20returns,
+20retry states/10cachedClaire captures/20NG00-PlyDG00 handoff ticks/60paired
+enemy samples/10original407player samples. Previous PlayerLink/grab/corridor
+probes pass. Complete encounter dispatch/combat, inventory, decoded audio and
+versioned saves remain required for Step1; New Game remains disabled.
+
+Final retry/turn verification:66/66headless checks,205original rooms, fresh
+packaged smoke241ticks/240renders/53moves/10focus-blocked ticks/main-menu
+return/INI creation. EXE/ZIP refreshed. Fresh source review found no defects
+in this increment. These checks complete the callbacks and probes; complete
+native playable slice remains in progress.

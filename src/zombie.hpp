@@ -99,6 +99,11 @@ bool zombie_capture_check(const ScenarioState &state, size_t work,
 void tick_zombie_lunge(ScenarioState &state, size_t work,
                        ScenarioEntity &player,
                        const std::vector<int32_t> &playing = {});
+// Complete en01.c::MV06 capture retry and MV07 authored turn callbacks.
+void tick_zombie_capture_retry(ScenarioState &state, size_t work,
+                               ScenarioEntity &player);
+void tick_zombie_turn(ScenarioState &state, size_t work,
+                      const ScenarioEntity &player);
 // PlayerControl: mode2=0 PlyDG00 states0..8, mode2=1 PlyDG01 states0..5.
 // Clips share the enemy bank; escape restores the player's retained base bank.
 void tick_zombie_player_grab(ScenarioState &state, size_t work,

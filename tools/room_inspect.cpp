@@ -221,6 +221,9 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_head_birth_probes=0,zombie_head_birth_works=0;
         size_t zombie_close_pursuit_ticks=0,zombie_walk_phase_boundaries=0;
         size_t zombie_lunge_ticks=0,zombie_capture_probes=0;
+        size_t zombie_retry_ticks=0,zombie_retry_captures=0,zombie_retry_grab_ticks=0;
+        size_t zombie_retry_pair_samples=0,zombie_retry_player_samples=0;
+        size_t zombie_turn_ticks=0,zombie_turn_returns=0,zombie_turn_pair_samples=0;
         size_t player_grab_ticks=0,player_grab_samples=0,player_grab_releases=0,player_grab_deaths=0;
         size_t zombie_grab_ticks=0,zombie_grab_bites=0,zombie_grab_escapes=0,zombie_grab_fatals=0;
         size_t zombie_grab_player_samples=0,zombie_grab_enemy_samples=0;
@@ -1118,8 +1121,94 @@ int wmain(int argc,wchar_t** argv) {
                                             if(account==1)++player_grab_samples;
                                             else if(account==0)++zombie_grab_player_samples;
                                             else if(account==2)++standing_grab_samples;
-                                            else ++ng02_player_samples;
+                                            else if(account==3)++ng02_player_samples;
+                                            else ++zombie_retry_player_samples;
                                         };
+                                        if(!back) {
+                                            // Complete MV07 against original127/327 in both
+                                            // directions; each continuing tick samples the pair.
+                                            for(int direction:{-1,1}) {
+                                                auto turning=initialized;
+                                                auto& spinner=turning.enemies[root];
+                                                spinner.modes={1,0,7,0};spinner.angles[1]=0;
+                                                calculate_zombie_model(turning,root);
+                                                ScenarioEntity target;
+                                                target.position=spinner.position;
+                                                target.position.x+=20.f*direction;
+                                                bool returned=false;
+                                                for(size_t tick=0;tick<80;++tick) {
+                                                    tick_zombie_turn(turning,root,target);++zombie_turn_ticks;
+                                                    if(!tick && (spinner.motion_number!=127 ||
+                                                       turning.enemies[body].motion_number!=327 ||
+                                                       spinner.yaw_correction!=(direction>0?-744:744)))
+                                                        throw std::runtime_error("Retail MV07 original paired turn startup mismatch");
+                                                    if(spinner.modes==std::array<uint8_t,4>{1,1,1,0}) {
+                                                        if(spinner.frame!=40*65536 || spinner.model->model!=raw)
+                                                            throw std::runtime_error("Retail MV07 authored frame40 return mismatch");
+                                                        ++zombie_turn_returns;returned=true;break;
+                                                    }
+                                                    tick_zombie_motion(turning,root,boundary_effects);
+                                                    calculate_zombie_model(turning,root);
+                                                    tick_zombie_motion(turning,body,boundary_effects);
+                                                    calculate_zombie_model(turning,body);zombie_turn_pair_samples+=2;
+                                                }
+                                                if(!returned)
+                                                    throw std::runtime_error("Retail MV07 did not finish original authored turn");
+                                            }
+                                            auto retrying=initialized;
+                                            auto& retry=retrying.enemies[root];
+                                            retry.modes={1,0,6,0};retry.zombie_flags&=~0x20004000u;
+                                            auto retry_player=captured;
+                                            retry_player.flags=5;retry_player.modes={};
+                                            tick_zombie_capture_retry(retrying,root,retry_player);++zombie_retry_ticks;
+                                            if(retry.motion_number!=49 || retrying.enemies[body].motion_number!=249 ||
+                                               retry.frame!=45*65536 || retry.modes[3]!=1)
+                                                throw std::runtime_error("Retail MV06 paired45frame startup mismatch");
+                                            tick_zombie_motion(retrying,root,boundary_effects);
+                                            calculate_zombie_model(retrying,root);
+                                            tick_zombie_motion(retrying,body,boundary_effects);
+                                            calculate_zombie_model(retrying,body);zombie_retry_pair_samples+=2;
+                                            // Position actual Claire joint3 within original chest10
+                                            // range; source capture consumes the prior cached pair.
+                                            retry_player.position=retry.position;retry_player.position.z-=4;
+                                            ActorPlacement retry_placement;
+                                            retry_placement.position=retry_player.position;
+                                            retry_player.model_work=calculate_actor_model_work(player.models.at(0),
+                                                retry_player.joint_pose,{},retry_placement);
+                                            const auto& chest_matrix=retry.model_work->joints.at(10).matrix;
+                                            const auto& player_matrix=retry_player.model_work->joints.at(3).matrix;
+                                            retry_player.position.x+=float(chest_matrix[3])-float(player_matrix[3]);
+                                            retry_player.position.z+=float(chest_matrix[11])-float(player_matrix[11])-1;
+                                            retry.angles[1]=enemy_direction(retry.position,retry_player.position);
+                                            retry_placement.position=retry_player.position;
+                                            retry_player.model_work=calculate_actor_model_work(player.models.at(0),
+                                                retry_player.joint_pose,{},retry_placement);
+                                            retry_player.flags=1;
+                                            tick_zombie_capture_retry(retrying,root,retry_player);++zombie_retry_ticks;
+                                            if(retry.modes!=std::array<uint8_t,4>{2,0,0,0} ||
+                                               retrying.enemies[body].modes!=retry.modes || !(retry_player.flags&0x10004))
+                                                throw std::runtime_error("Retail MV06 original cached Claire capture failed");
+                                            ++zombie_retry_captures;
+                                            // Source NG00 frame0 alignment then frame1 PlyDG00
+                                            // bank/clip handoff: no synthetic player animation.
+                                            for(size_t tick=0;tick<2;++tick) {
+                                                tick_zombie_grab(retrying,root,retry_player);++zombie_retry_grab_ticks;
+                                                tick_zombie_player_grab(retrying,root,retry_player);
+                                                if(tick) {
+                                                    if(retry.motion_number!=8 || retrying.enemies[body].motion_number!=208 ||
+                                                       retry_player.motion_number!=407 || retry_player.motions!=retry.motions ||
+                                                       retry_player.modes!=std::array<uint8_t,4>{4,0,0,1})
+                                                        throw std::runtime_error("Retail MV06 NG00/PlyDG00 original handoff mismatch");
+                                                    sample_player(retrying,retry_player,4);
+                                                }
+                                                tick_zombie_motion(retrying,root,boundary_effects);
+                                                calculate_zombie_model(retrying,root);
+                                                tick_zombie_motion(retrying,body,boundary_effects);
+                                                calculate_zombie_model(retrying,body);zombie_retry_pair_samples+=2;
+                                            }
+                                            if(retry.model->model!=raw)
+                                                throw std::runtime_error("Retail MV06 handoff replaced original model");
+                                        }
                                         // Joined NG02/PlyDG01/PlayerLink source dependencies;
                                         // complete root dispatch remains separate.
                                         for(bool prior15:{false,true}) {
@@ -2019,6 +2108,16 @@ int wmain(int argc,wchar_t** argv) {
                     throw std::runtime_error("Retail native lunge/capture probe count mismatch");
                 std::cout<<"Advanced "<<zombie_lunge_ticks<<" native lunge states with paired motion/cache/effect routing and "
                          <<zombie_capture_probes<<" cached Claire capture/player-state transitions\n";
+                if(zombie_turn_returns!=zombie_brain_roots*2 || zombie_turn_ticks!=zombie_brain_roots*82 ||
+                   zombie_turn_pair_samples!=zombie_brain_roots*160 || zombie_retry_ticks!=zombie_brain_roots*2 ||
+                   zombie_retry_captures!=zombie_brain_roots || zombie_retry_grab_ticks!=zombie_brain_roots*2 ||
+                   zombie_retry_pair_samples!=zombie_brain_roots*6 || zombie_retry_player_samples!=zombie_brain_roots)
+                    throw std::runtime_error("Retail MV06/MV07 complete source probe coverage mismatch");
+                std::cout<<"Advanced "<<zombie_turn_ticks<<" original MV07 states with "<<zombie_turn_pair_samples
+                         <<" paired motion/cache samples and "<<zombie_turn_returns<<" authored frame40 returns\n";
+                std::cout<<"Applied "<<zombie_retry_ticks<<" original MV06 retry states with "<<zombie_retry_captures
+                         <<" cached Claire captures; "<<zombie_retry_grab_ticks<<" NG00/PlyDG00 handoff ticks, "
+                         <<zombie_retry_pair_samples<<" paired enemy samples and "<<zombie_retry_player_samples<<" original player samples\n";
                 if(player_grab_releases!=zombie_brain_roots*2 || player_grab_deaths!=player_grab_releases ||
                    player_grab_samples<player_grab_releases*8 || player_grab_ticks<=player_grab_samples)
                     throw std::runtime_error("Retail player held-grab coverage mismatch");
