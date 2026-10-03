@@ -171,7 +171,8 @@ angled jaw anchors, and translated/rotated world placement. The headless retail
 probe prepares room archive entry 2 slot 4 from 27 to 31 joints and draws six
 meshes. This preparation intentionally supports the selected four-added-object
 skin layout. Facial deformation and eye matrices are described below. Lip
-shapes and MASK/controller updates remain required before ID 91 runs in gameplay.
+playback is described below; MASK/controller updates remain required before ID
+91 runs in gameplay.
 
 Normal facial shape keys now decode from the original MASK variable-table
 layout into native `FaceParameters`. Sampling follows the source unsigned-frame
@@ -179,8 +180,8 @@ selection and first/last clamping. The five interpolation modes preserve
 selective muscle updates, jaw/tongue level scaling and unscaled eye coordinates.
 Cosine interpolation uses the existing Ninja quarter-wave table and its 16383
 reflection, including integer angle truncation. The graveyard MASK has 24
-normal shape keys ending at frame 46. Packed lip keys and controller integration
-remain pending. These normal parameters feed the deformation path below.
+normal shape keys ending at frame 46. These normal parameters feed the
+deformation path below; controller integration remains pending.
 
 Selected mode-1 facial deformation now decodes native muscle connections and
 weighted jaw/tongue bindings. It resets only the source's designated vertices,
@@ -202,3 +203,29 @@ deforms and draws each of 93 frames with native persistent model work, and
 checks actual triangle movement. This is the `fmCnkCalcFace` dependency, not
 the complete `bhControlMask` path: scheduler gating, lip data and its specific
 copies/inverted eye angles into the runtime joint table remain to be adapted.
+
+Native packed lip shape decoding and two-tick playback now adapt
+`fmSetLipSyncParam`, `fmCnkSetParamLip` and `fmCnkSetInterParamLip`.
+164-byte lip records retain signed integer jaw/tongue angle words through
+interpolation; ordinary floating-point shape decoding cannot be reused for
+these words. The decoder ignores the source's unused eye/frame words.
+Playback preserves one segment transition per call, carried ticks, the final
+ten-tick blend window, short-duration level scaling and terminal neutral shape
+zero. It retains eye coordinates and unselected muscles while updating jaw
+and tongue. Normal and lip interpolation share the original Ninja rate lookup.
+
+Bounded clips require a terminating 0xff, valid shape indices and positive
+durations. Updates commit parameters and playback state together only after
+successful evaluation, including a late packed-angle failure. Differences
+outside signed 32-bit range fail explicitly instead of depending on C signed
+overflow. Synthetic tests cover all interpolation modes, odd and short clips,
+neutral termination, signed words, malformed inputs and complete state rollback.
+This dependency is not yet called by the gameplay actor scheduler. Original
+`bhSetRoom` supplies resident lip and external mask pointers through the room's
+motion header. Resident lip decoding now follows its enemy-count-plus-two
+pointer and preserves the length-prefixed clip indices, including empty
+records. It respects the next containing section boundary and bank sentinel.
+The private retail probe loads 617 lip clips in 44 of 205 rooms and validates
+12,042 segments; this checks streams without assuming a particular actor's
+shape bank. Actor binding, six-shape group selection, `bhControlMask` gating
+and runtime joint copies are the next integration work.

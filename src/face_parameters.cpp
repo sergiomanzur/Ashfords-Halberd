@@ -102,17 +102,10 @@ std::vector<FaceKeyframe> decode_face_track(const Bytes &mask) {
     validate_track(track);
   return track;
 }
-FaceParameters interpolate_face_parameters(FaceParameters out,
-                                           const FaceKeyframe &a,
-                                           const FaceKeyframe &b, float t,
-                                           float level, uint32_t mask) {
-  validate(out);
-  validate(a.parameters);
-  validate(b.parameters);
+float face_interpolation_rate(int16_t mode, float t) {
   finite(t);
-  finite(level);
   float rate = t;
-  switch (a.interpolation) {
+  switch (mode) {
   case 1:
     rate = t * t;
     break;
@@ -135,6 +128,17 @@ FaceParameters interpolate_face_parameters(FaceParameters out,
     break;
   }
   finite(rate);
+  return rate;
+}
+FaceParameters interpolate_face_parameters(FaceParameters out,
+                                           const FaceKeyframe &a,
+                                           const FaceKeyframe &b, float t,
+                                           float level, uint32_t mask) {
+  validate(out);
+  validate(a.parameters);
+  validate(b.parameters);
+  finite(level);
+  const float rate = face_interpolation_rate(a.interpolation, t);
   const auto &p = a.parameters, &q = b.parameters;
   auto blend = [&](float first, float second) {
     return first + rate * (second - first);

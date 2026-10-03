@@ -9,6 +9,7 @@
 #include "face_model.hpp"
 #include "face_parameters.hpp"
 #include "face_deformation.hpp"
+#include "face_lipsync.hpp"
 #include "runtime.hpp"
 #include "zombie.hpp"
 #include "render.hpp"
@@ -81,10 +82,20 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_startups=0, zombie_auxiliary_startups=0;
         size_t zombie_startup_links=0, zombie_managers=0;
         size_t zombie_model_work_samples=0, zombie_range_draws=0;
+        size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
                 auto r=room_info(data);
+                const auto resident_lips=decode_room_lip_clips(data);
+                if(!resident_lips.empty())++lip_rooms;
+                for(const auto& clip:resident_lips) {
+                    ++lip_clips;
+                    if(!clip.empty()) {
+                        const auto playback=start_lip_playback(clip,255);
+                        lip_segments+=playback.segments.size();
+                    }
+                }
                 auto collision=decode_room_collision(data);
                 auto records=decode_room_records(data);
                 auto scenario=decode_room_scenario(data);
@@ -666,6 +677,8 @@ int wmain(int argc,wchar_t** argv) {
         output<<text;output.flush();
         if(!output) throw std::runtime_error("Could not write room report");
         std::cout<<"Validated "<<entries.size()<<" rooms and "<<scenario_entries<<" scenario entry slots\n";
+        std::cout<<"Decoded "<<lip_clips<<" resident lip clips in "<<lip_rooms
+                 <<" rooms with "<<lip_segments<<" validated segments\n";
         if(scenario_check) {
             std::cout<<"Decoded "<<prop_models<<" room object/item models, including "<<prop_skins<<" skinned objects\n";
             std::cout<<"Verified "<<zombie_linked_work<<" linked zombie work bindings against graveyard assets\n";
