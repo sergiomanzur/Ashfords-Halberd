@@ -9,6 +9,7 @@
 namespace ashford {
 class RoomScenario;
 struct RoomEntity;
+struct RoomRoutes;
 class ScenarioProgram {
 public:
   size_t size() const { return block_->size() - offset_; }
@@ -57,6 +58,7 @@ struct ZombieExtendedWork {
   std::optional<EnemyShadow> shadow;
   uint32_t material_color = 0;
   uint8_t personality = 0;
+  uint8_t awareness = 0, awareness_timeout = 0; // EXP0_UC(0x28/0x29).
   int32_t left_leg_state = 0, right_leg_state = 0;
   float player_distance =
       0; // EXP0_F(84), updated by the original Move callback.
@@ -147,6 +149,7 @@ struct ScenarioState {
   std::array<EnemyCallbackKind, 100> enemy_callbacks{};
   std::vector<CollisionRecord> interactions;
   std::optional<RoomCollision> collision;
+  std::shared_ptr<const RoomRoutes> routes;
   std::shared_ptr<const std::vector<std::optional<Motion>>> room_motions;
   std::shared_ptr<const std::vector<Bytes>> face_masks;
   std::shared_ptr<const RoomScenario> scenario;

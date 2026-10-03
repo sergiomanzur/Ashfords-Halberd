@@ -21,6 +21,17 @@ struct RoomRecords {
   std::vector<RoomEntity> enemies, objects, items;
 };
 RoomRecords decode_room_records(const Bytes &data);
+struct RoomRoutes {
+  std::vector<CollisionRecord> regions;
+  Bytes next_hops;
+};
+RoomRoutes decode_room_routes(const Bytes &data);
+// rutchk.c: inclusive XYZ region membership ignores ATR flags. A missing
+// source/destination region returns0xff without changing output; same-region
+// copies the destination and returns0xff. Other queries return the next hop.
+uint8_t room_route_id(const RoomRoutes &routes, Vec3 position);
+uint8_t room_route(const RoomRoutes &routes, Vec3 source, Vec3 destination,
+                   Vec3 &output);
 // Original ps2_dvd_image.c::rdx_files ordering. Missing variants are errors,
 // rather than silently loading another room case.
 size_t room_archive_index(uint8_t stage, uint8_t room, uint8_t room_case);

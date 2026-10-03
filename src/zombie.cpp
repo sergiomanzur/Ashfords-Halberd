@@ -32,7 +32,12 @@ uint8_t zombie_personality_index(uint8_t model_version) {
   return 0;
 }
 const ZombiePersonality &zombie_personality(uint8_t model_version) {
-  return personalities[zombie_personality_index(model_version)];
+  return zombie_personality_at(zombie_personality_index(model_version));
+}
+const ZombiePersonality &zombie_personality_at(uint8_t index) {
+  if (index >= sizeof(personalities) / sizeof(*personalities))
+    throw std::runtime_error("Zombie personality outside original table");
+  return personalities[index];
 }
 int32_t roll_zombie_health(ScenarioState &state, uint8_t model_version) {
   static constexpr int32_t health[2][16] = {

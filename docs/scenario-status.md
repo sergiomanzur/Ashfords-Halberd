@@ -424,7 +424,45 @@ authored neck angles and rejection without partial pose changes.
 The private retail targeting diagnostic queries318 authored floor trigger
 centers and ten actual graveyard personality view cones, and exercises640
 isolated root/body neck updates against cached Claire joint5. These are
-controller prerequisites; the full root zombie frame sequence, awareness,
-routing, movement, damage, attacks and player response still require their
+controller prerequisites; the full root zombie frame sequence, Brain routing
+integration, movement, damage, attacks and player response still require their
 original state handling. New Game and graveyard travel remain disabled until
 the real playable slice is ready.
+
+Native `bhEne01_EneSearch` now updates the original packed awareness byte and
+timeout through cached neck joint11, source probeY0, own actor yaw plus signed
+shared neck yaw, and the retained EXP0 personality index. It promotes pending
+view to the latched bit, preserves the31-frame counter cycle, clears the view
+latch at the last failed check and stages only changed scalar fields. Invalid
+consumed context cannot partially update awareness, timer or flags. Startup
+and reinitialization reset the new byte fields with the original extended work.
+
+The unsigned timeout behavior is confirmed against the private USA executable:
+0x17a504 loads an unsigned byte,0x17a508 decrements,0x17a50c stores,0x17a510
+masks0xff and0x17a514 branches on a nonnegative value. The source's negative
+timeout flag-clear branch cannot run. Native awareness preserves this behavior;
+a260-frame loss-of-view regression verifies timer wrap with notice bit0x400
+retained. No signed-timer gameplay change is introduced.
+
+`decode_room_routes` now reads ROM_WORK route regions at0x28, next-hop bytes
+at0x2c and count at0xa8. It preserves bounded36-byte ATR records, finite XYZ
+values and the full count-squared matrix, with at most255 byte-indexed regions.
+Zero-route rooms ignore unused pointers. Native room loading binds an immutable
+route snapshot and replaces it only with successful room load; failed
+transitions retain the prior routes and pending request.
+
+`bhCheckRouteID` uses inclusive XYZ bounds, ignores ATR flags/IDs/floor, and
+selects the first region. `bhCheckRoute` indexes destination rows/source columns,
+copies the destination and returns0xff for a shared region, and preserves
+output when either point has no region. Other valid queries return a next-hop
+region center. Unused diagonal0xff values survive decoding; a selected
+out-of-range hop fails explicitly before writing output.
+
+The retail scan decodes2,688 route regions, exercises85,944 valid center-to-center
+queries and excludes19,556 center-pair probes selecting source hops outside
+the declared region array. It also runs1,860 isolated awareness updates across
+ten initialized graveyard root/body pairs. These checks retain205-room decoding,
+auxiliary/manager dispatch, targeting, contacts and corridor runtime evidence.
+They do not imply full zombie Brain/Move/attack/damage dispatch is ready;
+unsupported root controllers still fail explicitly and New Game remains
+disabled pending the complete playable slice.

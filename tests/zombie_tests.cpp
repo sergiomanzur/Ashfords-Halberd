@@ -306,12 +306,16 @@ int main() {
        startup.enemies[3].frame == 65536);
     const auto children = startup.enemies[0].zombie_work->children;
     startup.enemies[0].zombie_work->children[7] = 12;
+    startup.enemies[0].zombie_work->awareness = 0x5e;
+    startup.enemies[0].zombie_work->awareness_timeout = 15;
     startup.enemies[0].zombie_flags = 0x7fffffff;
     initialize_zombie_work(startup, 0);
     ck(startup.enemies[0].zombie_work->body == 3 &&
        startup.enemies[0].zombie_work->children == children &&
        !(startup.enemies[16].flags & 1));
     ck(startup.enemies[0].zombie_flags == 0x10000001);
+    ck(startup.enemies[0].zombie_work->awareness == 0 &&
+       startup.enemies[0].zombie_work->awareness_timeout == 0);
     auto exhausted = startup_fixture();
     for (auto &enemy : exhausted.enemies)
       enemy.flags |= 1;

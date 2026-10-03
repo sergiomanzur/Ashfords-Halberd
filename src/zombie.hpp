@@ -8,6 +8,7 @@ struct ZombiePersonality {
 // en01.c initialization lookup preserves its original 30-entry loop bound.
 uint8_t zombie_personality_index(uint8_t model_version);
 const ZombiePersonality &zombie_personality(uint8_t model_version);
+const ZombiePersonality &zombie_personality_at(uint8_t index);
 // Startup health roll, before type-specific or linked-body health adjustments.
 int32_t roll_zombie_health(ScenarioState &state, uint8_t model_version);
 // bhEne01_GetWalkMotion for unlinked root work. Stores the chosen pair index;
@@ -31,4 +32,7 @@ void initialize_zombie_auxiliary(ScenarioState &state, size_t work);
 // en01sub.c source mode0/1 callbacks for head/arm/leg and parent manager.
 // Root AI updates the cached player distance consumed by manager policy.
 void tick_zombie_auxiliary(ScenarioState &state, size_t work);
+// en01.c::bhEne01_EneSearch. Uses cached neck joint11 and retained EXP0
+// personality, preserving packed byte counters and retail unsigned timeout.
+void tick_zombie_awareness(ScenarioState &state, size_t work, Vec3 player);
 } // namespace ashford

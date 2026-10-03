@@ -92,6 +92,14 @@ int main() {
     ck(enter_room(room, 1, collision, cuts).player.yaw == 123);
     auto runtime_data = b;
     runtime_data.resize(2500);
+    put(runtime_data, 128 + 0x28, 2200);
+    put(runtime_data, 128 + 0x2c, 2250);
+    put(runtime_data, 128 + 0xa8, 1);
+    flt(runtime_data, 2208, -50);
+    flt(runtime_data, 2220, 100);
+    flt(runtime_data, 2224, 100);
+    flt(runtime_data, 2228, 100);
+    runtime_data[2250] = 255; // Same-region queries do not read the diagonal.
     put(runtime_data, 264, 0); // No authored enemies in this fixture.
     put(runtime_data, 20, 1800);
     put(runtime_data, 1800, 1850);
@@ -142,8 +150,15 @@ int main() {
     persistent.objects[0].id = 77;
     persistent.door = ScenarioDoor{};
     persistent.player_frame = 99;
+    auto old_routes = std::make_shared<RoomRoutes>();
+    old_routes->regions.resize(2);
+    persistent.routes = old_routes;
     auto runtime =
         load_room_runtime(runtime_data, 0, 1, 1, persistent, entry_player);
+    ck(runtime.scenario.routes && runtime.scenario.routes != old_routes &&
+       runtime.scenario.routes->regions.size() == 1 &&
+       room_route_id(*runtime.scenario.routes, {0, 0, 0}) == 0 &&
+       persistent.routes == old_routes);
     ck(runtime.world.player.position.x == -10 &&
        runtime.world.player.yaw == 123 && runtime.world.player.entering &&
        runtime.scenario.stage == 0 && runtime.scenario.room == 1 &&
@@ -172,10 +187,17 @@ int main() {
     transition.previous_pad = 0x200;
     transition.scenario.random_seed = 42;
     bad([&] { transition_room_runtime(transition, Bytes{}, entry_player); });
+    const auto current_routes = transition.scenario.routes;
+    auto bad_routes = runtime_data;
+    put(bad_routes, 128 + 0x2c, 2500);
+    bad([&] { transition_room_runtime(transition, bad_routes, entry_player); });
+    ck(transition.scenario.routes == current_routes);
     ck(transition.scenario.room == 1 && transition.scenario.door &&
        transition.world.player.position.x == -10 &&
        transition.scenario.inventory[0] == 99 && transition.previous_pad == 0x200);
     transition_room_runtime(transition, runtime_data, entry_player);
+    ck(transition.scenario.routes && transition.scenario.routes != current_routes &&
+       transition.scenario.routes->regions.size() == 1);
     ck(transition.scenario.stage == 2 && transition.scenario.room == 3 &&
        !transition.scenario.door && !(transition.scenario.flags[10][0] & 1) &&
        transition.scenario.inventory[0] == 99 &&

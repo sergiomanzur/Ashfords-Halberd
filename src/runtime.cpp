@@ -176,6 +176,8 @@ RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
   persistent.player_work_flags =
       (persistent.player_work_flags & 0x20119) | 0x118;
   persistent.collision = result.collision;
+  persistent.routes =
+      std::make_shared<const RoomRoutes>(decode_room_routes(data));
   persistent.interactions = result.collision.miscellaneous;
   bind_room_enemies(data, result.collision, persistent);
   bind_room_props(data, persistent);

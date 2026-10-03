@@ -86,6 +86,8 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_player_contacts=0;
         size_t zombie_auxiliary_frames=0, zombie_manager_frames=0;
         size_t enemy_floor_probes=0, zombie_view_probes=0, zombie_neck_updates=0;
+        size_t route_regions=0, route_queries=0, invalid_route_hops=0;
+        size_t zombie_awareness_ticks=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
         size_t facial_lip_ticks=0, facial_lip_changed_frames=0;
@@ -104,6 +106,25 @@ int wmain(int argc,wchar_t** argv) {
                 }
                 auto collision=decode_room_collision(data);
                 auto records=decode_room_records(data);
+                const auto routes=decode_room_routes(data);
+                route_regions+=routes.regions.size();
+                if(scenario_check) for(const auto& from:routes.regions) for(const auto& to:routes.regions) {
+                    auto center=[](const CollisionRecord& r) {
+                        return Vec3{r.position.x+.5f*r.size.x,r.position.y+.5f*r.size.y,r.position.z+.5f*r.size.z};
+                    };
+                    const auto a=center(from),b=center(to);
+                    const auto start=room_route_id(routes,a),finish=room_route_id(routes,b);
+                    if(start==255 || finish==255)continue;
+                    if(start!=finish && routes.next_hops[size_t(finish)*routes.regions.size()+start]>=routes.regions.size()) {
+                        ++invalid_route_hops;continue; // Source would address outside its region array.
+                    }
+                    Vec3 target{9999,9999,9999};
+                    const auto hop=room_route(routes,a,b,target);
+                    const auto expected=hop==255?b:center(routes.regions.at(hop));
+                    if(target.x!=expected.x || target.y!=expected.y || target.z!=expected.z)
+                        throw std::runtime_error("Retail native route target did not match source region center/destination");
+                    ++route_queries;
+                }
                 if(scenario_check) for(const auto& floor:collision.floors) {
                     if(!(floor.flags&1) || floor.type!=2 || floor.size.x<0 || floor.size.z<0)continue;
                     const Vec3 center{floor.position.x+floor.size.x*.5f,0,floor.position.z+floor.size.z*.5f};
@@ -118,6 +139,7 @@ int wmain(int argc,wchar_t** argv) {
                 if(scenario_check) {
                     ScenarioState bound_enemies;
                     bind_room_enemies(data,collision,bound_enemies);
+                    bound_enemies.routes=std::make_shared<const RoomRoutes>(routes);
                     bind_room_props(data,bound_enemies);
                     // Entry 0 has an ID91 facial work and a resident lip bank.
                     // The graveyard entry below intentionally has no lip bank.
@@ -504,6 +526,27 @@ int wmain(int argc,wchar_t** argv) {
                                 if(result!=-1 && (result<-32768 || result>32768))
                                     throw std::runtime_error("Retail view cone returned an invalid signed yaw");
                                 ++zombie_view_probes;
+                                for(auto work:{root,body}) {
+                                    auto& sensed=targeting.enemies[work];
+                                    sensed.zombie_work->awareness=0;
+                                    sensed.zombie_work->awareness_timeout=0;
+                                    sensed.zombie_flags&=~0x400u;
+                                    const auto& neck=cached.joints.at(11).matrix;
+                                    const Vec3 sense_origin{float(neck[3]),0,float(neck[11])};
+                                    const auto sense_yaw=int32_t(uint32_t(sensed.angles[1])+uint32_t(owner.joint_pose.at(11).angles->at(1)));
+                                    const auto visible=search_enemy_player(sense_origin,sense_yaw,player_entry.player.position,
+                                        zombie_personality_at(sensed.zombie_work->personality).view_angle)!=-1;
+                                    const auto prior_flags=sensed.zombie_flags;
+                                    for(size_t tick=0;tick<93;++tick) {
+                                        tick_zombie_awareness(targeting,work,player_entry.player.position);
+                                        const auto want=uint8_t((tick+1)%31)+(visible?0x40:0);
+                                        if(sensed.zombie_work->awareness!=want ||
+                                           sensed.zombie_work->awareness_timeout!=(visible?15:0) ||
+                                           sensed.zombie_flags!=(prior_flags|(visible?0x400:0)))
+                                            throw std::runtime_error("Retail native awareness trace changed source counter/latch policy");
+                                        ++zombie_awareness_ticks;
+                                    }
+                                }
                                 for(auto work:{root,body}) for(size_t tick=0;tick<32;++tick) {
                                     const auto before=owner.joint_pose.at(11).angles.value();
                                     const auto frame=targeting.enemies[work].frame;
@@ -921,11 +964,17 @@ int wmain(int argc,wchar_t** argv) {
             std::cout<<"Verified "<<zombie_player_contacts<<" original player/zombie contacts with initialized retail geometry\n";
             if(!enemy_floor_probes)throw std::runtime_error("Missing retail enemy floor trigger coverage");
             std::cout<<"Queried "<<enemy_floor_probes<<" authored enemy floor trigger centers\n";
+            if(!route_regions || !route_queries)throw std::runtime_error("Missing retail native route coverage");
+            std::cout<<"Decoded "<<route_regions<<" route regions and queried "<<route_queries
+                     <<" native center-to-center routes; "<<invalid_route_hops<<" out-of-range source hops excluded\n";
             if(runtime_check) {
                 if(zombie_view_probes!=zombie_parameters || zombie_neck_updates!=zombie_parameters*64)
                     throw std::runtime_error("Missing retail native zombie targeting coverage");
                 std::cout<<"Probed "<<zombie_view_probes<<" actual personality view cones and applied "
                          <<zombie_neck_updates<<" cached root/body neck updates against Claire joint5\n";
+                if(zombie_awareness_ticks!=zombie_parameters*2*93)
+                    throw std::runtime_error("Missing native graveyard awareness trace coverage");
+                std::cout<<"Advanced "<<zombie_awareness_ticks<<" isolated native root/body awareness updates\n";
             }
             if(zombie_model_work_samples!=zombie_channel_applications || zombie_range_draws!=zombie_parameters*2)
                 throw std::runtime_error("Missing retail zombie model-work coverage");
