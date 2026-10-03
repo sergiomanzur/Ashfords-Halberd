@@ -27,6 +27,9 @@ void initialize_zombie_work(ScenarioState &state, size_t work);
 // Apply this work's motion to its ML_WORK owner, retaining separate counters.
 // This transactional diagnostic helper also replaces state on success.
 void advance_zombie_motion(ScenarioState &state, size_t work);
+// en01.c::CalcEnemy: refresh source model caches/capsules/heights only.
+// Drawing follows separately; an ordinary root consumes its prior cache.
+void calculate_zombie_model(ScenarioState &state, size_t work);
 // Original head/arm/leg and hidden parent-manager mode-0 startup. Does not
 // dispatch detached-part damage.
 void initialize_zombie_auxiliary(ScenarioState &state, size_t work);

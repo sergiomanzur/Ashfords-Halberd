@@ -65,7 +65,8 @@ struct ZombieExtendedWork {
   bool path_blocked = false;                    // Nonzero EXP0 pointer(0x70).
   std::optional<size_t> stair_target;           // EXP0 pointer(0x74).
   int32_t neck_yaw = 0;                         // EXP0_I(0x50).
-  int32_t left_leg_state = 0, right_leg_state = 0;
+  // Separate source limb accumulators; CalcEnemy reads only88/8c.
+  int32_t damage_80 = 0, damage_84 = 0, damage_88 = 0, damage_8c = 0;
   float player_distance =
       0; // EXP0_F(84), updated by the original Move callback.
 };
@@ -88,6 +89,8 @@ struct ScenarioEntity {
   std::shared_ptr<const ActorModelBank> model_bank;
   std::vector<JointPose> joint_pose;
   std::optional<ActorModelWork> model_work;
+  // BH_PWORK::mtx is per work, even when its ML_WORK cache is shared.
+  std::optional<ModelMatrix> model_matrix;
   std::optional<FaceRuntime> face;
   // ML_WORK aliasing is represented by an owner slot, not mutable pointers.
   std::optional<size_t> pose_owner;

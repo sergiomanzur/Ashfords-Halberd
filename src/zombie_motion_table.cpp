@@ -63,8 +63,8 @@ MotionFixResult evaluate_zombie_motion_fix(const ScenarioState &state,
     if (!enemy.zombie_work)
       throw std::runtime_error("Missing motion fix leg state");
     const bool left = type == 10 || type == 12;
-    if ((left ? enemy.zombie_work->left_leg_state
-              : enemy.zombie_work->right_leg_state) < 0)
+    if ((left ? enemy.zombie_work->damage_80
+              : enemy.zombie_work->damage_84) < 0)
       return {true, std::nullopt};
     if (type >= 12) {
       target = parent(state, work);

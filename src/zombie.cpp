@@ -148,61 +148,14 @@ void prepare_pose(ScenarioEntity &owner) {
   if (owner.model_work->joints.size() < 18)
     throw std::runtime_error("Zombie pose lacks original body joints");
 }
-Vec3 joint_origin(const ModelMatrix &m) {
-  return {float(m[3]), float(m[7]), float(m[11])};
-}
-Vec3 joint_point(const ModelMatrix &m, Vec3 p) {
-  Vec3 out{float(m[0] * p.x + m[1] * p.y + m[2] * p.z + m[3]),
-           float(m[4] * p.x + m[5] * p.y + m[6] * p.z + m[7]),
-           float(m[8] * p.x + m[9] * p.y + m[10] * p.z + m[11])};
-  if (!std::isfinite(out.x) || !std::isfinite(out.y) || !std::isfinite(out.z))
-    throw std::runtime_error("Zombie capsule transform overflow");
-  return out;
-}
 void calculate_startup_capsule(ScenarioState &state, size_t work) {
-  auto &zombie = state.enemies[work];
-  const auto owner_index = pose_owner(state, work);
-  auto &owner = state.enemies[owner_index];
-  if (zombie.flags & 0x80) {
-    if (!zombie.linked_parent || *zombie.linked_parent != owner_index ||
-        !owner.zombie_work)
-      throw std::runtime_error("Attached zombie capsule lacks parent work");
-    ActorPlacement placement;
-    placement.flags = owner.flags;
-    placement.position = owner.position;
-    placement.angles = owner.angles;
-    owner.model_work = calculate_actor_model_work(
-        *owner.model, owner.joint_pose, *owner.model_work, placement);
+  calculate_zombie_model(state, work);
+  if (state.enemies[work].flags & 0x80) {
+    const auto owner_index = pose_owner(state, work);
+    auto &owner = state.enemies[owner_index];
     owner.rendered_model = pose_actor_model_work(*owner.model, owner.joint_pose,
                                                  *owner.model_work);
-    const auto &matrices = owner.model_work->joints;
-    if (owner.zombie_work->left_leg_state == -1 ||
-        owner.zombie_work->right_leg_state == -1) {
-      owner.geometry.capsule_start =
-          joint_point(matrices.at(9).matrix, {0, 3.5f, 0});
-      owner.geometry.capsule_end =
-          joint_point(matrices.at(9).matrix, {0, -6, 0});
-    } else {
-      owner.geometry.capsule_start = joint_origin(matrices.at(10).matrix);
-      const auto a = joint_origin(matrices.at(4).matrix),
-                 b = joint_origin(matrices.at(7).matrix);
-      owner.geometry.capsule_end = {(a.x + b.x) / 2, (a.y + b.y) / 2,
-                                    (a.z + b.z) / 2};
-    }
-    owner.geometry.capsule_radius = 2;
-  } else if (zombie.zombie_flags & 0x80000000u) {
-    throw std::runtime_error(
-        "Detached zombie requires suffix model calculation");
   }
-  if (zombie.zombie_secondary_flags & 0x200) {
-    zombie.geometry.collision_radius += .2f;
-    if (zombie.geometry.collision_radius >= 2.5f) {
-      zombie.geometry.collision_radius = 2.5f;
-      zombie.zombie_secondary_flags &= ~0x200u;
-    }
-  }
-  zombie.geometry.height = zombie.geometry.collision_height =
-      float(owner.model_work->joints.at(10).matrix[7]) - zombie.position.y;
 }
 void apply_zombie_motion(ScenarioState &state, size_t work) {
   const auto owner_index = pose_owner(state, work);

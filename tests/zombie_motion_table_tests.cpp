@@ -193,12 +193,12 @@ int main() {
          "Source extracted fix switch path failed");
     }
     s = fixture();
-    s.enemies[0].zombie_work->left_leg_state = -1;
+    s.enemies[0].zombie_work->damage_80 = -1;
     auto skipped = detail::evaluate_zombie_motion_fix(s, 0, 10);
     ck(skipped.skip && !skipped.correction,
        "Missing left leg must continue window search");
     s = fixture();
-    s.enemies[0].zombie_work->right_leg_state = -1;
+    s.enemies[0].zombie_work->damage_84 = -1;
     skipped = detail::evaluate_zombie_motion_fix(s, 0, 11);
     ck(skipped.skip && !skipped.correction,
        "Missing right leg must continue window search");
@@ -216,10 +216,10 @@ int main() {
          "Leg12/13 must correct parent root");
     }
     body.linked_parent = 999;
-    body.zombie_work->left_leg_state = -1;
+    body.zombie_work->damage_80 = -1;
     ck(detail::evaluate_zombie_motion_fix(s, 1, 12).skip,
        "Negative leg must bypass unused parent");
-    body.zombie_work->left_leg_state = 0;
+    body.zombie_work->damage_80 = 0;
     bad([&] { detail::evaluate_zombie_motion_fix(s, 1, 12); });
     std::cout << "Source motion-table foot windows, event requests, feedback "
                  "and rollback passed\n";

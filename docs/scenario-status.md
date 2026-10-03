@@ -618,3 +618,30 @@ O_WORK forwarding fix, whose regression was observed RED then GREEN.
 The full Windows build,40 headless tests and package creation pass. A fresh
 packaged dummy-SDL smoke passes241 runtime ticks,240 rendered frames,
 53 movement ticks,10 focus-blocked ticks, main-menu return and INI creation.
+
+Native bhEne01_CalcEnemy now preserves source cache timing: ordinary roots
+consume their prior joint10 height, linked bodies refresh the parent and its
+capsule, and detached bodies refresh the parent followed by their own joint8
+suffix. Shared O_WORK caches retain the lower prefix and restore the full
+range. Separate per-work base matrices preserve primary1000 reuse after a
+detached body overwrites the shared upper cache. Frozen joints, negative
+heights and radius recovery retain source behavior; updates commit only after
+all consumed context validates. Startup uses this callback before its explicit
+drawing step.
+
+The capsule's exact minus1 limb gate now reads source EXP88/8c. The previous
+misnamed fields represented EXP80/84; these remain distinct and retain their
+original motion-table uses. A source review caught the detached endpoint's
+parent-cache read when model owners differ; its regression failed before the
+correction and passed afterward. No other source-review findings remain.
+
+The retail diagnostic now sequences paired SetMtn and CalcEnemy in work order,
+with1,600 cache/collision updates across ten roots,4,800 exact zero-drift foot
+paths and30 headless posed draws including20 changed frames. CalcEnemy does
+not morph or draw geometry; source mouth morphology belongs to later
+bhDrawEnemy integration. Full root AI/actions/combat, effects, decoded audio,
+inventory and cross-room saves remain pending, and New Game stays disabled.
+The final Windows build passes all41 headless checks and refreshes the ZIP.
+A fresh packaged dummy-SDL profile passes241 runtime ticks,240 rendered
+frames,53 movement ticks,10 focus-blocked ticks, main-menu return and INI
+creation. The final205-room scan passes after the source-review correction.

@@ -141,6 +141,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_walk_ticks=0, zombie_root_displacements=0, zombie_speed_samples=0;
         size_t zombie_motion_table_ticks=0, zombie_foot_zero_probes=0;
         size_t zombie_set_motion_ticks=0,zombie_dry_effect_checks=0;
+        size_t zombie_model_ticks=0,zombie_cache_draws=0,zombie_cache_changed_draws=0;
         size_t zombie_motion_sound_requests=0, zombie_motion_vibration_requests=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
@@ -676,9 +677,9 @@ int wmain(int argc,wchar_t** argv) {
                                                 throw std::runtime_error("Retail original walking root key produced invalid displacement/speed");
                                         }
                                     }
-                                    // Source SetMtn -> fresh full native cache. These
+                                    // Source SetMtn -> CalcEnemy in work-slot order. These
                                     // explicit dry-effect probes reject required effects;
-                                    // full effects/Move/CalcEnemy remain separate.
+                                    // full effects/Move and mouth morph drawing remain separate.
                                     const ZombieMotionEffects dry_effects{
                                         [&](ScenarioState& state,size_t slot,int32_t) {
                                             const auto motion=state.enemies[slot].motion_number;
@@ -693,16 +694,51 @@ int wmain(int argc,wchar_t** argv) {
                                             ++zombie_dry_effect_checks;
                                         }};
                                     auto planted=walking;
+                                    std::optional<Scene> first_cache_draw;
                                     for(size_t tick=0;tick<80;++tick) {
                                         const auto before_sounds=planted.pending_enemy_sounds.size();
                                         tick_zombie_motion(planted,root,dry_effects);++zombie_set_motion_ticks;++zombie_motion_table_ticks;
+                                        calculate_zombie_model(planted,root);++zombie_model_ticks;
                                         tick_zombie_motion(planted,body,dry_effects);++zombie_set_motion_ticks;++zombie_motion_table_ticks;
+                                        calculate_zombie_model(planted,body);++zombie_model_ticks;
                                         zombie_motion_sound_requests+=planted.pending_enemy_sounds.size()-before_sounds;
                                         auto& current=planted.enemies[root];
+                                        const auto& upper=planted.enemies[body];
+                                        if(current.geometry.capsule_radius!=2 ||
+                                           !std::isfinite(current.geometry.capsule_start.y) ||
+                                           !std::isfinite(current.geometry.capsule_end.y) ||
+                                           upper.geometry.height!=float(current.model_work->joints[10].matrix[7])-upper.position.y ||
+                                           upper.geometry.collision_height!=upper.geometry.height ||
+                                           current.model->model!=raw)
+                                            throw std::runtime_error("Retail source CalcEnemy capsule/height or immutable model changed");
                                         ActorPlacement cached_placement;
                                         cached_placement.flags=current.flags;cached_placement.position=current.position;
                                         cached_placement.angles=current.angles;
-                                        current.model_work=calculate_actor_model_work(*current.model,current.joint_pose,{},cached_placement);
+                                        if(tick==0 || tick==40 || tick==79) {
+                                            auto drawn=pose_actor_model_work(*current.model,current.joint_pose,*current.model_work);
+                                            size_t corners=0,changed=0;
+                                            for(size_t mesh=0;mesh<drawn.meshes.size();++mesh) {
+                                                if(first_cache_draw && (mesh>=first_cache_draw->meshes.size() ||
+                                                   drawn.meshes[mesh].triangles.size()!=first_cache_draw->meshes[mesh].triangles.size()))
+                                                    throw std::runtime_error("Retail cached drawing changed topology");
+                                                for(size_t triangle=0;triangle<drawn.meshes[mesh].triangles.size();++triangle)
+                                                    for(size_t corner=0;corner<3;++corner) {
+                                                        const auto p=drawn.meshes[mesh].triangles[triangle].corners[corner].position;
+                                                        if(!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z))
+                                                            throw std::runtime_error("Retail cached drawing has invalid geometry");
+                                                        ++corners;
+                                                        if(first_cache_draw) {
+                                                            const auto q=first_cache_draw->meshes[mesh].triangles[triangle].corners[corner].position;
+                                                            changed+=p.x!=q.x || p.y!=q.y || p.z!=q.z;
+                                                        }
+                                                    }
+                                            }
+                                            if(!corners || (first_cache_draw && drawn.meshes.size()!=first_cache_draw->meshes.size()))
+                                                throw std::runtime_error("Retail cached drawing has missing geometry");
+                                            if(changed)++zombie_cache_changed_draws;
+                                            if(!first_cache_draw)first_cache_draw=std::move(drawn);
+                                            ++zombie_cache_draws;
+                                        }
                                         for(size_t path:{0,1,2,3,6,7}) {
                                             const auto delta=calculate_actor_fix_offset(current.joint_pose,*current.model_work,
                                                 cached_placement,detail::zombie_fix_paths[path],{0,-1,-1.9f});
@@ -1220,6 +1256,11 @@ int wmain(int argc,wchar_t** argv) {
                     throw std::runtime_error("Retail SetMtn/dry-effect probe coverage mismatch");
                 std::cout<<"Advanced "<<zombie_set_motion_ticks<<" paired source SetMtn calls with "
                          <<zombie_dry_effect_checks<<" proven dry effect callbacks\n";
+                if(zombie_model_ticks!=zombie_set_motion_ticks || zombie_cache_draws!=zombie_brain_roots*3 ||
+                   zombie_cache_changed_draws!=zombie_brain_roots*2)
+                    throw std::runtime_error("Retail CalcEnemy/cache drawing coverage mismatch");
+                std::cout<<"Applied "<<zombie_model_ticks<<" source CalcEnemy cache/collision updates; derived "
+                         <<zombie_cache_draws<<" headless posed draws with "<<zombie_cache_changed_draws<<" changed frames\n";
             }
             if(zombie_model_work_samples!=zombie_channel_applications || zombie_range_draws!=zombie_parameters*2)
                 throw std::runtime_error("Missing retail zombie model-work coverage");

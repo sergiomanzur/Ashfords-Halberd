@@ -257,6 +257,15 @@ int main() {
        frozen_runtime.enemies[3].geometry.height == 302);
     ck(startup.enemies[0].model_work->joints[8].matrix[7] == 211 &&
        startup.enemies[0].model_work->joints[8].flags == 0);
+    auto arm_damage = startup;
+    arm_damage.enemies[0].zombie_work->damage_80 = -1;
+    initialize_zombie_work(arm_damage, 3);
+    ck(arm_damage.enemies[0].geometry.capsule_start.y == 213);
+    auto leg_damage = startup;
+    leg_damage.enemies[0].zombie_work->damage_88 = -1;
+    initialize_zombie_work(leg_damage, 3);
+    ck(leg_damage.enemies[0].geometry.capsule_start.y == 215.5f &&
+       leg_damage.enemies[0].geometry.capsule_end.y == 206);
     const auto startup_seed = startup.random_seed;
     ck(startup.enemy_callbacks[31]==EnemyCallbackKind::ZombieHead &&
        startup.enemy_callbacks[32]==EnemyCallbackKind::ZombieArm &&
