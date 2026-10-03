@@ -80,6 +80,14 @@ void tick_zombie_close_pursuit(ScenarioState &state, size_t work,
                                const ScenarioEntity &player);
 void change_zombie_walk_motion(ScenarioState &state, size_t work);
 bool zombie_fast_walk_active(const ScenarioState &state, size_t work);
+// Original EatCheck modes0/1/2 and MV05 lunge into synchronized grab state.
+// Player work includes its source cached joints and capsule, not render bounds.
+bool zombie_capture_check(const ScenarioState &state, size_t work,
+                          const ScenarioEntity &player, int32_t cone,
+                          float distance, int mode);
+void tick_zombie_lunge(ScenarioState &state, size_t work,
+                       ScenarioEntity &player,
+                       const std::vector<int32_t> &playing = {});
 void tick_zombie_neck(ScenarioState &state, size_t work,
                       const ActorModelWork &player);
 } // namespace ashford

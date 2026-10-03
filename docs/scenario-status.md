@@ -741,3 +741,36 @@ packaged dummy-SDL smoke passes241ticks/240renders/53movement ticks,
 10focus-blocked ticks, menu return and INI creation. Executable/ZIP refreshed.
 Deferred Minor review findings: mirrored Hokan terminal regression coverage and
 the scenario actor caller's stricter frame guard. Full Step1 remains active.
+
+Native MV05 lunge now starts paired122/322 motions, steers through the source
+window, captures only on frames8..12, enters recovery on a frame12 miss and
+returns both works to walking at the last authored frame. Captures retain
+original character85/285 or121/321 pairs, blend values, enemy flags and packed
+player {4,0,0,4}/enemy {2,0,0,2} modes. Motion/scalars, linked state, player grab
+flags/modes and sound requests commit only after consumed context validates.
+No assets or poses are copied by the action tick.
+
+EatCheck implements all three source modes using cached player joint3/root
+joint10, actor-position cone, strict distance, exact Y and health gates, plus
+transformed sphere/capsule contact with the original float projection/order.
+Cached Y is overwritten for planar distance, so unrelated cached Y is ignored.
+The final source review caught eager joint0 validation despite skipped steering;
+its flag80 regression failed before the correction and passes afterward.
+
+Retail probes advance complete missed-lunge recovery and eight actual paired
+motion/cache frames before successful capture, using Claire's original bind
+hierarchy positioned at the attack origin. This is stronger state/animation
+dependency evidence, but interactive player animation and grab damage/playback
+remain unverified and required. Root dispatch, complete combat, effect playback,
+decoded audio, inventory and cross-room saves remain pending. New Game stays
+disabled and the full Step1 goal stays active.
+
+Final verification:51/51headless checks;205retail rooms;490native lunge updates
+and10cached Claire capture transitions after eight original motion/cache frames.
+Prior pursuit/terminal/effect/foot/mouth/corridor probes pass. Fresh packaged
+dummy-SDL smoke passes241ticks/240renders/53movement ticks,10focus-blocked
+ticks, menu return and INI creation; the executable/ZIP are refreshed.
+Deferred Minor review findings: exact two-facing angular boundary tests and a
+retail assertion that accepts either grab flag rather than requiring both.
+The native implementation sets both, with an exact flags regression in unit
+coverage. These diagnostic limits do not complete the combat/playable slice.

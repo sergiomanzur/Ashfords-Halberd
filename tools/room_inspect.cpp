@@ -146,6 +146,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_mouth_draws=0,zombie_mouth_changed_draws=0;
         size_t zombie_blood_birth_probes=0,zombie_water_birth_probes=0;
         size_t zombie_close_pursuit_ticks=0,zombie_walk_phase_boundaries=0;
+        size_t zombie_lunge_ticks=0,zombie_capture_probes=0;
         size_t zombie_motion_sound_requests=0, zombie_motion_vibration_requests=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
@@ -860,6 +861,71 @@ int wmain(int argc,wchar_t** argv) {
                                        tracker.geometry.capsule_radius!=2)
                                         throw std::runtime_error("Retail terminal collision cache invalid");
                                     ++zombie_walk_phase_boundaries;
+                                    auto lunging=initialized;
+                                    auto& lunging_root=lunging.enemies[root];
+                                    lunging_root.modes={1,0,5,0};
+                                    lunging_root.zombie_flags&=~0x20000000u;
+                                    lunging_root.flags|=0x40000;
+                                    ScenarioEntity victim;
+                                    victim.flags=5;victim.health=100;victim.floor=lunging_root.floor;
+                                    victim.position={lunging_root.position.x,lunging_root.position.y,
+                                        lunging_root.position.z-4};
+                                    ActorPlacement victim_placement;
+                                    victim_placement.flags=0x118;victim_placement.position=victim.position;
+                                    victim.model_work=calculate_actor_model_work(player.models.at(0),
+                                        actor_bind_pose(player.models.at(0)),{},victim_placement);
+                                    const auto lunge_frames=lunging_root.motions->at(122)->frames;
+                                    bool recovered=false;
+                                    for(size_t tick=0;tick<lunge_frames+2;++tick) {
+                                        tick_zombie_lunge(lunging,root,victim);++zombie_lunge_ticks;
+                                        if(lunging_root.modes==std::array<uint8_t,4>{1,1,1,0}) {
+                                            recovered=true;break;
+                                        }
+                                        tick_zombie_motion(lunging,root,boundary_effects);
+                                        calculate_zombie_model(lunging,root);
+                                        tick_zombie_motion(lunging,body,boundary_effects);
+                                        calculate_zombie_model(lunging,body);
+                                    }
+                                    if(!recovered || lunging.enemies[body].modes!=lunging_root.modes ||
+                                       lunging_root.model->model!=raw)
+                                        throw std::runtime_error("Retail complete lunge miss/recovery sequence failed");
+                                    // Place original cached Claire joints at the attack origin, using
+                                    // actual model hierarchy; no edits to cached retail enemy matrices.
+                                    auto grabbing=initialized;
+                                    auto& grabber=grabbing.enemies[root];
+                                    grabber.modes={1,0,5,0};grabber.zombie_flags&=~0x20000000u;
+                                    for(size_t tick=0;tick<8;++tick) {
+                                        tick_zombie_lunge(grabbing,root,victim);++zombie_lunge_ticks;
+                                        tick_zombie_motion(grabbing,root,boundary_effects);
+                                        calculate_zombie_model(grabbing,root);
+                                        tick_zombie_motion(grabbing,body,boundary_effects);
+                                        calculate_zombie_model(grabbing,body);
+                                    }
+                                    if(grabber.frame!=8*65536 || grabber.motion_number!=122)
+                                        throw std::runtime_error("Retail capture must follow eight native lunge motion/cache frames");
+                                    const auto& chest=grabber.model_work->joints.at(10).matrix;
+                                    victim.flags=1;victim.modes={};victim.position=grabber.position;
+                                    victim.position.z-=4;
+                                    victim.angles[1]=32768;victim_placement.position=victim.position;
+                                    victim.model_work=calculate_actor_model_work(player.models.at(0),
+                                        actor_bind_pose(player.models.at(0)),{},victim_placement);
+                                    const auto& target_joint=victim.model_work->joints.at(3).matrix;
+                                    victim.position.x+=float(chest[3])-float(target_joint[3]);
+                                    victim.position.z+=float(chest[11])-float(target_joint[11])-1;
+                                    grabber.angles[1]=enemy_direction(grabber.position,victim.position);
+                                    victim_placement.position=victim.position;
+                                    victim.model_work=calculate_actor_model_work(player.models.at(0),
+                                        actor_bind_pose(player.models.at(0)),{},victim_placement);
+                                    if(!zombie_capture_check(grabbing,root,victim,3640,5.5f,0))
+                                        throw std::runtime_error("Retail original cached Claire/chest capture gate rejected");
+                                    tick_zombie_lunge(grabbing,root,victim);
+                                    if(grabber.motion_number!=85 || grabbing.enemies[body].motion_number!=285 ||
+                                       grabber.modes!=std::array<uint8_t,4>{2,0,0,2} ||
+                                       grabbing.enemies[body].modes!=grabber.modes ||
+                                       victim.modes!=std::array<uint8_t,4>{4,0,0,4} || !(victim.flags&0x10004) ||
+                                       grabber.control0!=75)
+                                        throw std::runtime_error("Retail native lunge player/grab pair state mismatch");
+                                    ++zombie_capture_probes;
                                     auto blood=initialized;
                                     auto& bitten=blood.enemies[root];
                                     const auto birth_seed=blood.random_seed;
@@ -1421,6 +1487,10 @@ int wmain(int argc,wchar_t** argv) {
                     throw std::runtime_error("Retail close-pursuit source state coverage mismatch");
                 std::cout<<"Applied "<<zombie_close_pursuit_ticks<<" isolated source close-pursuit states and "
                          <<zombie_walk_phase_boundaries<<" literal walking phase boundaries with paired terminal sampling/cache updates\n";
+                if(zombie_capture_probes!=zombie_brain_roots || zombie_lunge_ticks<=zombie_brain_roots*13)
+                    throw std::runtime_error("Retail native lunge/capture probe count mismatch");
+                std::cout<<"Advanced "<<zombie_lunge_ticks<<" native lunge states with paired motion/cache/effect routing and "
+                         <<zombie_capture_probes<<" cached Claire capture/player-state transitions\n";
                 if(zombie_model_ticks!=zombie_set_motion_ticks || zombie_cache_draws!=zombie_brain_roots*3 ||
                    zombie_cache_changed_draws!=zombie_brain_roots*2)
                     throw std::runtime_error("Retail CalcEnemy/cache drawing coverage mismatch");

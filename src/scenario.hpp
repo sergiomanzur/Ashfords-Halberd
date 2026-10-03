@@ -66,6 +66,7 @@ struct ZombieExtendedWork {
   int32_t pursuit_phase_word = 0;               // EXP0_I/F(0x94), shared bits.
   int32_t pursuit_transition_timer = 0;         // EXP0_I(0x98).
   float target_x = 0, target_z = 0;             // EXP0_F(0x58/0x60).
+  Vec3 action_anchor{};                         // EXP0_F(0x64/0x68/0x6c).
   bool path_blocked = false;                    // Nonzero EXP0 pointer(0x70).
   std::optional<size_t> stair_target;           // EXP0 pointer(0x74).
   int32_t neck_yaw = 0;                         // EXP0_I(0x50).
