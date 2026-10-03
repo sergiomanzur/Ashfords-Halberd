@@ -1,6 +1,8 @@
 #include "core.hpp"
 #include <fstream>
 #include <iostream>
+#include <thread>
+#include <windows.h>
 
 using namespace ashford;
 void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
@@ -11,7 +13,10 @@ template<class F> void rejects(F action, const char* message) {
 int main(int argc, char** argv) {
     try {
         require(argc == 3, "expected test directory and fixture directory");
-        fs::path root = fs::u8path(argv[1]);
+        // A failed run may leave an INI halfway through the persistence cases.
+        // Each run gets its own diagnostic profile, independent of that state.
+        fs::path root = fs::u8path(argv[1]) /
+            ("run-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(GetTickCount64()));
         fs::create_directories(root);
         auto ini = root / "settings.ini";
         auto defaults = load_settings(ini);
@@ -26,6 +31,39 @@ int main(int argc, char** argv) {
         require(restored.viewer_room==87 && restored.viewer_cut==2 && restored.viewer_variant==1,"viewer selection persistence");
         restored.width = 1920; save_settings(ini, restored);
         require(fs::exists(ini.string() + ".bak"), "settings backup");
+        auto locked_settings = restored;
+        locked_settings.width = 1600;
+        HANDLE settings_handle = CreateFileW(ini.c_str(), GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+        require(settings_handle != INVALID_HANDLE_VALUE, "open settings sharing-lock fixture");
+        std::thread release_settings([settings_handle] {
+            Sleep(150);
+            CloseHandle(settings_handle);
+        });
+        std::exception_ptr save_error;
+        try { save_settings(ini, locked_settings); }
+        catch (...) { save_error = std::current_exception(); }
+        release_settings.join();
+        if (save_error) std::rethrow_exception(save_error);
+        require(load_settings(ini).width == 1600,
+                "settings must persist after a short Windows sharing lock");
+        require(load_settings(fs::path(ini.wstring() + L".bak")).width == 1920,
+                "sharing retry preserves the previous settings backup");
+        settings_handle = CreateFileW(ini.c_str(), GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+        require(settings_handle != INVALID_HANDLE_VALUE, "open persistent settings lock");
+        auto blocked_settings = locked_settings;
+        blocked_settings.width = 1700;
+        const auto lock_started = GetTickCount64();
+        save_error = nullptr;
+        try { save_settings(ini, blocked_settings); }
+        catch (...) { save_error = std::current_exception(); }
+        CloseHandle(settings_handle);
+        const auto lock_elapsed = GetTickCount64() - lock_started;
+        require(save_error && lock_elapsed >= 400 && lock_elapsed < 5000,
+                "persistent sharing lock must fail within the bounded retry");
+        require(load_settings(ini).width == 1600,
+                "failed sharing retry preserves original settings");
         { std::ofstream file(ini); file << "[Display]\nwidth=oops\nheight=999999\nmode=invalid\nvsync=0\n[GameData]\niso_path=C:/good.iso\n[Viewer]\nroom=-1\ncut=999999\nvariant=7\n"; }
         auto partial = load_settings(ini);
         require(partial.width == 1120 && partial.height == 720 && partial.mode == "windowed" &&

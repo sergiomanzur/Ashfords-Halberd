@@ -154,8 +154,20 @@ void save_settings(const fs::path& path, const Settings& value) {
         if (healthy) check(CopyFileW(path.c_str(), backup.c_str(), FALSE) != 0, "Cannot back up settings.");
         else check(CopyFileW(path.c_str(), fs::path(path.wstring() + L".damaged").c_str(), FALSE) != 0, "Cannot preserve damaged settings.");
     }
-    check(MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0,
-          "Cannot save settings. Check folder permissions.");
+    bool saved = false;
+    for (int attempt = 0; attempt <= 10; ++attempt) {
+        if (MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            saved = true;
+            break;
+        }
+        const auto error = GetLastError();
+        // MoveFileExW can report a file held without FILE_SHARE_DELETE as
+        // ACCESS_DENIED. A bounded retry also handles that ambiguous response.
+        if (attempt == 10 || (error != ERROR_SHARING_VIOLATION &&
+            error != ERROR_LOCK_VIOLATION && error != ERROR_ACCESS_DENIED)) break;
+        Sleep(50);
+    }
+    check(saved, "Cannot save settings. Check folder permissions.");
 }
 Disc read_disc(const fs::path& path) {
     Disc disc { fs::absolute(path), {} };
