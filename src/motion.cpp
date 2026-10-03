@@ -32,6 +32,17 @@ struct Reader {
     return f;
   }
 };
+// FrameNum's legacy clamp/caller shift can produce exactly frm_num. Retail
+// terminal channels overlap the pointer table rewritten by bhMnbBinRealize.
+// Native compatibility: sample the next loop there, retaining the original
+// work frame for bhSetMotion's subsequent advancement and boundary result.
+int64_t application_frame(uint32_t frames, int64_t frame) {
+  if (!frames || frames > 65535 || frame < 0 ||
+      uint64_t(frame) >= (uint64_t(frames) + 1) * 65536)
+    throw std::runtime_error("Invalid motion application frame");
+  const int64_t extent = int64_t(frames) * 65536;
+  return frame >= extent ? frame - extent : frame;
+}
 // Motion.c::AngZyxToYzx/AngYzxToZyx. Angles remain integer Ninja units.
 std::array<int, 3> convert_angles(std::array<int, 3> a, bool to_yzx) {
   auto x = ninja_sin_cos(uint16_t(a[0]));
@@ -51,6 +62,15 @@ std::array<int, 3> convert_angles(std::array<int, 3> a, bool to_yzx) {
           int(10430.381f * std::atan2(z[0], y[1] * z[1]))};
 }
 } // namespace
+uint16_t motion_attribute_at(const Motion &motion, int64_t frame,
+                             uint16_t previous) {
+  if (motion.attributes.empty())
+    return previous;
+  if (motion.attributes.size() != motion.frames)
+    throw std::runtime_error("Invalid motion attribute track");
+  return motion.attributes.at(size_t(application_frame(motion.frames, frame)) >>
+                              16);
+}
 std::vector<JointPose>
 blend_motion_pose(const std::vector<JointPose> &current,
                   const std::vector<JointPose> &target, float rate,
@@ -141,16 +161,15 @@ apply_motion_pose(const std::vector<JointPose> &current, const Motion &motion,
                   int64_t frame, const MotionApplicationOptions &options,
                   std::array<uint16_t, 3> angle_scratch) {
   if (current.size() > 4096 || motion.tracks.size() > 64 || !motion.frames ||
-      motion.frames > 65535 || frame < 0 ||
-      uint64_t(frame) >= uint64_t(motion.frames) * 65536 ||
-      options.joint_base > current.size() ||
+      motion.frames > 65535 || options.joint_base > current.size() ||
       options.joint_flags.size() > current.size() ||
       (options.blend_rate && !std::isfinite(*options.blend_rate)))
     throw std::runtime_error("Invalid motion application input");
   const bool slow = (options.mode & 8) || (motion.flags & 0x20);
   const bool fast = !slow && !(motion.flags & 0x10);
   const bool mirrored = options.mode & 2;
-  auto sampled = sample_motion(motion, frame, slow);
+  auto sampled =
+      sample_motion(motion, application_frame(motion.frames, frame), slow);
   MotionApplicationResult result{current, angle_scratch};
   auto destination = [&](size_t map_index) {
     // NormalTbl has 64 entries; mirrored tables end with signed -1.

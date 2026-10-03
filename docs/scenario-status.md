@@ -723,3 +723,21 @@ terminal motion key, whose sampling must be resolved before controller
 integration. Full enemy actions/combat, effect playback, decoded audio,
 inventory and cross-room saves remain pending. Step1 stays active and New Game
 stays disabled.
+
+The walking-remap terminal sampling dependency is now resolved for the zombie
+path. Source sampling reaches the relocated MDATA pointer table at the final
+angle channel, so the PC uses a bounded next-loop sample there while retaining
+the original frame/counter/boundary and effect/foot-fix callback timing. This
+is an explicit compatibility fix to an original out-of-range read.
+All10retail boundaries run paired SetMtn and CalcEnemy. Their local poses match
+frame0 sampling; world translations retain source foot correction using the
+incoming terminal frame, so caches are validated independently rather than
+incorrectly required to match a frame0 event sequence.
+
+Final verification:49/49headless checks,205retail rooms,180pursuit state ticks,
+10paired terminal sampling/cache boundaries and all prior retail probes pass.
+The comparator review finding has a retail RED-to-GREEN regression. Fresh
+packaged dummy-SDL smoke passes241ticks/240renders/53movement ticks,
+10focus-blocked ticks, menu return and INI creation. Executable/ZIP refreshed.
+Deferred Minor review findings: mirrored Hokan terminal regression coverage and
+the scenario actor caller's stricter frame guard. Full Step1 remains active.

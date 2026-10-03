@@ -813,8 +813,52 @@ int wmain(int argc,wchar_t** argv) {
                                     if(uint32_t(tracker.frame)!=new_frames*65536u ||
                                        close.enemies[body].motion_number!=119)
                                         throw std::runtime_error("Retail source legacy walking phase boundary mismatch");
-                                    // Literal source metadata reaches a terminal key. Full scheduler
-                                    // integration must resolve this sampling boundary before enabling play.
+                                    // Native compatibility at the source remap boundary: compare
+                                    // frame0 sampling, retaining literal advancement/boundary flags.
+                                    const auto terminal_blend=tracker.blend_count;
+                                    const auto terminal_attribute=tracker.motion_attribute;
+                                    const auto& terminal_motion=*tracker.motions->at(tracker.motion_number);
+                                    auto reference=close;
+                                    reference.enemies[root].frame=0;
+                                    const ZombieMotionEffects boundary_effects{
+                                        [](ScenarioState& state,size_t slot,int32_t frame) {
+                                            tick_zombie_kami_effect(state,slot,frame);
+                                        },
+                                        [](ScenarioState& state,size_t slot,int32_t frame) {
+                                            tick_zombie_water_effect(state,slot,frame);
+                                        }};
+                                    for(auto* sampled : {&close,&reference}) {
+                                        tick_zombie_motion(*sampled,root,boundary_effects);
+                                        calculate_zombie_model(*sampled,root);
+                                        tick_zombie_motion(*sampled,body,boundary_effects);
+                                        calculate_zombie_model(*sampled,body);
+                                    }
+                                    const auto& expected=reference.enemies[root];
+                                    if(tracker.frame!=65536 || tracker.motion_boundary!=1 ||
+                                       expected.frame!=65536 || expected.motion_boundary!=0 ||
+                                       close.enemies[body].frame!=65536 || tracker.model->model!=raw ||
+                                       !(tracker.flags&0x2000000) || tracker.blend_count!=terminal_blend-1 ||
+                                       tracker.motion_attribute!=(terminal_motion.attributes.empty()?terminal_attribute:
+                                           terminal_motion.attributes[0]))
+                                        throw std::runtime_error("Retail terminal sampling counter order mismatch");
+                                    for(size_t joint=0;joint<tracker.joint_pose.size();++joint) {
+                                        const auto& actual=tracker.joint_pose[joint];
+                                        const auto& wanted=expected.joint_pose[joint];
+                                        if(actual.angles!=wanted.angles ||
+                                           actual.position.has_value()!=wanted.position.has_value() ||
+                                           (actual.position && (actual.position->x!=wanted.position->x ||
+                                            actual.position->y!=wanted.position->y || actual.position->z!=wanted.position->z)))
+                                            throw std::runtime_error("Retail terminal paired pose differs from next-loop sampling");
+                                        // Source foot fixes retain the original incoming frame, so
+                                        // world translations can differ from the frame0 reference.
+                                        for(float element : tracker.model_work->joints[joint].matrix)
+                                            if(!std::isfinite(element))
+                                                throw std::runtime_error("Retail terminal cache contains nonfinite matrix");
+                                    }
+                                    if(!std::isfinite(tracker.geometry.capsule_start.y) ||
+                                       !std::isfinite(tracker.geometry.capsule_end.y) ||
+                                       tracker.geometry.capsule_radius!=2)
+                                        throw std::runtime_error("Retail terminal collision cache invalid");
                                     ++zombie_walk_phase_boundaries;
                                     auto blood=initialized;
                                     auto& bitten=blood.enemies[root];
@@ -1376,7 +1420,7 @@ int wmain(int argc,wchar_t** argv) {
                 if(zombie_close_pursuit_ticks!=zombie_brain_roots*18 || zombie_walk_phase_boundaries!=zombie_brain_roots)
                     throw std::runtime_error("Retail close-pursuit source state coverage mismatch");
                 std::cout<<"Applied "<<zombie_close_pursuit_ticks<<" isolated source close-pursuit states and "
-                         <<zombie_walk_phase_boundaries<<" literal walking phase boundaries; terminal-key integration pending\n";
+                         <<zombie_walk_phase_boundaries<<" literal walking phase boundaries with paired terminal sampling/cache updates\n";
                 if(zombie_model_ticks!=zombie_set_motion_ticks || zombie_cache_draws!=zombie_brain_roots*3 ||
                    zombie_cache_changed_draws!=zombie_brain_roots*2)
                     throw std::runtime_error("Retail CalcEnemy/cache drawing coverage mismatch");

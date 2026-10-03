@@ -77,3 +77,25 @@ hold before executing the unchanged corridor event.
 Step 1 remains incomplete. Next is application integration and original
 movement/collision, room interactions
 and transitions, enemy combat, inventory, audio and versioned save/load.
+
+Native zombie walking transitions now handle the terminal frame produced by
+the original FrameNum clamp and caller shift. Motion.c reads the key before
+advancing, but the last retail angle key reaches the MDATA table whose words
+binfunc.c rewrites to memory addresses. Reproducing those pointer-derived
+angles would depend on the original allocation address.
+
+The PC compatibility policy samples frame0 (with its fractional phase) for
+the single terminal-frame window. It retains the literal incoming work frame,
+source counter advancement, loop boundary flag and callback timing. Attribute
+reads use the same bounded index. Further out-of-range frames still reject;
+decoded assets/frame counts and diagnostic preview looping stay unchanged.
+This deliberately fixes an original out-of-range read; terminal poses are not
+claimed to match the original address-dependent result.
+
+Focused checks cover Fast/Normal/Slow, blending, mirroring, fractional samples,
+record bounds, attributes, immutable failure inputs and counter ordering.
+All10retail zombie remap boundaries now execute paired SetMtn/CalcEnemy and
+validate normalized local poses, counter/attribute/blend/boundary values and
+finite collision/model caches. Main scenario actors retain their stricter
+frame guard; generalized terminal support and mirrored Hokan regression
+coverage are deferred Minor review findings.

@@ -194,7 +194,9 @@ int main() {
     mapping = {};
     mapping.blend_rate = NAN;
     bad([&] { apply_motion_pose(joints, channels, 0, mapping); });
-    bad([&] { apply_motion_pose(joints, channels, 65536); });
+    // The terminal frame now safely samples the next loop. Further indices
+    // remain invalid; this is not an unbounded modulo application API.
+    bad([&] { apply_motion_pose(joints, channels, 2 * 65536); });
     auto invalid_channels = channels;
     invalid_channels.tracks[0].positions[0].x = INFINITY;
     bad([&] { apply_motion_pose(joints, invalid_channels, 0); });

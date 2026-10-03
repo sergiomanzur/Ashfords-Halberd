@@ -197,9 +197,8 @@ void apply_zombie_motion(ScenarioState &state, size_t work) {
   const auto boundary =
       advance_motion_frame(slot->frames, int32_t(zombie.motion_step),
                            zombie.motion_mode, frame, direction);
-  uint16_t attribute = zombie.motion_attribute;
-  if (!slot->attributes.empty())
-    attribute = slot->attributes.at(size_t(zombie.frame) >> 16);
+  const auto attribute =
+      motion_attribute_at(*slot, zombie.frame, zombie.motion_attribute);
   owner.joint_pose = std::move(applied.pose);
   state.motion_angle_scratch = applied.angle_scratch;
   zombie.frame = frame;

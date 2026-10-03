@@ -31,6 +31,8 @@ struct MotionApplicationResult {
   std::array<uint16_t, 3> angle_scratch{};
 };
 // Stateful SetMtn channel application; immutable inputs, no frame advancement.
+// Native compatibility: a frame in [frames,frames+1) samples the next loop
+// without changing work counters. Retail terminal keys overlap relocated data.
 // Flags/map refer to work joints; mirror destinations are relative to
 // joint_base.
 MotionApplicationResult
@@ -38,6 +40,10 @@ apply_motion_pose(const std::vector<JointPose> &current, const Motion &motion,
                   int64_t frame_fixed,
                   const MotionApplicationOptions &options = {},
                   std::array<uint16_t, 3> angle_scratch = {});
+// Attribute reads follow the same sampling policy before counter advancement.
+// A missing attribute channel retains the work's previous value.
+uint16_t motion_attribute_at(const Motion &motion, int64_t frame_fixed,
+                             uint16_t previous);
 std::vector<JointPose>
 blend_motion_pose(const std::vector<JointPose> &current,
                   const std::vector<JointPose> &target, float rate,

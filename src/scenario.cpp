@@ -1040,13 +1040,13 @@ void tick_scenario_actors(ScenarioState &state) {
       }
       auto applied = apply_motion_pose(entity.joint_pose, motion, entity.frame,
                                        options, state.motion_angle_scratch);
+      const auto attribute =
+          motion_attribute_at(motion, entity.frame, entity.motion_attribute);
       entity.joint_pose = std::move(applied.pose);
       state.motion_angle_scratch = applied.angle_scratch;
       if (entity.blend_count)
         --entity.blend_count;
-      if (!motion.attributes.empty())
-        entity.motion_attribute =
-            motion.attributes.at(size_t(entity.frame) >> 16);
+      entity.motion_attribute = attribute;
       entity.motion_boundary = advance_motion_frame(
           motion.frames, int32_t(entity.motion_step), entity.motion_mode,
           entity.frame, entity.frame_direction);
