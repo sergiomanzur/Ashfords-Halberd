@@ -147,6 +147,7 @@ void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
       examine_room_interaction(runtime);
   }
   scenario.player_frame = runtime.world.player.frame;
+  tick_wall_damage_timers(scenario);
   tick_scenario_props(scenario);
   control_scenario(scenario);
 }

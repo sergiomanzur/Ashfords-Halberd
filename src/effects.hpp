@@ -1,6 +1,7 @@
 #pragma once
 #include "collision.hpp"
 namespace ashford {
+struct ScenarioState;
 struct NativeEffectTemplate {
   uint32_t flags = 0;
   uint16_t id = 0, type = 0;
@@ -19,6 +20,7 @@ struct NativeEffectWork {
   std::array<int32_t, 3> angles{}; // O_WRK widens EF_WORK angles.
   int32_t texture_id = 0, linked_joint = 0;
   std::optional<size_t> linked_parent;
+  std::optional<size_t> linked_wall; // Effect29's static/dynamic ATR link.
   Vec3 offset{}, base_scale{}, direction{};
   uint32_t motion_color = 0, motion_number = 0;
   std::optional<uint16_t> texture_slot;
@@ -33,4 +35,7 @@ struct NativeEffectPool {
   NativeEffectTemplate scratch;      // sys->ef retains fields not overwritten.
   std::optional<size_t> ground_wall; // sys->htp, merged static/dynamic index.
 };
+// effect.c control gate for wall timers, effsub1.c::bhEff029. Runs after player
+// and before objects. Other particle playback remains a separate service.
+void tick_wall_damage_timers(ScenarioState &state);
 } // namespace ashford

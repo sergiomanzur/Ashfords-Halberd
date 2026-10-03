@@ -87,6 +87,8 @@ struct PlayerExtendedWork {
 };
 struct ScenarioEntity {
   uint32_t flags = 0, state_flags = 0, secondary_flags = 0;
+  int32_t push_count = 0; // BH_PWORK::psh_ct.
+  std::optional<size_t> push_index, step_area; // merged wall/ATR indices.
   int32_t angular_speed = 0;
   int32_t health = 0;
   Vec3 position{}, previous_position{};
@@ -226,6 +228,7 @@ struct ScenarioState {
   uint32_t input_held = 0;    // sys->pad_on; source directional bits are low4.
   uint32_t input_pressed = 0; // sys->pad_ps, consumed by grab LeverCheck.
   uint32_t drawing_flags = 0;
+  uint32_t effect_flags = 0; // sys->ef_flg, distinct from event flag banks.
 };
 // Native control and event scheduling subset. Unsupported instructions fail
 // explicitly; entity controllers and audiovisual instructions are pending.

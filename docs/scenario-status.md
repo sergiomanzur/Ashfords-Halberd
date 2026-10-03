@@ -990,3 +990,42 @@ dummy-SDL smoke passes241ticks/240renders/53moves/10focus-blocked ticks/
 main-menu return/INI creation. EXE/ZIP refreshed; source review found no issues.
 This verifies the providers; complete PlayerLink and the playable slice remain
 in progress.
+
+Stateful native hitchk.c::bhCheckWallEx and zonzon.c::CollisionCheckWall2 now
+consume static and dynamic walls in original order, source step limits, push
+counts/directional masks, attr20000/index stamping, rounded resets, special
+circle damage modes/flags and source saved-work-flag restoration. Temporary
+walls are removed before querying the original proposed point for wall type.
+Small collision metadata and touched scalars/effect pool are staged; late
+validation failure commits no wall, player, step or push changes.
+
+Wall-damage Effect29 preserves first-free/reserved/full allocation semantics,
+player position, bit-reinterpreted player angle offsets, unit scale/zero base
+scale and separate merged wall linkage. Its source active/frozen/SP/effect
+gates and32tick expiry restore attr40 and stop the timer, including inactive
+linked walls. It runs after player and before object processing; room changes
+clear all old effect links. Other particle playback/drawing remains separate.
+
+Native en01.c::PlayerLink now transforms the original enemy EXP0 anchor,
+preserves player Y, assigns yaw, reads prior position from per-work mtx,
+applies authored character/frame XZ offsets and rebuilds that matrix using
+yaw_correction. Complete Wall2 displacement goes to enemy XYZ. Outer scalar/
+matrix validation shares the collision pre-commit gate; model assets/poses and
+shared ML_WORK are neither copied nor used as substitute per-work matrices.
+
+Four focused checks pass. Original scans cover205rooms and4400joined
+NG02/PlyDG01/PlayerLink world/matrix updates with666wall corrections across
+ten initialized roots/both facings/startups. Original Claire model sampling
+retains the generated per-work matrix. All temporary walls are removed;
+previous grab/death/release/blood, step metadata and corridor probes still pass.
+Complete root encounter dispatch, armed player controls/combat, other particle
+playback/drawing, decoded audio, inventory and versioned saves remain required
+for Step1; New Game remains disabled.
+
+Final stateful PlayerLink verification:64/64 headless checks,205original rooms,
+4400joined world/matrix updates and666wall corrections. Fresh packaged smoke
+passes241ticks/240renders/53moves/10focus-blocked ticks/main-menu return/INI
+creation; EXE/ZIP refreshed. Source review found no material defects. Deferred
+minors: clear effect_flags during room initialization when adding its currently
+unreachable override; add focused late-circle-birth rollback and outer enemy
+correction overflow fixtures. Complete playable slice remains in progress.

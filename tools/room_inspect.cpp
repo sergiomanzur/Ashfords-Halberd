@@ -234,6 +234,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t facial_lip_ticks=0, facial_lip_changed_frames=0;
         StepProbeCounts step_probes;
         size_t player_link_roots=0,player_link_frames=0;
+        size_t joined_player_links=0,joined_player_link_corrections=0;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
@@ -1105,8 +1106,11 @@ int wmain(int argc,wchar_t** argv) {
                                             ActorPlacement placement;
                                             if(account==2 || account==3)placement.flags=actor.flags;
                                             placement.position=actor.position;placement.angles=actor.angles;
+                                            if(account==3 && actor.model_matrix)
+                                                actor.model_work->base_matrix=*actor.model_matrix;
                                             actor.model_work=calculate_actor_model_work(player.models.at(0),
                                                 actor.joint_pose,*actor.model_work,placement);
+                                            if(account==3)actor.model_matrix=actor.model_work->base_matrix;
                                             for(const auto& joint:actor.model_work->joints)
                                                 for(double element:joint.matrix)
                                                     if(!std::isfinite(element))
@@ -1116,8 +1120,8 @@ int wmain(int argc,wchar_t** argv) {
                                             else if(account==2)++standing_grab_samples;
                                             else ++ng02_player_samples;
                                         };
-                                        // Joined NG02/PlyDG01 source dependencies. PlayerLink
-                                        // world alignment and complete root dispatch are separate.
+                                        // Joined NG02/PlyDG01/PlayerLink source dependencies;
+                                        // complete root dispatch remains separate.
                                         for(bool prior15:{false,true}) {
                                             auto combat=grabbing;
                                             auto& enemy=combat.enemies[root];
@@ -1131,6 +1135,9 @@ int wmain(int argc,wchar_t** argv) {
                                             grabbed.base_motions=captured.base_motions;
                                             grabbed.motions=grabbed.base_motions;
                                             grabbed.joint_pose=actor_bind_pose(player.models.at(0));
+                                            grabbed.model_matrix=claire.base_matrix;
+                                            // player.c::PlyInfo (ar/ah), not car/cah contact sizes.
+                                            grabbed.geometry.radius=3.5f;grabbed.geometry.height=16.5f;
                                             grabbed.health=100;
                                             bool saw_damage=false,dead=false,released=false,finished=false;
                                             const auto damage=zombie_personality_at(enemy.zombie_work->personality).attack_bonus+5;
@@ -1171,6 +1178,15 @@ int wmain(int argc,wchar_t** argv) {
                                                 if(dead && released) {finished=true;break;}
                                                 if(!dead) {
                                                     tick_zombie_motion(combat,root,boundary_effects);
+                                                    if(enemy.zombie_flags&0x80000) {
+                                                        const auto before=enemy.position;
+                                                        const auto wall_count=combat.dynamic_walls.size();
+                                                        link_zombie_player(combat,root,grabbed);++joined_player_links;
+                                                        if(combat.dynamic_walls.size()!=wall_count || grabbed.position.y!=victim.position.y)
+                                                            throw std::runtime_error("Retail PlayerLink left temporary walls/changed player Y");
+                                                        if(enemy.position.x!=before.x || enemy.position.y!=before.y || enemy.position.z!=before.z)
+                                                            ++joined_player_link_corrections;
+                                                    }
                                                     calculate_zombie_model(combat,root);
                                                     tick_zombie_motion(combat,body,boundary_effects);
                                                     calculate_zombie_model(combat,body);ng02_enemy_samples+=2;
@@ -1951,6 +1967,10 @@ int wmain(int argc,wchar_t** argv) {
                     throw std::runtime_error("Missing retail Claire PlayerLink table/frame range coverage");
                 std::cout<<"Verified "<<player_link_frames<<" original Claire PlayerLink frame offsets across "
                          <<player_link_roots<<" roots and four authored clips\n";
+                if(joined_player_links<player_link_roots*40)
+                    throw std::runtime_error("Missing joined original PlayerLink world alignment coverage");
+                std::cout<<"Applied "<<joined_player_links<<" joined NG02/PlyDG01 PlayerLink world/matrix updates; "
+                         <<joined_player_link_corrections<<" source wall corrections with temporary-wall cleanup\n";
                 if(zombie_view_probes!=zombie_parameters || zombie_neck_updates!=zombie_parameters*64)
                     throw std::runtime_error("Missing retail native zombie targeting coverage");
                 std::cout<<"Probed "<<zombie_view_probes<<" actual personality view cones and applied "

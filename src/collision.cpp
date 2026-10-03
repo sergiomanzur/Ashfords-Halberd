@@ -2,6 +2,7 @@
 // bhCheckWallEx/bhCheckBox, pwksub.c::bhCheckFloorNum and
 // ps2_NaColi.c::njDistanceP2L. Disk records are decoded into native values.
 #include "collision.hpp"
+#include "collision_response.hpp"
 #include "collision_shapes.hpp"
 #include "player.hpp"
 #include <cmath>
@@ -88,9 +89,11 @@ int8_t player_floor_number(const RoomCollision &room, float height) {
       floor = i;
   return int8_t(floor - 2);
 }
-static CollisionResult collide_walls(const RoomCollision &room,
-                                     const CollisionBody &body,
-                                     std::optional<Vec3> previous) {
+static CollisionResult
+collide_walls(const RoomCollision &room, const CollisionBody &body,
+              std::optional<Vec3> previous,
+              const std::vector<CollisionRecord> *dynamic = nullptr,
+              const detail::WallResponseCallbacks *callbacks = nullptr) {
   if (!std::isfinite(body.position.x) || !std::isfinite(body.position.z) ||
       !std::isfinite(body.radius) || !std::isfinite(body.height) ||
       body.radius <= 0 || body.height < 0 || !std::isfinite(room.height))
@@ -104,11 +107,17 @@ static CollisionResult collide_walls(const RoomCollision &room,
     throw std::runtime_error("Nonfinite collision position");
   if (!previous)
     p.y = truncate_height(p.y);
-  for (const auto &r : room.walls) {
+  const size_t count = room.walls.size() + (dynamic ? dynamic->size() : 0);
+  for (size_t index = 0; index < count; ++index) {
+    const auto &r = index < room.walls.size()
+                        ? room.walls[index]
+                        : (*dynamic)[index - room.walls.size()];
     if (!(r.flags & 1))
       continue;
     if (previous && r.type == 6)
       continue;
+    if (r.type > 7 && callbacks)
+      continue; // Source WallEx has no default response.
     if (r.type > 7)
       throw std::runtime_error("Unsupported active wall collision shape");
     auto attr = r.attribute;
@@ -274,9 +283,13 @@ static CollisionResult collide_walls(const RoomCollision &room,
       float dx = x - p.x, dz = z - p.z;
       float radius = body.radius + w;
       if (std::sqrt(dx * dx + dz * dz) < radius) {
-        if ((attr & 0x40) && (body.state_flags & 0x40000000))
-          throw std::runtime_error(
-              "Special wall damage response requires player state");
+        if ((attr & 0x40) && (body.state_flags & 0x40000000)) {
+          if (callbacks)
+            callbacks->circle_hit(index, p);
+          else
+            throw std::runtime_error(
+                "Special wall damage response requires player state");
+        }
         ++result.hits;
         project(x, z, radius);
       }
@@ -289,6 +302,8 @@ static CollisionResult collide_walls(const RoomCollision &room,
       ++result.hits;
       bool left = (previous ? previous->x : p.x) < x + .5f * w,
            top = (previous ? previous->z : p.z) < z + .5f * d;
+      if (callbacks)
+        callbacks->rectangle_hit(index, p);
       float edge_x = left ? min_x : min_x + width,
             edge_z = top ? min_z : min_z + depth;
       float gap_x = std::fabs(p.x - edge_x), gap_z = std::fabs(p.z - edge_z);
@@ -298,6 +313,8 @@ static CollisionResult collide_walls(const RoomCollision &room,
         if (std::sqrt(dx * dx + dz * dz) <= body.radius)
           project(corner_x, corner_z, body.radius);
         result.reset_push_count = true;
+        if (callbacks)
+          callbacks->rounded_corner();
       } else {
         if (previous) {
           gap_x = std::fabs(previous->x - edge_x);
@@ -328,5 +345,12 @@ CollisionResult collide_player_walls_ex(const RoomCollision &room,
                                         const CollisionBody &body,
                                         Vec3 previous) {
   return collide_walls(room, body, previous);
+}
+CollisionResult
+detail::collide_walls_ex_context(const RoomCollision &room,
+                                 const std::vector<CollisionRecord> &dynamic,
+                                 const CollisionBody &body, Vec3 previous,
+                                 const WallResponseCallbacks &callbacks) {
+  return collide_walls(room, body, previous, &dynamic, &callbacks);
 }
 } // namespace ashford
