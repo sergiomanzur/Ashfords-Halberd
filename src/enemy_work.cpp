@@ -70,6 +70,7 @@ std::optional<size_t> link_zombie_enemy(ScenarioState &state, size_t parent,
   linked.id = id;
   linked.model_flags |= 0x21;
   linked.linked_parent = parent;
+  linked.pose_owner = parent;
   linked.linked_joint = joint;
   linked.model = root.model;
   linked.model_bank = root.model_bank;

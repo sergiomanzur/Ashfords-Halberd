@@ -1,5 +1,6 @@
 // Native startup parameters from MIT recvx-decomp en01.c.
 #include "zombie.hpp"
+#include <cmath>
 #include <stdexcept>
 namespace ashford {
 namespace {
@@ -114,5 +115,278 @@ void initialize_zombie_type(ScenarioState &state, size_t work) {
     if (!linked)
       zombie.zombie_flags = (zombie.zombie_flags & ~0xfu) | 0x40001;
   }
+}
+namespace {
+size_t pose_owner(const ScenarioState &state, size_t work) {
+  if (state.enemies.size() != 128 || work >= state.enemies.size())
+    throw std::runtime_error("Invalid zombie pose work pool");
+  const auto owner = state.enemies[work].pose_owner.value_or(work);
+  if (owner >= state.enemies.size() || !(state.enemies[owner].flags & 1) ||
+      !state.enemies[owner].model || !state.enemies[work].motions ||
+      (owner != work && state.enemies[owner].pose_owner))
+    throw std::runtime_error("Invalid zombie model-work owner");
+  return owner;
+}
+void prepare_pose(ScenarioEntity &owner) {
+  if (owner.joint_pose.empty())
+    owner.joint_pose = actor_bind_pose(*owner.model);
+  if (owner.joint_matrices.empty())
+    owner.joint_matrices = actor_joint_matrices(*owner.model, owner.joint_pose,
+                                                owner.position, owner.angles);
+  if (owner.joint_matrices.size() < 18)
+    throw std::runtime_error("Zombie pose lacks original body joints");
+}
+Vec3 joint_origin(const ModelMatrix &m) {
+  return {float(m[3]), float(m[7]), float(m[11])};
+}
+Vec3 joint_point(const ModelMatrix &m, Vec3 p) {
+  Vec3 out{float(m[0] * p.x + m[1] * p.y + m[2] * p.z + m[3]),
+           float(m[4] * p.x + m[5] * p.y + m[6] * p.z + m[7]),
+           float(m[8] * p.x + m[9] * p.y + m[10] * p.z + m[11])};
+  if (!std::isfinite(out.x) || !std::isfinite(out.y) || !std::isfinite(out.z))
+    throw std::runtime_error("Zombie capsule transform overflow");
+  return out;
+}
+void calculate_startup_capsule(ScenarioState &state, size_t work) {
+  auto &zombie = state.enemies[work];
+  const auto owner_index = pose_owner(state, work);
+  auto &owner = state.enemies[owner_index];
+  if (zombie.flags & 0x80) {
+    if (!zombie.linked_parent || *zombie.linked_parent != owner_index ||
+        !owner.zombie_work)
+      throw std::runtime_error("Attached zombie capsule lacks parent work");
+    owner.joint_matrices = actor_joint_matrices(*owner.model, owner.joint_pose,
+                                                owner.position, owner.angles);
+    owner.rendered_model = pose_actor_rotated(*owner.model, owner.joint_pose,
+                                              owner.position, owner.angles);
+    const auto &matrices = owner.joint_matrices;
+    if (owner.zombie_work->left_leg_state == -1 ||
+        owner.zombie_work->right_leg_state == -1) {
+      owner.geometry.capsule_start = joint_point(matrices.at(9), {0, 3.5f, 0});
+      owner.geometry.capsule_end = joint_point(matrices.at(9), {0, -6, 0});
+    } else {
+      owner.geometry.capsule_start = joint_origin(matrices.at(10));
+      const auto a = joint_origin(matrices.at(4)),
+                 b = joint_origin(matrices.at(7));
+      owner.geometry.capsule_end = {(a.x + b.x) / 2, (a.y + b.y) / 2,
+                                    (a.z + b.z) / 2};
+    }
+    owner.geometry.capsule_radius = 2;
+  } else if (zombie.zombie_flags & 0x80000000u) {
+    throw std::runtime_error(
+        "Detached zombie requires suffix model calculation");
+  }
+  if (zombie.zombie_secondary_flags & 0x200) {
+    zombie.geometry.collision_radius += .2f;
+    if (zombie.geometry.collision_radius >= 2.5f) {
+      zombie.geometry.collision_radius = 2.5f;
+      zombie.zombie_secondary_flags &= ~0x200u;
+    }
+  }
+  zombie.geometry.height = zombie.geometry.collision_height =
+      float(owner.joint_matrices.at(10)[7]) - zombie.position.y;
+}
+void apply_zombie_motion(ScenarioState &state, size_t work) {
+  const auto owner_index = pose_owner(state, work);
+  auto &zombie = state.enemies[work];
+  if (zombie.id != 1 || !(zombie.flags & 1) || !zombie.zombie_work ||
+      zombie.blend_count < 0 || zombie.motion_number >= zombie.motions->size())
+    throw std::runtime_error("Invalid initialized zombie motion work");
+  auto &owner = state.enemies[owner_index];
+  prepare_pose(owner);
+  zombie.motion_boundary = 0;
+  const auto &slot = (*zombie.motions)[zombie.motion_number];
+  if (!slot)
+    return; // bhSetMotion leaves counters untouched for a null record.
+  MotionApplicationOptions options;
+  options.mode = zombie.motion_mode;
+  const bool body = zombie.zombie_flags & 0x80000000u;
+  options.joint_base = body ? 8 : 0;
+  options.mirror_map =
+      body ? std::vector<int8_t>{0, 1, 2, 3, 7, 8, 9, 4, 5, 6, -1}
+           : std::vector<int8_t>{0,  1,  5,  6,  7,  2,  3,  4,  8, 9,
+                                 10, 11, 15, 16, 17, 12, 13, 14, -1};
+  if (zombie.blend_count) {
+    const auto remaining_bits = 65536u - uint32_t(zombie.blend_rate);
+    const auto remaining =
+        remaining_bits < 0x80000000u
+            ? int32_t(remaining_bits)
+            : int32_t(int64_t(remaining_bits) - 0x100000000ll);
+    options.blend_rate =
+        zombie.motion_mode & 0x20
+            ? 1.f / zombie.blend_count - .000015258789f * zombie.blend_rate
+            : .000015258789f * remaining;
+  }
+  auto applied = apply_motion_pose(owner.joint_pose, *slot, zombie.frame,
+                                   options, state.motion_angle_scratch);
+  auto frame = zombie.frame;
+  auto direction = zombie.frame_direction;
+  const auto boundary =
+      advance_motion_frame(slot->frames, int32_t(zombie.motion_step),
+                           zombie.motion_mode, frame, direction);
+  uint16_t attribute = zombie.motion_attribute;
+  if (!slot->attributes.empty())
+    attribute = slot->attributes.at(size_t(zombie.frame) >> 16);
+  owner.joint_pose = std::move(applied.pose);
+  state.motion_angle_scratch = applied.angle_scratch;
+  zombie.frame = frame;
+  zombie.frame_direction = direction;
+  zombie.motion_boundary = boundary;
+  zombie.motion_attribute = attribute;
+  if (zombie.blend_count)
+    --zombie.blend_count;
+}
+void initialize_work(ScenarioState &state, size_t work) {
+  if (!state.collision || state.enemies.size() != 128 ||
+      work >= state.enemies.size())
+    throw std::runtime_error("Invalid zombie initialization context");
+  auto &zombie = state.enemies[work];
+  if (zombie.id != 1 || !(zombie.flags & 1) || zombie.type >= 16 ||
+      zombie.flags & 0x1000)
+    throw std::runtime_error("Unsupported zombie initialization work");
+  if (zombie.zombie_work && (zombie.zombie_flags & 0x80000000u))
+    zombie.flags |= 0x80;
+  const bool linked = zombie.flags & 0x80;
+  const auto owner_index = pose_owner(state, work);
+  if ((!linked && zombie.model_version != 9 && zombie.model_version != 10 &&
+       zombie.model_version != 32) ||
+      (linked &&
+       (!zombie.linked_parent || *zombie.linked_parent != owner_index ||
+        !state.enemies[owner_index].zombie_work)))
+    throw std::runtime_error(
+        "Zombie startup model or parent requires its controller path: slot " +
+        std::to_string(work) + ", model version " +
+        std::to_string(zombie.model_version));
+  auto &owner = state.enemies[owner_index];
+  prepare_pose(owner); // Finish-room bind matrices precede the startup sample.
+  state.player_work_flags &= ~4u;
+  zombie.geometry.radius = 3.8f;
+  zombie.geometry.height = 18.2f;
+  zombie.geometry.width = zombie.geometry.depth = 0;
+  zombie.geometry.collision_radius = 2.5f;
+  zombie.geometry.collision_height = 18.2f;
+  zombie.state_flags = 0;
+  zombie.damage.fill(0);
+  zombie.blend_rate = zombie.blend_count = 0;
+  zombie.frame = 0;
+  zombie.motion_step = 65536;
+  zombie.motion_number = 0;
+  zombie.motion_mode = 0;
+  if (!zombie.zombie_work) {
+    zombie.zombie_work.emplace();
+    if (!linked) {
+      auto allocate = [&](int joint, uint16_t id) {
+        auto slot = link_zombie_enemy(state, work, joint, id);
+        if (!slot)
+          throw std::runtime_error("Zombie linked work pool exhausted");
+        return *slot;
+      };
+      zombie.zombie_work->body = allocate(1, 1);
+      zombie.zombie_work->children[4] = allocate(0, 31);
+      zombie.zombie_work->children[0] = allocate(0, 32);
+      zombie.zombie_work->children[1] = allocate(0, 32);
+      zombie.zombie_work->children[2] = allocate(0, 33);
+      zombie.zombie_work->children[3] = allocate(0, 33);
+      bool first = true;
+      for (size_t i = 0; i < state.enemies.size(); ++i) {
+        const auto &enemy = state.enemies[i];
+        if (enemy.id == 1 && enemy.flags & 1 && enemy.type != 10 &&
+            !(enemy.flags & 0x80)) {
+          first = i == work;
+          break;
+        }
+      }
+      if (first) {
+        auto &manager = state.enemies[allocate(0, 38)];
+        manager.linked_parent.reset();
+        manager.flags &= ~0x80u;
+      }
+    }
+  } else {
+    const auto previous = *zombie.zombie_work;
+    zombie.zombie_work.emplace();
+    for (size_t i = 0; i < 7; ++i)
+      zombie.zombie_work->children[i] = previous.children[i];
+    zombie.zombie_work->body = previous.body;
+    zombie.zombie_work->shadow = previous.shadow;
+  }
+  zombie.zombie_flags = zombie.zombie_secondary_flags = 0;
+  zombie.zombie_walk_choice = 0;
+  zombie.zombie_work->personality =
+      zombie_personality_index(zombie.model_version);
+  zombie.health = roll_zombie_health(state, zombie.model_version);
+  zombie.zombie_flags |= 1;
+  zombie.flags = (zombie.flags | 0x178) & ~2u;
+  if (linked) {
+    zombie.flags = (zombie.flags & ~0x28u) | 0x8000;
+    zombie.zombie_flags = (zombie.zombie_flags & 0xf) | 0x80000000u;
+    zombie.state_flags |= 8;
+    zombie.type = owner.type;
+    zombie.health = owner.health;
+    zombie.position = owner.position;
+    zombie.angles = {};
+  } else {
+    zombie.model_flags = 0;
+    zombie.zombie_flags |= 0x10000000;
+    if (zombie.zombie_work->body) {
+      auto &body = state.enemies.at(*zombie.zombie_work->body);
+      body.type = zombie.type;
+      body.modes = zombie.modes;
+    }
+    if (!(zombie.zombie_work->material_color & 0xffffff)) {
+      zombie.model_flags &= ~0x400u;
+      zombie.zombie_work->material_color = 0xffb2b2b2;
+    }
+  }
+  if (!(zombie.flags & 0x800)) {
+    zombie.zombie_work->shadow =
+        EnemyShadow{linked ? std::vector<int8_t>{8, 10, -1}
+                           : std::vector<int8_t>{0, 3, 4, 10, -1},
+                    linked ? 10 : 1,
+                    {6, 5, 5}};
+    zombie.flags |= 0x800;
+  }
+  initialize_zombie_type(state, work);
+  zombie.clip_joints = {11, 14, 17, 4, 7, 12, 15, 1};
+  zombie.model_flags &= ~0x20u;
+  zombie.look_joint = 10;
+  zombie.combo_flags |= 2;
+  apply_zombie_motion(state, work);
+  calculate_startup_capsule(state, work);
+}
+} // namespace
+void initialize_zombie_work(ScenarioState &state, size_t work) {
+  auto replacement = state;
+  initialize_work(replacement, work);
+  state = std::move(replacement);
+}
+void advance_zombie_motion(ScenarioState &state, size_t work) {
+  auto replacement = state;
+  apply_zombie_motion(replacement, work);
+  state = std::move(replacement);
+}
+void initialize_zombie_auxiliary(ScenarioState &state, size_t work) {
+  if (state.enemies.size() != 128 || work >= state.enemies.size())
+    throw std::runtime_error("Invalid zombie auxiliary work pool");
+  const auto &current = state.enemies[work];
+  if (!(current.flags & 1) || (current.id != 31 && current.id != 32 &&
+                               current.id != 33 && current.id != 38))
+    throw std::runtime_error("Unsupported zombie auxiliary initialization");
+  auto replacement = current;
+  replacement.state_flags = 0;
+  replacement.flags |= 0x8000;
+  if (replacement.id != 38) {
+    const size_t words = replacement.id == 31 ? 8 : 28;
+    if (!replacement.zombie_part_work)
+      replacement.zombie_part_work =
+          ZombiePartExtendedWork{std::vector<uint32_t>(words)};
+    if (replacement.zombie_part_work->words.size() != words)
+      throw std::runtime_error("Zombie auxiliary extended work size mismatch");
+    auto &fields = replacement.zombie_part_work->words;
+    fields[0] = fields[1] = fields[5] = 0;
+    fields[2] = replacement.id == 31 ? 0 : 2;
+  }
+  replacement.modes = {1, 0, 0, 0};
+  state.enemies[work] = std::move(replacement);
 }
 } // namespace ashford

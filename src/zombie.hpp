@@ -17,4 +17,15 @@ uint32_t zombie_walk_motion(int32_t choice, bool linked_body);
 // All 16 bhEne01_InitType table entries. Caller performs the surrounding
 // work allocation, health roll, cloned-body setup, pose and collision init.
 void initialize_zombie_type(ScenarioState &state, size_t work);
+// Main Init state/linked allocation/motion/capsule path for the selected
+// graveyard models. Startup shadow requests are retained as native metadata.
+// Movement, damage, detached drawing and the wider scheduler remain separate.
+// On success this transactional startup replaces state; reacquire references.
+void initialize_zombie_work(ScenarioState &state, size_t work);
+// Apply this work's motion to its ML_WORK owner, retaining separate counters.
+// This transactional diagnostic helper also replaces state on success.
+void advance_zombie_motion(ScenarioState &state, size_t work);
+// Original head/arm/leg and hidden parent-manager mode-0 startup. Does not
+// dispatch detached-part damage or manager nearest/stair movement checks.
+void initialize_zombie_auxiliary(ScenarioState &state, size_t work);
 } // namespace ashford

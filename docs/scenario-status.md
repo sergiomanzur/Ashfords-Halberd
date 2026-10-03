@@ -309,3 +309,37 @@ passed after it. Retail checks cover 480 graveyard startup/walking applications
 with mirrored/blended samples and the body's joint-eight offset. Complete
 zombie initialization, body subtree drawing, movement/attacks/damage and ID-91
 subplayer handling remain required; application graveyard travel stays pending.
+
+`initialize_zombie_work` now adapts the selected ordinary main startup path
+for model versions 9, 10 and 32. The second graveyard variant contains version
+10 roots in addition to 9 and 32. Native extended work retains the body and
+first seven child slots across reinitialization, resets other startup state,
+allocates six core works per root and the extra first-root hidden manager,
+and preserves the original health/walking RNG order. Attached body work has
+its own counters while applying joint-eight channels to the parent's mutable
+pose through an owner index. Copying a scenario isolates those poses.
+
+Initial collision dimensions, damage clearing, flags, clipping joints and
+type dispatch follow the source. Root startup reads the finish-room bind
+matrices; attached-body startup rebuilds the combined parent pose and obtains
+capsule endpoints and height from world joints. Startup shadow descriptors and
+the default material color are retained as metadata; their rendering is still
+pending. Stair-use clearing has no native stair binding yet. Detached suffix
+calculation and saved-matrix/rotation-reset model work remain unsupported.
+
+`initialize_zombie_auxiliary` adapts head, arm, leg and manager startup from
+`en01sub.c`, including original extended-work sizes and selective resets on
+reuse. Its damage controllers and the manager's nearest-root/stair movement
+checks are still pending. These helpers are exercised by the developer probe;
+they are not yet dispatched by the runtime enemy scheduler. Transactional
+main startup/motion helpers replace `ScenarioState` on success, so callers
+must reacquire entity references. The motion helper is currently diagnostic;
+per-frame full-state copying needs replacement before gameplay integration.
+
+Synthetic tests cover allocation/reset order, RNG, shared pose ownership,
+copy isolation, variant-10 health, auxiliary reuse and failure rollback. The
+retail runtime probe verifies 20 root/body initializations, 62 allocations and
+52 auxiliary initializations across both graveyard variants, while retaining
+the 480 motion-channel probes. This advances the native enemy startup work.
+AI, combat, ID-91 control and the rest of the Step 1 playable slice remain
+incomplete, and New Game remains unavailable.

@@ -38,6 +38,31 @@ struct ScenarioDoor {
   uint16_t attribute = 0;
   uint8_t stage = 0, room = 0, position = 0, type = 0;
 };
+struct EnemyGeometry {
+  float radius = 0, height = 0, width = 0, depth = 0;
+  float collision_radius = 0, collision_height = 0;
+  Vec3 capsule_start{}, capsule_end{};
+  float capsule_radius = 0;
+};
+struct EnemyShadow {
+  std::vector<int8_t> joints;
+  int32_t anchor_joint = 0;
+  Vec3 size{};
+};
+struct ZombieExtendedWork {
+  // EXP0 child slots: arms, legs, head, cap, worm, bomb and scope.
+  std::array<std::optional<size_t>, 9> children{};
+  std::optional<size_t> body;
+  std::optional<EnemyShadow> shadow;
+  uint32_t material_color = 0;
+  uint8_t personality = 0;
+  int32_t left_leg_state = 0, right_leg_state = 0;
+};
+struct ZombiePartExtendedWork {
+  // en01sub.c stores 32 bytes for the head, 112 for an arm/leg. Retain
+  // untouched words on reinitialization; damage-state meanings are separate.
+  std::vector<uint32_t> words;
+};
 struct ScenarioEntity {
   uint32_t flags = 0, state_flags = 0;
   int32_t angular_speed = 0;
@@ -50,6 +75,9 @@ struct ScenarioEntity {
   std::shared_ptr<const ActorModel> model;
   std::shared_ptr<const ActorModelBank> model_bank;
   std::vector<JointPose> joint_pose;
+  std::vector<ModelMatrix> joint_matrices;
+  // ML_WORK aliasing is represented by an owner slot, not mutable pointers.
+  std::optional<size_t> pose_owner;
   std::optional<Scene> rendered_model;
   uint16_t id = 0, type = 0;
   uint8_t model_version = 0;
@@ -70,6 +98,12 @@ struct ScenarioEntity {
   Vec3 linked_offset{};
   std::optional<int32_t> zombie_walk_choice;
   uint32_t zombie_flags = 0, zombie_secondary_flags = 0;
+  std::optional<ZombieExtendedWork> zombie_work;
+  std::optional<ZombiePartExtendedWork> zombie_part_work;
+  EnemyGeometry geometry;
+  std::array<int32_t, 64> damage{};
+  uint32_t combo_flags = 0;
+  int32_t look_joint = 0;
 };
 struct ScenarioTask {
   std::optional<ScenarioProgram> program;
@@ -116,6 +150,7 @@ struct ScenarioState {
   int32_t player_frame = 0;
   uint16_t selected_item_id = 0;
   uint32_t player_state_flags = 0;
+  uint32_t player_work_flags = 0;
   uint32_t drawing_flags = 0;
 };
 // Native control and event scheduling subset. Unsupported instructions fail

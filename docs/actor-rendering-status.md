@@ -118,3 +118,11 @@ against both model versions. Body samples preserved joints before index eight;
 direct samples were checked against independent destination/axis mapping.
 This completes the channel-application dependency, not zombie initialization,
 body subtree drawing, AI/combat or the complete playable slice.
+
+Selected root/body startup now uses owner-index pose sharing and world joint
+matrices for its collision capsule. Attached-body initialization refreshes the
+parent's combined rendered pose; retail checks cover all ten roots across the
+two graveyard variants. The root's requested material color and both shadow
+descriptors remain metadata until their original rendering paths are adapted.
+Saved O_WORK matrices, selected joint-range drawing, detached body work and
+flag-0x1000 placement remain required before complete enemy rendering.

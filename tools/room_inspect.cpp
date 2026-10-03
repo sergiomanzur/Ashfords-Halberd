@@ -75,6 +75,8 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_parameters=0;
         size_t zombie_joint_samples=0, zombie_linked_poses=0;
         size_t zombie_channel_applications=0;
+        size_t zombie_startups=0, zombie_auxiliary_startups=0;
+        size_t zombie_startup_links=0, zombie_managers=0;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
@@ -224,6 +226,63 @@ int wmain(int argc,wchar_t** argv) {
                             }
                         if(!parents || bindings!=parents*6)
                             throw std::runtime_error("Missing retail linked zombie work coverage");
+                        // Exercise the selected native main Init paths, including
+                        // the extra first-root manager and shared body ML_WORK.
+                        auto initialized=bound_enemies;
+                        initialized.collision=collision;
+                        std::vector<size_t> roots;
+                        for(size_t slot=0;slot<bound_enemies.enemies.size();++slot)
+                            if((bound_enemies.enemies[slot].flags&1) && bound_enemies.enemies[slot].id==1)
+                                roots.push_back(slot);
+                        for(auto root:roots) {
+                            initialize_zombie_work(initialized,root);
+                            const auto& work=initialized.enemies[root];
+                            if(!work.zombie_work || !work.zombie_work->body || work.modes[0]!=1 || work.health<=0)
+                                throw std::runtime_error("Retail native zombie root Init mismatch");
+                            ++zombie_startups;
+                        }
+                        for(size_t body=0;body<initialized.enemies.size();++body) {
+                            if(!(initialized.enemies[body].flags&1) || (bound_enemies.enemies[body].flags&1))continue;
+                            const auto id=initialized.enemies[body].id;
+                            if(id!=1) {
+                                initialize_zombie_auxiliary(initialized,body);
+                                const auto& part=initialized.enemies[body];
+                                if(part.modes!=std::array<uint8_t,4>{1,0,0,0} || part.state_flags || !(part.flags&0x8000) ||
+                                   (id!=38 && (!part.zombie_part_work || part.zombie_part_work->words.size()!=(id==31?8u:28u))))
+                                    throw std::runtime_error("Retail native zombie auxiliary Init mismatch");
+                                ++zombie_auxiliary_startups;
+                                continue;
+                            }
+                            const auto root=*initialized.enemies[body].pose_owner;
+                            initialize_zombie_work(initialized,body);
+                            const auto& owner=initialized.enemies[root];
+                            const auto& work=initialized.enemies[body];
+                            if(work.pose_owner!=root || work.health!=owner.health || !work.joint_pose.empty() ||
+                               work.motion_number!=202 || work.modes[0]!=1 || work.geometry.height<=0 ||
+                               owner.geometry.capsule_radius!=2 || !owner.rendered_model || owner.rendered_model->meshes.empty())
+                                throw std::runtime_error("Retail native zombie body Init/capsule mismatch");
+                            for(const auto& point:{owner.geometry.capsule_start,owner.geometry.capsule_end})
+                                if(!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z))
+                                    throw std::runtime_error("Retail native zombie capsule is not finite");
+                            ++zombie_startups;
+                        }
+                        size_t allocated=0,managers=0;
+                        for(size_t slot=0;slot<initialized.enemies.size();++slot)
+                            if((initialized.enemies[slot].flags&1) && !(bound_enemies.enemies[slot].flags&1)) {
+                                const auto& work=initialized.enemies[slot];
+                                ++allocated;
+                                if(!work.pose_owner || std::find(roots.begin(),roots.end(),*work.pose_owner)==roots.end())
+                                    throw std::runtime_error("Retail startup linked model owner mismatch");
+                                if(work.id==38) {
+                                    if(work.linked_parent || work.flags&0x80 || !(work.model_flags&1))
+                                        throw std::runtime_error("Retail startup manager visibility/parent mismatch");
+                                    ++managers;
+                                }
+                            }
+                        if(allocated!=roots.size()*6+1 || managers!=1)
+                            throw std::runtime_error("Retail native startup allocation count mismatch");
+                        zombie_startup_links+=allocated;
+                        zombie_managers+=managers;
                     }
                     for(const auto* entities:{&bound_enemies.objects,&bound_enemies.items})
                         for(const auto& entity:*entities)if(entity.model) {
@@ -501,6 +560,12 @@ int wmain(int argc,wchar_t** argv) {
             if(zombie_channel_applications!=zombie_parameters*48)
                 throw std::runtime_error("Missing retail zombie channel application coverage");
             std::cout<<"Applied "<<zombie_channel_applications<<" full/body graveyard motion samples with original mirroring, joint offset and blending\n";
+            if(zombie_startups!=zombie_parameters*2 || zombie_startup_links!=zombie_parameters*6+2 || zombie_managers!=2)
+                throw std::runtime_error("Missing retail zombie main Init coverage");
+            std::cout<<"Initialized "<<zombie_startups<<" native root/body zombie works with "<<zombie_startup_links<<" linked allocations and "<<zombie_managers<<" hidden managers\n";
+            if(zombie_auxiliary_startups!=zombie_parameters*5+2)
+                throw std::runtime_error("Missing retail zombie auxiliary Init coverage");
+            std::cout<<"Initialized "<<zombie_auxiliary_startups<<" native head/arm/leg/manager works in pool order\n";
             if(runtime_check)std::cout<<"Loaded "<<runtime_entries<<" native corridor runtime entries with Claire pose and initialized scenario state\n";
             if(runtime_check)std::cout<<"Advanced "<<runtime_ticks<<" joined player/actor/prop/scenario runtime ticks\n";
             if(runtime_check)std::cout<<"Applied player displacement on "<<runtime_movement_ticks<<" runtime ticks\n";

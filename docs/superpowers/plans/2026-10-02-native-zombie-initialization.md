@@ -31,8 +31,9 @@ movement, combat and ID-91 controller rather than enabling a static encounter.
   and separate extended counters. The parent manager initializes separately,
   then performs nearest-root and stair checks. These are actual scheduler
   dependencies, not optional diagnostic callbacks.
-- Selected authored roots are type 0, model versions 9 and 32; ID 91 is also
-  active. Other model-specific cap/worm/bomb attachments require explicit
+- Selected initial authored roots are type 0, model versions 9 and 32; the
+  second graveyard variant also uses version 10. ID 91 is also active in the
+  initial variant. Other model-specific cap/worm/bomb attachments require explicit
   support when reached. Do not silently substitute selected-room behavior.
 
 ## Execution
@@ -51,3 +52,26 @@ movement, combat and ID-91 controller rather than enabling a static encounter.
    inventory, decoded audio and versioned cross-room save/load required by
    Step 1. Keep New Game unavailable until the approved playable-slice scope
    and original-reference behavior comparison pass.
+
+## Startup checkpoint
+
+The selected root/body startup state, six core linked allocations plus the
+first-root manager, RNG cadence, owner-index joint sharing and ordinary
+attached capsule path are implemented. Auxiliary head/arm/leg/manager startup
+is implemented independently and probed in allocation order. The second
+retail graveyard variant additionally uses model version 10; its personality
+and startup have a synthetic regression.
+
+The source review found no actionable defect in the represented paths.
+Rendering tint/shadows, saved matrices and selected model ranges, stair-use
+binding, runtime enemy dispatch/AI/combat and ID-91 remain required. Do not
+interpret this checkpoint as complete main startup rendering or completion of
+Step 1. Next adapt model-work calculation/range behavior and required enemy
+dispatch, then verify the real transition before exposing it in the preview.
+
+Headless verification: `tools/build.ps1` passed all 19 CTest entries and
+packaged the Windows executable. The retail runtime probe validated all 205
+rooms, 20 root/body and 52 auxiliary startup calls, 62 linked allocations,
+480 channel applications and 960 corridor runtime ticks. The packaged
+application smoke rendered 240 frames and returned to the main menu using
+an isolated profile and SDL dummy video/software rendering.
