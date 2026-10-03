@@ -2,6 +2,7 @@
 #include "effects.hpp"
 #include "room.hpp"
 #include "scenario_motion.hpp"
+#include "scenario_collision.hpp"
 #include "zombie.hpp"
 #include <limits>
 #include <stdexcept>
@@ -724,6 +725,14 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
       if (!resume())
         return;
       break;
+    case 10:
+    case 11:
+    case 12:
+      extent(4);
+      set_scenario_collision_visibility(state, uint8_t(program[pc] - 10),
+                                        program[pc + 1], program[pc + 2] == 0);
+      pc += 4;
+      break;
     case 14: {
       extent(6);
       auto count = word(pc + 2);
@@ -736,10 +745,12 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
       uint32_t mask = 0x80000000u >> (count & 31);
       if (state.flags[10][0] & 0x800) {
         if (!(item_flags & mask)) {
-          auto &trigger = indexed(state.interactions, interaction);
+          auto trigger = scenario_interaction(state, interaction);
           auto &item = indexed(state.items, trigger.parameters[0]);
-          if (!keep_trigger)
+          if (!keep_trigger) {
             trigger.flags &= uint8_t(~1u);
+            replace_scenario_interaction(state, interaction, trigger);
+          }
           item.state_flags |= 0x1000000;
           item_flags |= mask;
           flag(9, count & 0x1ff) &= ~mask;
@@ -754,14 +765,18 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
       extent(6);
       auto item_index = program[pc + 1];
       auto count = word(pc + 2);
-      auto &trigger = indexed(state.interactions, program[pc + 4]);
+      auto trigger = scenario_interaction(state, program[pc + 4]);
       if (flag(7, count & 0x1ff) & (0x80000000u >> (count & 31))) {
         auto &item = indexed(state.items, item_index);
-        if (program[pc + 5] == 0)
+        if (program[pc + 5] == 0) {
           trigger.flags &= uint8_t(~1u);
+          replace_scenario_interaction(state, program[pc + 4], trigger);
+        }
         item.state_flags |= 0x1000000;
-      } else
+      } else {
         trigger.flags |= 1;
+        replace_scenario_interaction(state, program[pc + 4], trigger);
+      }
       pc += 6;
       break;
     }
@@ -805,11 +820,12 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
     }
     case 37: {
       extent(10);
-      auto &trigger = indexed(state.interactions, program[pc + 1]);
+      auto trigger = scenario_interaction(state, program[pc + 1]);
       trigger.attribute = word(pc + 2);
       for (size_t i = 0; i < 4; ++i)
         trigger.parameters[i] = program[pc + 4 + i];
       trigger.type = program[pc + 8];
+      replace_scenario_interaction(state, program[pc + 1], trigger);
       pc += 10;
       break;
     }

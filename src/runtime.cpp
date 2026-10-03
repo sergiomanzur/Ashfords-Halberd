@@ -172,6 +172,8 @@ void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
                        const PlayerTranslationTables &translations,
                        uint16_t pad) {
   auto &scenario = runtime.scenario;
+  if ((scenario.flags[6][0] & 1) && !scenario.collision)
+    throw std::runtime_error("Missing current runtime collision work");
   uint16_t pressed = uint16_t(pad & ~runtime.previous_pad);
   runtime.previous_pad = pad;
   scenario.input_held = pad;
@@ -229,7 +231,7 @@ void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
     }
     runtime.world =
         advance_player_world(runtime.world, player, translations,
-                             runtime.collision, runtime.cuts, pad, &contacts);
+                             *scenario.collision, runtime.cuts, pad, &contacts);
     for (size_t slot = 0; slot < scenario.enemies.size(); ++slot)
       scenario.enemies[slot].state_flags = contacts.enemies[slot].state_flags;
     scenario.player_state_flags = contacts.player.state_flags;
