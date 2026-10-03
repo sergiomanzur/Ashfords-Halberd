@@ -22,6 +22,15 @@ struct GroundQuery {
   // Original static-then-dynamic wall index (sys->htp).
   std::optional<size_t> wall;
 };
+struct LineCollisionResult {
+  Vec3 position{}, normal{};
+  // bhCollisionCheckLine: last successful static-then-dynamic wall index.
+  std::optional<size_t> wall;
+};
+LineCollisionResult
+query_collision_line(const RoomCollision &room,
+                     const std::vector<CollisionRecord> &dynamic, Vec3 from,
+                     Vec3 to);
 GroundQuery query_ground_position(const RoomCollision &room,
                                   const std::vector<CollisionRecord> &dynamic,
                                   Vec3 position);

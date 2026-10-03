@@ -96,6 +96,10 @@ void tick_zombie_player_grab(ScenarioState &state, size_t work,
                              const std::vector<int32_t> &playing = {});
 void push_zombie_grab_neighbors(ScenarioState &state, size_t work,
                                 const ScenarioEntity &player, int mode);
+// Complete en01.c::NG00 held/lunge grab damage and wall/cliff release.
+// Caller runs player control, motion sampling and cached model updates after.
+void tick_zombie_grab(ScenarioState &state, size_t work, ScenarioEntity &player,
+                      const std::vector<int32_t> &playing = {});
 void tick_zombie_neck(ScenarioState &state, size_t work,
                       const ActorModelWork &player);
 } // namespace ashford

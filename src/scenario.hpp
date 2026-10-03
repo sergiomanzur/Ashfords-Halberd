@@ -118,6 +118,7 @@ struct ScenarioEntity {
   int16_t grab_yaw_offset = 0; // BH_PWORK::waxp.
   int16_t torso_yaw = 0;       // BH_PWORK::wax.
   int16_t turn_speed = 0;      // BH_PWORK::way.
+  int16_t roll_speed = 0;      // BH_PWORK::waz.
   float speed = 0;             // BH_PWORK::spd.
   float shape_count = 0; // BH_PWORK::shp_ct, consumed by draw-time morphology.
   uint32_t frame_direction = 0;
@@ -139,6 +140,7 @@ struct ScenarioEntity {
   std::array<int32_t, 64> damage{};
   int32_t damage_joint = 0; // BH_PWORK::djnt_no.
   Vec3 damage_velocity{};   // BH_PWORK::dvx/dvy/dvz.
+  Vec3 damage_position{};   // BH_PWORK::dpx/dpy/dpz.
   uint32_t combo_flags = 0;
   int32_t combo_timeout = 0;
   int32_t look_joint = 0;
@@ -219,7 +221,8 @@ struct ScenarioState {
   uint32_t player_state_flags = 0;
   uint32_t player_work_flags = 0;
   uint32_t player_secondary_flags = 0;
-  uint32_t input_held = 0; // sys->pad_on; source directional bits are low4.
+  uint32_t input_held = 0;    // sys->pad_on; source directional bits are low4.
+  uint32_t input_pressed = 0; // sys->pad_ps, consumed by grab LeverCheck.
   uint32_t drawing_flags = 0;
 };
 // Native control and event scheduling subset. Unsupported instructions fail

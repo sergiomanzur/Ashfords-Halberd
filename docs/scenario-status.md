@@ -801,3 +801,42 @@ main-menu return and INI creation; executable/ZIP refreshed. Fresh source review
 found no Critical/Important production defects. Deferred Minor coverage:
 combined push plus failed-release rollback and negative-angle rounding. Existing
 separate rollback and positive/exact180 alignment checks pass.
+
+Native en01.c::NG00 now implements the complete held/lunge enemy-grab callback:
+paired startup/character motions, authored frame25/60 bite damage and personality
+bonus, frame20 timer initialization, pressed-input LeverCheck escape, health<0
+fatal classification, recoil, wall/cliff recovery, cap row4 flight metadata,
+cached-root relocation and all authored recovery states. Source same-motion
+counter retention and optional null body remain intact. Root/body/player/cap
+scalars, motion changes and sound requests commit after consumed context
+validates, including late cliff failures after recoil and staged cap flight.
+
+The native hitchkl line query covers all original wall types0..7 with original
+static/dynamic order, clipped endpoint, last hit, raw plane normal, one-sided
+polygons, strict end exclusion and raw signed dimensions. It preserves source
+type7's unusual negative-X conditional. Native compatibility completes the
+type2/3 octagonal top before querying; upstream reads uninitialized vertices
+during its fill loop. This defines the top geometry without reproducing those
+undefined stack reads.
+
+Retail dependency probes now join real lunge captures through NG00 bite damage,
+pressed-input escape or fatal release, PlyDG00 and paired original motion/cache
+updates. Initial scan passes3890joined state updates,40authored bites,
+20input escapes,20fatal releases,3380Claire and7700enemy motion/cache samples
+across both facing branches and all10graveyard roots. Enemy Nage routing,
+standing grab callbacks and PlayerLink/world positioning remain separate
+required work; these checks do not establish complete interactive combat.
+Step1/New Game remain gated pending the complete gameplay/audio/inventory/save
+slice and its final acceptance checks.
+
+Final verification:55/55headless checks, all205retail rooms,3890joined grab
+updates,40bites,20pressed escapes and20fatal releases pass. Fresh packaged
+dummy-SDL smoke passes241ticks/240renders/53movement ticks/10focus-blocked
+ticks, menu return and INI persistence; executable/ZIP refreshed. The first full
+build encountered a permission-denied rename in the asset-recovery test's
+unique scratch folder. Its independent rerun and the full build rerun pass;
+the responsible process remains unverified. Both results are retained locally.
+Source review found no Critical/Important production defects. Deferred Minor
+coverage: polygon endpoint/corner priority/near-parallel threshold fixtures and
+sound/RNG rollback after late fatal-cache failure. Source paths reviewed as
+correct; these cases lack focused regression protection. Step1 remains active.

@@ -148,6 +148,8 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_close_pursuit_ticks=0,zombie_walk_phase_boundaries=0;
         size_t zombie_lunge_ticks=0,zombie_capture_probes=0;
         size_t player_grab_ticks=0,player_grab_samples=0,player_grab_releases=0,player_grab_deaths=0;
+        size_t zombie_grab_ticks=0,zombie_grab_bites=0,zombie_grab_escapes=0,zombie_grab_fatals=0;
+        size_t zombie_grab_player_samples=0,zombie_grab_enemy_samples=0;
         size_t zombie_motion_sound_requests=0, zombie_motion_vibration_requests=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
@@ -940,7 +942,7 @@ int wmain(int argc,wchar_t** argv) {
                                         captured.motions=captured.base_motions;
                                         captured.joint_pose=actor_bind_pose(player.models.at(0));
                                         held.input_held=0xabcd;
-                                        auto sample_player=[&](ScenarioState& context,ScenarioEntity& actor) {
+                                        auto sample_player=[&](ScenarioState& context,ScenarioEntity& actor,bool account=true) {
                                             const auto& clip=actor.motions->at(actor.motion_number).value();
                                             MotionApplicationOptions options;
                                             options.mode=actor.motion_mode;
@@ -965,7 +967,8 @@ int wmain(int argc,wchar_t** argv) {
                                                 for(double element:joint.matrix)
                                                     if(!std::isfinite(element))
                                                         throw std::runtime_error("Retail player grab cache is nonfinite");
-                                            ++player_grab_samples;
+                                            if(account)++player_grab_samples;
+                                            else ++zombie_grab_player_samples;
                                         };
                                         const auto voices=held.pending_player_voices.size();
                                         for(size_t tick=0;tick<8;++tick) {
@@ -1012,6 +1015,60 @@ int wmain(int argc,wchar_t** argv) {
                                            fatal.input_held!=0xabc0 || (fatal.enemies[root].zombie_flags&0xa4080))
                                             throw std::runtime_error("Retail complete player fatal-grab cleanup failed");
                                         ++player_grab_deaths;
+                                        // Join actual captured NG00 to PlyDG00 in source order.
+                                        // Press escape only after a real bite; fatal work begins
+                                        // with1HP and reaches death through the same bite callback.
+                                        // PlayerLink/world positioning remains a separate dependency.
+                                        for(bool lethal : {false,true}) {
+                                            auto combat=grabbing;
+                                            auto& biting=combat.enemies[root];
+                                            if(back)biting.zombie_flags|=0x4000;
+                                            else biting.zombie_flags&=~0x4000u;
+                                            auto bitten_player=victim;
+                                            bitten_player.player_work.emplace();
+                                            bitten_player.base_motions=captured.base_motions;
+                                            bitten_player.motions=bitten_player.base_motions;
+                                            bitten_player.joint_pose=actor_bind_pose(player.models.at(0));
+                                            bitten_player.health=lethal?1:100;
+                                            bool saw_bite=false,finished=false;
+                                            const int32_t damage=biting.model_version==32?15:10;
+                                            for(size_t tick=0;tick<240;++tick) {
+                                                combat.input_pressed=saw_bite?0x2d0f:0;
+                                                const auto old_health=bitten_player.health;
+                                                tick_zombie_grab(combat,root,bitten_player);++zombie_grab_ticks;
+                                                if(bitten_player.health!=old_health) {
+                                                    if(saw_bite || bitten_player.health!=old_health-damage)
+                                                        throw std::runtime_error("Retail joined grab bite damage/order mismatch");
+                                                    saw_bite=true;++zombie_grab_bites;
+                                                }
+                                                tick_zombie_player_grab(combat,root,bitten_player);
+                                                if(lethal && (bitten_player.flags&2) && !bitten_player.motion_step &&
+                                                   biting.modes[3]==7) {finished=true;break;}
+                                                if(!lethal && bitten_player.modes==std::array<uint8_t,4>{1,0,0,0} &&
+                                                   biting.modes[0]!=2) {finished=true;break;}
+                                                tick_zombie_motion(combat,root,boundary_effects);
+                                                calculate_zombie_model(combat,root);
+                                                tick_zombie_motion(combat,body,boundary_effects);
+                                                calculate_zombie_model(combat,body);zombie_grab_enemy_samples+=2;
+                                                if(bitten_player.modes[0]==4 || bitten_player.modes[0]==6)
+                                                    sample_player(combat,bitten_player,false);
+                                            }
+                                            if(!finished || !saw_bite || (bitten_player.flags&0x10004) ||
+                                               (combat.enemies[root].zombie_flags&0x20000))
+                                                throw std::runtime_error("Retail joined enemy/player grab failed to release");
+                                            if(lethal) {
+                                                if(bitten_player.health>=0 || !(bitten_player.state_flags&0x40000) ||
+                                                   combat.enemies[root].motion_number!=111 ||
+                                                   combat.enemies[body].motion_number!=311)
+                                                    throw std::runtime_error("Retail native bite fatal transition/cache relocation failed");
+                                                ++zombie_grab_fatals;
+                                            } else {
+                                                if(bitten_player.health!=100-damage ||
+                                                   bitten_player.motions!=bitten_player.base_motions)
+                                                    throw std::runtime_error("Retail native bite escape failed to restore player bank");
+                                                ++zombie_grab_escapes;
+                                            }
+                                        }
                                     }
                                     auto blood=initialized;
                                     auto& bitten=blood.enemies[root];
@@ -1584,6 +1641,14 @@ int wmain(int argc,wchar_t** argv) {
                 std::cout<<"Advanced "<<player_grab_ticks<<" player held-grab states and "<<player_grab_samples
                          <<" original Claire motion/cache samples; "<<player_grab_releases<<" escapes and "
                          <<player_grab_deaths<<" fatal releases across both facings\n";
+                if(zombie_grab_escapes!=zombie_brain_roots*2 || zombie_grab_fatals!=zombie_grab_escapes ||
+                   zombie_grab_bites!=zombie_grab_escapes+zombie_grab_fatals ||
+                   zombie_grab_player_samples<zombie_grab_bites*25 || zombie_grab_enemy_samples<zombie_grab_bites*50)
+                    throw std::runtime_error("Retail joined zombie grab coverage mismatch");
+                std::cout<<"Advanced "<<zombie_grab_ticks<<" joined enemy/player grab states with "<<zombie_grab_bites
+                         <<" authored bites, "<<zombie_grab_escapes<<" input escapes and "<<zombie_grab_fatals
+                         <<" fatal releases; "<<zombie_grab_player_samples<<" original Claire and "
+                         <<zombie_grab_enemy_samples<<" paired enemy motion/cache samples\n";
                 if(zombie_model_ticks!=zombie_set_motion_ticks || zombie_cache_draws!=zombie_brain_roots*3 ||
                    zombie_cache_changed_draws!=zombie_brain_roots*2)
                     throw std::runtime_error("Retail CalcEnemy/cache drawing coverage mismatch");
