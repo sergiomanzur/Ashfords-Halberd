@@ -172,3 +172,13 @@ probe prepares room archive entry 2 slot 4 from 27 to 31 joints and draws six
 meshes. This preparation intentionally supports the selected four-added-object
 skin layout. Facial deformation, eye matrices, lip shapes and MASK/controller
 updates still require their own source port before ID 91 runs in gameplay.
+
+Normal facial shape keys now decode from the original MASK variable-table
+layout into native `FaceParameters`. Sampling follows the source unsigned-frame
+selection and first/last clamping. The five interpolation modes preserve
+selective muscle updates, jaw/tongue level scaling and unscaled eye coordinates.
+Cosine interpolation uses the existing Ninja quarter-wave table and its 16383
+reflection, including integer angle truncation. The graveyard MASK has 24
+normal shape keys ending at frame 46. Packed lip keys, deformation, eye matrices
+and controller integration remain pending; normal parameter sampling alone
+does not animate the model.

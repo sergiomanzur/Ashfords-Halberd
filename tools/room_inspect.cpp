@@ -7,6 +7,7 @@
 #include "motion.hpp"
 #include "actor.hpp"
 #include "face_model.hpp"
+#include "face_parameters.hpp"
 #include "runtime.hpp"
 #include "zombie.hpp"
 #include "render.hpp"
@@ -107,6 +108,24 @@ int wmain(int argc,wchar_t** argv) {
                                     throw std::runtime_error("Graveyard facial preparation differs from selected model");
                                 std::cout<<"Prepared subplayer joints="<<expanded.size()
                                          <<" meshes="<<facial_scene.meshes.size()<<'\n';
+                                const auto track=decode_face_track(actor.model_bank->mask);
+                                if(track.empty())throw std::runtime_error("Selected facial model has no shape keys");
+                                const auto first=sample_face_track(track,0);
+                                const auto last=sample_face_track(track,float(track.back().frame));
+                                (void)first;(void)last;
+                                size_t sampled_shapes=0;
+                                for(float frame=0;frame<=track.back().frame;frame+=0.5f) {
+                                    (void)sample_face_track(track,frame);
+                                    ++sampled_shapes;
+                                }
+                                for(const auto& key:track) {
+                                    const auto exact=sample_face_track(track,float(key.frame));
+                                    if(exact.muscle!=key.parameters.muscle)
+                                        throw std::runtime_error("Facial sampling changed an authored muscle key");
+                                }
+                                std::cout<<"Selected facial shape keys="<<track.size()
+                                         <<" last_frame="<<track.back().frame
+                                         <<" samples="<<sampled_shapes<<'\n';
                             }
                         }
                         auto linked=bound_enemies;
