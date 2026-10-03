@@ -12,6 +12,7 @@
 #include "face_lipsync.hpp"
 #include "runtime.hpp"
 #include "zombie.hpp"
+#include "enemy_targeting.hpp"
 #include "render.hpp"
 #include <algorithm>
 #include <cmath>
@@ -84,6 +85,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_model_work_samples=0, zombie_range_draws=0;
         size_t zombie_player_contacts=0;
         size_t zombie_auxiliary_frames=0, zombie_manager_frames=0;
+        size_t enemy_floor_probes=0, zombie_view_probes=0, zombie_neck_updates=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
         size_t facial_lip_ticks=0, facial_lip_changed_frames=0;
@@ -102,6 +104,15 @@ int wmain(int argc,wchar_t** argv) {
                 }
                 auto collision=decode_room_collision(data);
                 auto records=decode_room_records(data);
+                if(scenario_check) for(const auto& floor:collision.floors) {
+                    if(!(floor.flags&1) || floor.type!=2 || floor.size.x<0 || floor.size.z<0)continue;
+                    const Vec3 center{floor.position.x+floor.size.x*.5f,0,floor.position.z+floor.size.z*.5f};
+                    const auto* hit=enemy_floor_trigger(collision,{},center,floor.floor,floor.parameters[0],floor.parameters[1]);
+                    if(!hit || hit->floor!=floor.floor || hit->parameters[0]!=floor.parameters[0] ||
+                       hit->parameters[1]!=floor.parameters[1])
+                        throw std::runtime_error("Retail enemy floor trigger did not match its authored center/identity");
+                    ++enemy_floor_probes;
+                }
                 auto scenario=decode_room_scenario(data);
                 scenario_entries+=scenario.entry_count();
                 if(scenario_check) {
@@ -471,6 +482,45 @@ int wmain(int argc,wchar_t** argv) {
                             throw std::runtime_error("Retail native startup allocation count mismatch");
                         zombie_startup_links+=allocated;
                         zombie_managers+=managers;
+                        if(runtime_check) {
+                            // Isolated native targeting dependencies against actual
+                            // cached body/Claire joints, not full root AI frames.
+                            auto targeting=initialized;
+                            const auto player_entry=enter_room(records,0,collision,decode_room_cuts(data));
+                            ActorPlacement placement;
+                            placement.flags=0x118;placement.position=player_entry.player.position;
+                            placement.angles={0,int32_t(player_entry.player.yaw),0};
+                            const auto claire=calculate_actor_model_work(player.models.at(0),actor_bind_pose(player.models.at(0)),{},placement);
+                            for(auto root:roots) {
+                                auto& owner=targeting.enemies[root];
+                                const auto cached=*owner.model_work;
+                                const auto raw=owner.model->model;
+                                const auto body=owner.zombie_work->body.value();
+                                const auto cone=zombie_personality(owner.model_version).view_angle;
+                                const auto& matrix=cached.joints.at(11).matrix;
+                                const Vec3 probe{float(matrix[3]),0,float(matrix[11])};
+                                const auto yaw=owner.angles[1]+int32_t(owner.joint_pose.at(11).angles->at(1));
+                                const auto result=search_enemy_player(probe,yaw,player_entry.player.position,cone);
+                                if(result!=-1 && (result<-32768 || result>32768))
+                                    throw std::runtime_error("Retail view cone returned an invalid signed yaw");
+                                ++zombie_view_probes;
+                                for(auto work:{root,body}) for(size_t tick=0;tick<32;++tick) {
+                                    const auto before=owner.joint_pose.at(11).angles.value();
+                                    const auto frame=targeting.enemies[work].frame;
+                                    rotate_zombie_neck(targeting,work,11,claire,5);
+                                    const auto after=owner.joint_pose.at(11).angles.value();
+                                    const auto delta=uint16_t(after[1]-before[1]);
+                                    if(after[0]!=before[0] || after[2]!=before[2] ||
+                                       (delta>910 && delta<65536-910) || targeting.enemies[work].frame!=frame ||
+                                       owner.model->model!=raw)
+                                        throw std::runtime_error("Retail cached neck update changed unrelated work or step size");
+                                    for(size_t joint=0;joint<cached.joints.size();++joint)
+                                        if(owner.model_work->joints[joint].matrix!=cached.joints[joint].matrix)
+                                            throw std::runtime_error("Retail neck wrapper changed prior cached matrices");
+                                    ++zombie_neck_updates;
+                                }
+                            }
+                        }
                         // Exercise production auxiliary callbacks without claiming
                         // the separate root movement/damage controller is ready.
                         auto scheduled_parts=initialized;
@@ -869,6 +919,14 @@ int wmain(int argc,wchar_t** argv) {
             std::cout<<"Dispatched "<<zombie_auxiliary_frames<<" native auxiliary frames, including "
                      <<zombie_manager_frames<<" manager policy updates and original post-controller cleanup\n";
             std::cout<<"Verified "<<zombie_player_contacts<<" original player/zombie contacts with initialized retail geometry\n";
+            if(!enemy_floor_probes)throw std::runtime_error("Missing retail enemy floor trigger coverage");
+            std::cout<<"Queried "<<enemy_floor_probes<<" authored enemy floor trigger centers\n";
+            if(runtime_check) {
+                if(zombie_view_probes!=zombie_parameters || zombie_neck_updates!=zombie_parameters*64)
+                    throw std::runtime_error("Missing retail native zombie targeting coverage");
+                std::cout<<"Probed "<<zombie_view_probes<<" actual personality view cones and applied "
+                         <<zombie_neck_updates<<" cached root/body neck updates against Claire joint5\n";
+            }
             if(zombie_model_work_samples!=zombie_channel_applications || zombie_range_draws!=zombie_parameters*2)
                 throw std::runtime_error("Missing retail zombie model-work coverage");
             std::cout<<"Verified "<<zombie_model_work_samples<<" linear model-work samples and "<<zombie_range_draws<<" frozen prefix/suffix drawing ranges\n";

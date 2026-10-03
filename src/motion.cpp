@@ -95,7 +95,13 @@ blend_motion_pose(const std::vector<JointPose> &current,
     if (target[i].angles) {
       if (!current[i].angles)
         throw std::runtime_error("Motion blend missing current angles");
-      auto a = *current[i].angles, b = *target[i].angles;
+      // Motion interpolation works in angle words even when the source
+      // object still carries a signed32 authored rotation.
+      std::array<uint16_t, 3> a{}, b{};
+      for (size_t axis = 0; axis < 3; ++axis) {
+        a[axis] = uint16_t((*current[i].angles)[axis]);
+        b[axis] = uint16_t((*target[i].angles)[axis]);
+      }
       int dx = short_word(int(b[0]) - a[0]);
       int dy = short_word(int(b[1]) - a[1]);
       int alternate_y = short_word(int(b[1]) - (32768 - int(a[1])));
@@ -117,11 +123,11 @@ blend_motion_pose(const std::vector<JointPose> &current,
               uint16_t(int64_t(source[axis]) +
                        weighted(short_word(destination[axis] - source[axis])));
         source = convert_angles(source, false);
-        result[i].angles = std::array<uint16_t, 3>{
+        result[i].angles = std::array<int32_t, 3>{
             uint16_t(source[0]), uint16_t(source[1]), uint16_t(source[2])};
         continue;
       }
-      std::array<uint16_t, 3> out{};
+      std::array<int32_t, 3> out{};
       for (size_t axis = 0; axis < 3; ++axis)
         out[axis] = uint16_t(int64_t(source[axis]) +
                              weighted(short_word(int(b[axis]) - source[axis])));
@@ -215,16 +221,19 @@ apply_motion_pose(const std::vector<JointPose> &current, const Motion &motion,
       }
       if (options.blend_rate) {
         if (angles)
-          result.angle_scratch = *angles;
+          for (size_t axis = 0; axis < 3; ++axis)
+            result.angle_scratch[axis] = uint16_t((*angles)[axis]);
         else if (slow)
           result.angle_scratch[0] = 0;
         else
           result.angle_scratch = {};
-        target.angles = result.angle_scratch;
+        target.angles = std::array<int32_t, 3>{result.angle_scratch[0],
+                                               result.angle_scratch[1],
+                                               result.angle_scratch[2]};
       } else if (angles) {
         target.angles = angles;
       } else if (fast) {
-        target.angles = std::array<uint16_t, 3>{};
+        target.angles = std::array<int32_t, 3>{};
       } else {
         // USA SetMtnNormal/Slow store zero to X three times, retaining Y/Z.
         if (!result.pose[index].angles)
@@ -460,7 +469,7 @@ std::vector<JointPose> sample_motion(const Motion &m, int64_t frame,
     if (!t.angles.empty()) {
       if (t.angles.size() != m.frames)
         throw std::runtime_error("Invalid angle track");
-      std::array<uint16_t, 3> out{};
+      std::array<int32_t, 3> out{};
       for (size_t axis = 0; axis < 3; ++axis) {
         int a = t.angles[first][axis], b = t.angles[next][axis];
         // SetMtnSlow casts the delta to signed 16-bit before interpolation.

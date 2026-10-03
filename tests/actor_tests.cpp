@@ -292,7 +292,7 @@ int main() {
     put(invalid_object, 6404, 200);
     bad([&] { decode_room_actor_models(invalid_object); });
     std::vector<JointPose> pose(2);
-    pose[1].angles = std::array<uint16_t, 3>{0, 0, 16384};
+    pose[1].angles = std::array<int32_t, 3>{0, 0, 16384};
     auto scene = pose_actor(a, pose);
     ck(scene.meshes.size() == 1);
     auto p = scene.meshes[0].triangles[0].corners[0].position;
@@ -478,8 +478,8 @@ int main() {
             .position;
     ck(std::abs(p.x - 12) < 0.0001 && std::abs(p.y - 5) < 0.0001);
     auto combined = pose;
-    combined[0].angles = std::array<uint16_t, 3>{0, 0, 16384};
-    combined[1].angles = std::array<uint16_t, 3>{16384, 16384, 16384};
+    combined[0].angles = std::array<int32_t, 3>{0, 0, 16384};
+    combined[1].angles = std::array<int32_t, 3>{16384, 16384, 16384};
     auto blended = fixture();
     put(blended.skin, 16, 0x01040000);
     p = pose_actor(blended, combined)

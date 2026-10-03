@@ -49,7 +49,7 @@ int main() {
       put(weighted.skin, 16 + i * 4, 0x0b041234);
     auto blended = prepare_face_model(weighted, mask);
     auto joints = actor_bind_pose(blended.actor);
-    joints[15].angles = std::array<uint16_t, 3>{0, 16384, 0};
+    joints[15].angles = std::array<int32_t, 3>{0, 16384, 0};
     auto blend_scene = pose_actor(blended.actor, joints, {100, 200, 300});
     auto blend_point = blend_scene.meshes[0].triangles[0].corners[0].position;
     near(blend_point.x, 111.5f);
@@ -79,10 +79,10 @@ int main() {
            std::abs(jaw.jaw_angles[1] + 8192) <= 1,
        "Jaw ratios differ from original atan (not atan2) alignment");
     auto jaw_pose = actor_bind_pose(jaw.actor);
-    ck((*jaw_pose[jaw.tooth.parent].angles)[1] == uint16_t(jaw.jaw_angles[0]) &&
-           (*jaw_pose[jaw.tooth.parent].angles)[2] ==
-               uint16_t(jaw.jaw_angles[1]) &&
-           (*jaw_pose[jaw.tooth.clone].angles)[2] == 4096,
+    ck((*jaw_pose[jaw.tooth.parent].angles)[1] == jaw.jaw_angles[0] &&
+           (*jaw_pose[jaw.tooth.parent].angles)[2] == jaw.jaw_angles[1],
+       "Jaw alignment lost source signed32 rotation");
+    ck((*jaw_pose[jaw.tooth.clone].angles)[2] == 4096,
        "Jaw alignment overwrote clone rotation");
     auto chained = a;
     put(chained.model, 16 + 6 * 52 + 48, 0xffffffff);

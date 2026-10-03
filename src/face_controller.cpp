@@ -182,14 +182,14 @@ bool tick_face_runtime(FaceRuntime &face, std::vector<JointPose> &pose,
     const size_t table = header + word(prepared.actor.model, 12);
     for (size_t joint : {size_t(7), size_t(11)})
       (*updated[joint].angles)[0] =
-          uint16_t(word(prepared.actor.model, table + joint * 52 + 20));
+          int32_t(word(prepared.actor.model, table + joint * 52 + 20));
     for (size_t joint : {size_t(9), size_t(13)}) {
       const size_t p = table + joint * 52;
       for (size_t axis = 0; axis < 2; ++axis) {
         const uint32_t inverted =
             0u - word(prepared.actor.model, p + 20 + axis * 4);
         put(prepared.actor.model, p + 20 + axis * 4, inverted);
-        (*updated[joint].angles)[axis] = uint16_t(inverted);
+        (*updated[joint].angles)[axis] = int32_t(inverted);
       }
       // bhControlMask copies only eye X/Y into the separate runtime table.
       put(prepared.actor.model, p + 28, word(face.model.actor.model, p + 28));

@@ -15,7 +15,9 @@ struct Motion {
 };
 struct JointPose {
   std::optional<Vec3> position;
-  std::optional<std::array<uint16_t, 3>> angles;
+  // CNK_OBJECT stores signed32 angles. Motion samples write word-sized
+  // values, but untouched authored angles must retain their original sign.
+  std::optional<std::array<int32_t, 3>> angles;
 };
 struct MotionApplicationOptions {
   uint32_t mode = 0;

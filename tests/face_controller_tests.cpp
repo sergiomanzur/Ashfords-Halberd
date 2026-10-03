@@ -96,7 +96,7 @@ int main() {
                0xffffff98u &&
            word(padded_face.model.actor.model, padded_table + 9 * 52 + 24) ==
                104 &&
-           (*padded_pose[9].angles)[0] == 65432,
+           (*padded_pose[9].angles)[0] == -104,
        "Padded MDL header corrupted runtime copies");
     auto face = initialize_face_runtime(raw, mask());
     auto pose = actor_bind_pose(face.model.actor);
@@ -109,7 +109,7 @@ int main() {
     const size_t table = 16 + word(face.model.actor.model, 12);
     ck(word(face.model.actor.model, table + 9 * 52 + 24) == 104 &&
            word(face.model.actor.model, table + 9 * 52 + 20) == 0xffffff98u &&
-           (*pose[9].angles)[0] == 65432 && (*pose[9].angles)[1] == 104,
+           (*pose[9].angles)[0] == -104 && (*pose[9].angles)[1] == 104,
        "Runtime eye yaw was not inverted");
     const auto first = face.model.actor.model;
     ck(!tick_face_runtime(face, pose, 91, flags, 0) && (flags & 0x80),
@@ -336,20 +336,20 @@ int main() {
       body.control2 = control2;
       body.blend_count = 4;
       body.frame = 0;
-      body.joint_pose[6].angles = std::array<uint16_t, 3>{1111, 2222, 3333};
+      body.joint_pose[6].angles = std::array<int32_t, 3>{1111, 2222, 3333};
       tick_scenario_actors(moving);
       near(body.joint_pose[0].position->x, control2 == 0 ? 1 : 2);
       ck(body.frame == 32768 && body.modes[3] == 1 &&
              body.blend_count == (control2 == 0 ? 7 : 3) &&
              *body.joint_pose[6].angles ==
-                 std::array<uint16_t, 3>{1111, 2222, 3333},
+                 std::array<int32_t, 3>{1111, 2222, 3333},
          "Body blend startup overwrote facial motion mask");
       const auto eye = body.joint_pose[9].angles;
       tick_scenario_actors(moving);
       ck(body.frame == 65536 && body.blend_count == (control2 == 0 ? 6 : 2) &&
              body.joint_pose[9].angles == eye &&
              *body.joint_pose[6].angles ==
-                 std::array<uint16_t, 3>{1111, 2222, 3333} &&
+                 std::array<int32_t, 3>{1111, 2222, 3333} &&
              body.rendered_model,
          "Body animation lost facial updates or rendering");
     }

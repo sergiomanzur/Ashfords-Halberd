@@ -991,7 +991,7 @@ int main() {
     bound.blend_count = 1;
     bound.joint_pose = actor_bind_pose(*bound.model);
     tick_scenario_actors(transformed);
-    ck(*bound.joint_pose[1].angles == std::array<uint16_t, 3>{0, 200, 300});
+    ck(*bound.joint_pose[1].angles == std::array<int32_t, 3>{0, 200, 300});
     ck(transformed.motion_angle_scratch ==
        std::array<uint16_t, 3>{0, 200, 300});
     auto scratch_copy = transformed;

@@ -133,15 +133,15 @@ SkeletonTransforms calculate_skeleton(const ActorModel &actor,
         size_t o = table + i * 52;
         auto p = r.vec(o + 8);
         bind[i] = {origin.x + p.x, origin.y + p.y, origin.z + p.z};
-        std::array<uint16_t, 3> angles{uint16_t(r.u32(o + 20)),
-                                       uint16_t(r.u32(o + 24)),
-                                       uint16_t(r.u32(o + 28))};
+        std::array<int32_t, 3> angles{int32_t(r.u32(o + 20)),
+                                      int32_t(r.u32(o + 24)),
+                                      int32_t(r.u32(o + 28))};
         if (i < pose.size()) {
           if (pose[i].position)
             p = *pose[i].position;
           if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z))
             throw std::runtime_error("Non-finite joint position");
-          angles = pose[i].angles.value_or(std::array<uint16_t, 3>{});
+          angles = pose[i].angles.value_or(std::array<int32_t, 3>{});
         }
         auto local = translate(p);
         for (int axis : {2, 1, 0})
@@ -150,8 +150,8 @@ SkeletonTransforms calculate_skeleton(const ActorModel &actor,
         validate_matrix(world[i]);
         unrotated[i] = world[i];
         for (int axis : {0, 1, 2})
-          unrotated[i] =
-              multiply(unrotated[i], rotate(axis, -int(angles[axis])));
+          unrotated[i] = multiply(unrotated[i],
+                                  rotate(axis, -int(uint16_t(angles[axis]))));
         auto child = r.u32(o + 44), sibling = r.u32(o + 48);
         if (child != 0xffffffff)
           visit(index(child), world[i], bind[i], depth + 1);
@@ -190,14 +190,14 @@ Scene draw_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
       skeleton.world[i] = work->joints[i].matrix;
       skeleton.unrotated[i] = skeleton.world[i];
       const auto o = table + i * 52;
-      std::array<uint16_t, 3> angles{uint16_t(r.u32(o + 20)),
-                                     uint16_t(r.u32(o + 24)),
-                                     uint16_t(r.u32(o + 28))};
+      std::array<int32_t, 3> angles{int32_t(r.u32(o + 20)),
+                                    int32_t(r.u32(o + 24)),
+                                    int32_t(r.u32(o + 28))};
       if (i < pose.size())
-        angles = pose[i].angles.value_or(std::array<uint16_t, 3>{});
+        angles = pose[i].angles.value_or(std::array<int32_t, 3>{});
       for (int axis : {0, 1, 2})
-        skeleton.unrotated[i] =
-            multiply(skeleton.unrotated[i], rotate(axis, -int(angles[axis])));
+        skeleton.unrotated[i] = multiply(
+            skeleton.unrotated[i], rotate(axis, -int(uint16_t(angles[axis]))));
     }
     if (!selected)
       return {};
@@ -331,12 +331,11 @@ ActorModelWork calculate_actor_model_work(const ActorModel &actor,
     if (r.u32(o + 48) != 0xffffffff)
       stack.push_back(current);
     auto p = r.vec(o + 8);
-    std::array<uint16_t, 3> angles{uint16_t(r.u32(o + 20)),
-                                   uint16_t(r.u32(o + 24)),
-                                   uint16_t(r.u32(o + 28))};
+    std::array<int32_t, 3> angles{
+        int32_t(r.u32(o + 20)), int32_t(r.u32(o + 24)), int32_t(r.u32(o + 28))};
     if (i < pose.size()) {
       p = pose[i].position.value_or(p);
-      angles = pose[i].angles.value_or(std::array<uint16_t, 3>{});
+      angles = pose[i].angles.value_or(std::array<int32_t, 3>{});
     }
     current = multiply(current,
                        placement_matrix(p, {angles[0], angles[1], angles[2]}));
@@ -374,9 +373,8 @@ std::vector<JointPose> actor_bind_pose(const ActorModel &actor) {
   for (size_t i = 0; i < count; ++i) {
     size_t p = table + i * 52;
     pose[i].position = r.vec(p + 8);
-    pose[i].angles = std::array<uint16_t, 3>{uint16_t(r.u32(p + 20)),
-                                             uint16_t(r.u32(p + 24)),
-                                             uint16_t(r.u32(p + 28))};
+    pose[i].angles = std::array<int32_t, 3>{
+        int32_t(r.u32(p + 20)), int32_t(r.u32(p + 24)), int32_t(r.u32(p + 28))};
   }
   return pose;
 }

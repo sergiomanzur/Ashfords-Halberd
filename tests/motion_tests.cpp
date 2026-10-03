@@ -79,7 +79,7 @@ int main() {
     std::vector<JointPose> joints(5);
     for (auto &joint : joints) {
       joint.position = Vec3{20, 30, 40};
-      joint.angles = std::array<uint16_t, 3>{10, 20, 30};
+      joint.angles = std::array<int32_t, 3>{10, 20, 30};
     }
     MotionApplicationOptions mapping;
     mapping.mode = 2;
@@ -89,7 +89,7 @@ int main() {
     ck(applied.pose[0].position->x == 20 && applied.pose[4].position->x == 20);
     ck(applied.pose[3].position->x == -2 && applied.pose[3].position->y == 4 &&
        *applied.pose[3].angles ==
-           std::array<uint16_t, 3>{100, uint16_t(-200), uint16_t(-300)});
+           std::array<int32_t, 3>{100, uint16_t(-200), uint16_t(-300)});
     ck(applied.pose[2].position->x == -8 &&
        (*applied.pose[2].angles)[0] == 400);
     ck(joints[2].position->x == 20 && channels.tracks[0].positions[0].x == 2);
@@ -102,7 +102,7 @@ int main() {
     mapping.mode = 2 | 8; // Force Slow despite the motion's Normal flag.
     applied = apply_motion_pose(joints, interpolated, 32768, mapping);
     ck(applied.pose[3].position->x == -4 &&
-       *applied.pose[3].angles == std::array<uint16_t, 3>{150, uint16_t(-400), uint16_t(-650)});
+       *applied.pose[3].angles == std::array<int32_t, 3>{150, uint16_t(-400), uint16_t(-650)});
     mapping = {};
     mapping.joint_flags = {4, 2, 0};
     applied = apply_motion_pose(joints, channels, 0, mapping);
@@ -136,15 +136,15 @@ int main() {
     for (uint8_t format : {uint8_t(0x10), uint8_t(0x20)}) {
       absent_channels.flags = format;
       applied = apply_motion_pose(joints, absent_channels, 0, mapping);
-      ck(*applied.pose[1].angles == std::array<uint16_t, 3>{0, 20, 30});
+      ck(*applied.pose[1].angles == std::array<int32_t, 3>{0, 20, 30});
     }
     absent_channels.flags = 0;
     ck(*apply_motion_pose(joints, absent_channels, 0).pose[1].angles ==
-       std::array<uint16_t, 3>{});
+       std::array<int32_t, 3>{});
     absent_channels.flags = 0x20;
     mapping.blend_rate = 1.f;
     applied = apply_motion_pose(joints, absent_channels, 0, mapping);
-    ck(*applied.pose[1].angles == std::array<uint16_t, 3>{0, 200, 300} &&
+    ck(*applied.pose[1].angles == std::array<int32_t, 3>{0, 200, 300} &&
        applied.angle_scratch == std::array<uint16_t, 3>{0, 200, 300});
     // SlowHokan scratch survives separate calls and skips angle-disabled work.
     Motion missing;
@@ -153,7 +153,7 @@ int main() {
     missing.tracks.resize(1);
     applied =
         apply_motion_pose(joints, missing, 0, mapping, applied.angle_scratch);
-    ck(*applied.pose[0].angles == std::array<uint16_t, 3>{0, 200, 300});
+    ck(*applied.pose[0].angles == std::array<int32_t, 3>{0, 200, 300});
     mapping.joint_flags = {2};
     applied = apply_motion_pose(joints, channels, 0, mapping, {7, 8, 9});
     ck(*applied.pose[0].angles == *joints[0].angles &&
@@ -204,8 +204,8 @@ int main() {
     bad([&] { apply_motion_pose(joints, missing_fast_translation, 0); });
     ck(joints[0].position->x == 20 && (*joints[0].angles)[0] == 10);
     std::vector<JointPose> angle_start(1), angle_end(1);
-    angle_start[0].angles = std::array<uint16_t, 3>{};
-    angle_end[0].angles = std::array<uint16_t, 3>{8192, 8192, 8192};
+    angle_start[0].angles = std::array<int32_t, 3>{};
+    angle_end[0].angles = std::array<int32_t, 3>{8192, 8192, 8192};
     auto ordinary = blend_motion_pose(angle_start, angle_end, .5f);
     auto shoulder = blend_motion_pose(angle_start, angle_end, .5f, false, {8});
     ck(shoulder[0].angles != ordinary[0].angles);
@@ -214,8 +214,8 @@ int main() {
       ck(std::abs(int((*endpoint[0].angles)[axis]) - 8192) < 8);
     bad([&] { blend_motion_pose(angle_start, angle_end, .5f, false, {4}); });
     bad([&] { blend_motion_pose(angle_start, angle_end, .5f, false, {8, 8}); });
-    angle_start[0].angles = std::array<uint16_t, 3>{12000, 64000, 3000};
-    angle_end[0].angles = std::array<uint16_t, 3>{50000, 9000, 62000};
+    angle_start[0].angles = std::array<int32_t, 3>{12000, 64000, 3000};
+    angle_end[0].angles = std::array<int32_t, 3>{50000, 9000, 62000};
     shoulder = blend_motion_pose(angle_start, angle_end, .35f, false, {8});
     // Independent evaluation of the source's conversion equations and
     // quarter-wave lookup; tolerate a few integer units of libm rounding.
@@ -226,16 +226,16 @@ int main() {
     std::vector<JointPose> current(1), target(1);
     current[0].position = Vec3{2, 4, 6};
     target[0].position = Vec3{10, 12, 14};
-    current[0].angles = std::array<uint16_t, 3>{65530, 0, 0};
-    target[0].angles = std::array<uint16_t, 3>{6, 2000, 0};
+    current[0].angles = std::array<int32_t, 3>{65530, 0, 0};
+    target[0].angles = std::array<int32_t, 3>{6, 2000, 0};
     auto blended = blend_motion_pose(current, target, 0.5f);
     ck(blended[0].position->x == 6 && (*blended[0].angles)[0] == 0 &&
        (*blended[0].angles)[1] == 1000);
     ck(blend_motion_pose(current, target, 0.5f, true)[0].position->x == 10);
-    current[0].angles = std::array<uint16_t, 3>{32768, 32768, 32768};
-    target[0].angles = std::array<uint16_t, 3>{0, 0, 0};
+    current[0].angles = std::array<int32_t, 3>{32768, 32768, 32768};
+    target[0].angles = std::array<int32_t, 3>{0, 0, 0};
     ck(*blend_motion_pose(current, target, 0.25f)[0].angles ==
-       std::array<uint16_t, 3>{0, 0, 0});
+       std::array<int32_t, 3>{0, 0, 0});
     bad([&] { blend_motion_pose(current, target, NAN); });
     bad([&] { blend_motion_pose({}, target, 0.5f); });
     int32_t counter = 0;

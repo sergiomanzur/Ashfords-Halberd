@@ -38,7 +38,7 @@ Loop types share the nesting index, with four counter slots and six pointer
 slots. Event initialization retains existing counters and loop pointers, as in
 the reference. Wider entity controllers are still pending.
 
-Inventory conditions inspect the original player block's slots 1–11 in the
+Inventory conditions inspect the original player block's slots 1â€“11 in the
 384-word inventory and retain item 72's high-byte room-flag side effect. CmpW
 supports the original player/enemy health, message selection and status timer
 fields, its six comparison operators and unsigned 16-bit right-hand values.
@@ -137,7 +137,7 @@ animation. Sound commands 3/4, remaining special object controllers and
 complete gameplay still remain to implement.
 
 Native `bind_room_props` carries decoded room objects and pickups into the
-script-addressable vectors. Object slots 0–3 retain player attachments; room
+script-addressable vectors. Object slots 0â€“3 retain player attachments; room
 slots and pickups are rebuilt with authored metadata and immutable model
 ownership. Tests check signed transforms, type/parameter splitting, source
 flags, retained attachments and rollback on malformed assets. The retail
@@ -356,7 +356,7 @@ and rebased skin lists remain pending; the runtime scheduler still rejects
 the unsupported graveyard controller rather than exposing a static encounter.
 
 Native auxiliary dispatch now retains the original shared callback registrations
-made by `bhEne01_Init`. IDs 31–33 and 38 can be reused by other enemy types;
+made by `bhEne01_Init`. IDs 31â€“33 and 38 can be reused by other enemy types;
 unregistered or unsupported bindings fail instead of being silently assigned
 zombie behavior. Registered callbacks persist with the native scenario state.
 The indexed enemy loop preserves original pool order and suppresses linked
@@ -391,3 +391,40 @@ owners and unchanged RNG/raw assets. It isolates these callbacks from the
 pending root AI; it does not claim the full encounter runs. The root zombie
 movement, attacks/damage and player response remain required before travel
 into the graveyard is exposed. Step 1 and New Game remain incomplete.
+
+Native enemy targeting prerequisites are now implemented in
+`enemy_targeting.cpp`: `bhSearchPlayer`/`bhSearchPlayer2` preserve the source's
+two Ninja table rotations, 3D normalization, strict view-cone comparison,
+zero-cone fallback, signed atan yaw and valid-1 sentinel remapping. The explicit
+probe API preserves actor work without temporary position changes.
+`NitenDir_ck` retains its XZ-only query. `bhEne01_SideRotNeck` preserves the
+910-word step, snap comparison, 16-bit wrapping and source neck limits.
+`bhEne01_RotNeck` resolves shared pose ownership, reads cached world matrices,
+uses the parent yaw for linked bodies and updates only the selected neck yaw.
+
+Source review exposed a signed initial-angle mismatch in the existing pose
+representation. Joint poses now retain signed32 CNK object angles from the bind
+model; motion samples and interpolation still produce original unsigned16
+angle words. The regression first failed with a raw neck yaw-2000 and forward
+target (wrong64446), then passed with the original62626 result; the next update
+uses that canonical output word and produces63536. Renderer inversion masks
+to the angle word before negation, avoiding overflow on raw signed extremes.
+Facial tooth/tongue and inverted eye copies also retain their full source
+integers; the eye copy regression fails on truncated65432 and passes on-104.
+Prepared jaw assertions now check signed rotations while retaining the separate
+clone-rotation invariant.
+
+`bhEne_EnemyAtariCheck` now queries the first qualifying authored/dynamic floor
+trigger with active/type2/id/action/floor matching, inclusive XZ boundaries,
+ignored Y and static-before-dynamic order. Returned records retain their
+original owner; this query does not invent behavior from other floor attributes.
+Tests cover malformed consumed values, cache/owner/joint errors, negative signed
+authored neck angles and rejection without partial pose changes.
+
+The private retail targeting diagnostic queries318 authored floor trigger
+centers and ten actual graveyard personality view cones, and exercises640
+isolated root/body neck updates against cached Claire joint5. These are
+controller prerequisites; the full root zombie frame sequence, awareness,
+routing, movement, damage, attacks and player response still require their
+original state handling. New Game and graveyard travel remain disabled until
+the real playable slice is ready.
