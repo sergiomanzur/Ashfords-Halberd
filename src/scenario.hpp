@@ -2,6 +2,7 @@
 #include "actor.hpp"
 #include "assets.hpp"
 #include "collision.hpp"
+#include "face_controller.hpp"
 #include <array>
 #include <memory>
 #include <optional>
@@ -76,6 +77,7 @@ struct ScenarioEntity {
   std::shared_ptr<const ActorModelBank> model_bank;
   std::vector<JointPose> joint_pose;
   std::optional<ActorModelWork> model_work;
+  std::optional<FaceRuntime> face;
   // ML_WORK aliasing is represented by an owner slot, not mutable pointers.
   std::optional<size_t> pose_owner;
   std::optional<Scene> rendered_model;
@@ -133,6 +135,7 @@ struct ScenarioState {
   std::vector<CollisionRecord> interactions;
   std::optional<RoomCollision> collision;
   std::shared_ptr<const std::vector<std::optional<Motion>>> room_motions;
+  std::shared_ptr<const std::vector<Bytes>> face_masks;
   std::shared_ptr<const RoomScenario> scenario;
   std::array<ScenarioTask, 16> tasks;
   size_t current_task = 0;

@@ -83,6 +83,8 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_startup_links=0, zombie_managers=0;
         size_t zombie_model_work_samples=0, zombie_range_draws=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
+        size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
+        size_t facial_lip_ticks=0, facial_lip_changed_frames=0;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
@@ -104,6 +106,50 @@ int wmain(int argc,wchar_t** argv) {
                     ScenarioState bound_enemies;
                     bind_room_enemies(data,collision,bound_enemies);
                     bind_room_props(data,bound_enemies);
+                    // Entry 0 has an ID91 facial work and a resident lip bank.
+                    // The graveyard entry below intentionally has no lip bank.
+                    if(i==0) {
+                        size_t authored=0;
+                        while(authored<records.enemies.size() &&
+                              (!(records.enemies[authored].flags&1) || records.enemies[authored].id!=91))++authored;
+                        if(authored>=records.enemies.size() || authored>255 || resident_lips.empty())
+                            throw std::runtime_error("Missing selected retail facial lip fixture");
+                        const auto slot=bound_enemies.enemy_slots.at(authored);
+                        auto native=bound_enemies;
+                        for(size_t work=0;work<native.enemies.size();++work)
+                            if(work!=slot)native.enemies[work].flags&=~1u;
+                        native.flags[6][0]=2;
+                        tick_scenario_actors(native);
+                        auto& actor=native.enemies.at(slot);
+                        if(!actor.face || !actor.rendered_model || !actor.face->controller.selected_clip)
+                            throw std::runtime_error("Missing selected retail facial lip binding");
+                        const auto held_frame=actor.frame;
+                        const auto raw=actor.model->model;
+                        const auto original=*actor.rendered_model;
+                        run_scenario(Bytes{61,0,uint8_t(authored),0,63,0,uint8_t(authored),0,0,0},native);
+                        do {
+                            if(++facial_lip_ticks>100000)throw std::runtime_error("Native facial lip clip did not terminate");
+                            tick_scenario_actors(native);
+                            if(actor.frame!=held_frame || !actor.rendered_model ||
+                               actor.rendered_model->meshes.size()!=original.meshes.size() || actor.model->model!=raw)
+                                throw std::runtime_error("Native lip playback changed raw asset, body frame or mesh count");
+                            bool changed=false;
+                            for(size_t mesh=0;mesh<original.meshes.size();++mesh) {
+                                const auto& before=original.meshes[mesh].triangles;
+                                const auto& after=actor.rendered_model->meshes[mesh].triangles;
+                                if(before.size()!=after.size())throw std::runtime_error("Native lip playback changed triangle count");
+                                for(size_t triangle=0;triangle<before.size();++triangle)
+                                    for(size_t corner=0;corner<3;++corner) {
+                                        const auto a=before[triangle].corners[corner].position;
+                                        const auto b=after[triangle].corners[corner].position;
+                                        if(std::abs(a.x-b.x)+std::abs(a.y-b.y)+std::abs(a.z-b.z)>.0001f)changed=true;
+                                    }
+                            }
+                            if(changed)++facial_lip_changed_frames;
+                        } while(actor.face->controller.flags&4);
+                        if(facial_lip_ticks<2 || !facial_lip_changed_frames)
+                            throw std::runtime_error("Native retail lip playback did not animate geometry");
+                    }
                     if(i==2 || i==3) {
                         for(size_t slot=0;slot<bound_enemies.enemies.size();++slot) {
                             const auto& actor=bound_enemies.enemies[slot];
@@ -173,6 +219,54 @@ int wmain(int argc,wchar_t** argv) {
                                          <<" last_frame="<<track.back().frame
                                          <<" samples="<<sampled_shapes
                                          <<" deformed_geometry_frames="<<deformed_geometry_frames<<'\n';
+                                if(!actor.face || !actor.model_work || actor.joint_pose.size()!=31)
+                                    throw std::runtime_error("Finish-room did not bind selected facial runtime");
+                                // Run the production scheduler on the selected ID91 work.
+                                // The graveyard's ID1 zombie controller remains separate.
+                                auto native=bound_enemies;
+                                for(auto& work:native.enemies)if(work.id!=91)work.flags&=~1u;
+                                native.flags[6][0]=2;
+                                tick_scenario_actors(native);
+                                auto& controller=native.enemies.at(slot);
+                                if(controller.modes[0]!=1 || controller.modes[3]!=3 ||
+                                   controller.frame!=0 || !controller.motions ||
+                                   controller.motions->at(0).has_value() || !controller.rendered_model ||
+                                   controller.rendered_model->meshes.size()!=6)
+                                    throw std::runtime_error("Selected facial subplayer startup differs from source: mode="+
+                                        std::to_string(controller.modes[0])+","+std::to_string(controller.modes[3])+
+                                        " frame="+std::to_string(controller.frame)+" meshes="+
+                                        (controller.rendered_model?std::to_string(controller.rendered_model->meshes.size()):"absent")+
+                                        " motion0="+(controller.motions && !controller.motions->empty() && (*controller.motions)[0]?"bound":"null"));
+                                ++facial_actor_startups;
+                                const auto held_frame=controller.frame;
+                                const auto native_first=*controller.rendered_model;
+                                const auto native_raw=controller.model->model;
+                                controller.face->controller.flags|=0x20;
+                                tick_scenario_actors(native); // Original track reset after this sample.
+                                controller.face->controller.flags|=3;
+                                for(size_t step=0;step<96;++step) {
+                                    tick_scenario_actors(native);
+                                    if(controller.frame!=held_frame ||
+                                       controller.face->controller.frame!=int32_t((step+1)%46) ||
+                                       !controller.rendered_model || controller.rendered_model->meshes.size()!=6)
+                                        throw std::runtime_error("Native facial actor loop/hold/render mismatch");
+                                    ++facial_actor_ticks;
+                                    bool changed=false;
+                                    for(size_t mesh=0;mesh<native_first.meshes.size();++mesh) {
+                                        const auto &before=native_first.meshes[mesh].triangles;
+                                        const auto &after=controller.rendered_model->meshes[mesh].triangles;
+                                        if(before.size()!=after.size())throw std::runtime_error("Facial actor changed triangle count");
+                                        for(size_t triangle=0;triangle<before.size();++triangle)
+                                            for(size_t corner=0;corner<3;++corner) {
+                                                const auto a=before[triangle].corners[corner].position;
+                                                const auto b=after[triangle].corners[corner].position;
+                                                if(std::abs(a.x-b.x)+std::abs(a.y-b.y)+std::abs(a.z-b.z)>0.0001f)changed=true;
+                                            }
+                                    }
+                                    if(changed)++facial_actor_changed_frames;
+                                }
+                                if(!facial_actor_changed_frames || controller.model->model!=native_raw)
+                                    throw std::runtime_error("Facial actor rendered static geometry or mutated raw asset");
                             }
                         }
                         auto linked=bound_enemies;
@@ -679,6 +773,12 @@ int wmain(int argc,wchar_t** argv) {
         std::cout<<"Validated "<<entries.size()<<" rooms and "<<scenario_entries<<" scenario entry slots\n";
         std::cout<<"Decoded "<<lip_clips<<" resident lip clips in "<<lip_rooms
                  <<" rooms with "<<lip_segments<<" validated segments\n";
+        if(scenario_check)std::cout<<"Initialized "<<facial_actor_startups
+            <<" selected native facial actors and advanced "<<facial_actor_ticks
+            <<" joined mask/body/model ticks with "<<facial_actor_changed_frames
+            <<" changed geometry frames\n";
+        if(scenario_check)std::cout<<"Played selected retail lip clip through "<<facial_lip_ticks
+            <<" native actor ticks to termination with "<<facial_lip_changed_frames<<" changed geometry frames\n";
         if(scenario_check) {
             std::cout<<"Decoded "<<prop_models<<" room object/item models, including "<<prop_skins<<" skinned objects\n";
             std::cout<<"Verified "<<zombie_linked_work<<" linked zombie work bindings against graveyard assets\n";

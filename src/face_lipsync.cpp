@@ -68,7 +68,8 @@ std::vector<LipShape> decode_lip_shapes(const Bytes &bytes) {
   }
   return shapes;
 }
-std::vector<Bytes> decode_room_lip_clips(const Bytes &room) {
+namespace {
+std::vector<Bytes> decode_room_face_bank(const Bytes &room, size_t from_end) {
   if (room.size() > 64 * 1024 * 1024)
     throw std::runtime_error("Room lip input exceeds limit");
   const auto info = room_info(room);
@@ -84,7 +85,7 @@ std::vector<Bytes> decode_room_lip_clips(const Bytes &room) {
     return {};
   if (table < 36 || table > room.size() || count * 4 > room.size() - table)
     throw std::runtime_error("Room lip pointer table outside input");
-  size_t p = read(table + (count - 1) * 4);
+  size_t p = read(table + (count - from_end) * 4);
   if (!p)
     return {};
   if (p < table + count * 4 || p >= room.size())
@@ -113,6 +114,13 @@ std::vector<Bytes> decode_room_lip_clips(const Bytes &room) {
     clips.emplace_back(room.begin() + p, room.begin() + p + size);
     p += size;
   }
+}
+} // namespace
+std::vector<Bytes> decode_room_lip_clips(const Bytes &room) {
+  return decode_room_face_bank(room, 1);
+}
+std::vector<Bytes> decode_room_face_masks(const Bytes &room) {
+  return decode_room_face_bank(room, 2);
 }
 LipPlayback start_lip_playback(const Bytes &clip, size_t shape_count) {
   if (!shape_count || clip.empty() || clip.size() > 64 * 1024 * 1024)

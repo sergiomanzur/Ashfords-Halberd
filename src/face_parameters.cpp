@@ -52,7 +52,7 @@ void validate_track(const std::vector<FaceKeyframe> &track) {
   }
 }
 } // namespace
-std::vector<FaceKeyframe> decode_face_track(const Bytes &mask) {
+Bytes face_track_records(const Bytes &mask) {
   if (mask.size() > 64 * 1024 * 1024)
     throw std::runtime_error("Facial track exceeds limit");
   Reader r{mask};
@@ -82,9 +82,16 @@ std::vector<FaceKeyframe> decode_face_track(const Bytes &mask) {
   skip(size_t(jaws) * 8);
   skip(size_t(tongues) * 8);
   r.range(p, size_t(shapes) * 164);
+  return Bytes(mask.begin() + p, mask.begin() + p + size_t(shapes) * 164);
+}
+std::vector<FaceKeyframe> decode_face_parameter_records(const Bytes &records) {
+  if (records.size() % 164 || records.size() > 64 * 1024 * 1024)
+    throw std::runtime_error("Invalid facial parameter record extent");
+  Reader r{records};
+  const size_t shapes = records.size() / 164;
   std::vector<FaceKeyframe> track;
   track.reserve(shapes);
-  for (size_t i = 0; i < shapes; ++i, p += 164) {
+  for (size_t i = 0, p = 0; i < shapes; ++i, p += 164) {
     FaceKeyframe key;
     auto &v = key.parameters;
     for (size_t j = 0; j < 32; ++j)
@@ -101,6 +108,9 @@ std::vector<FaceKeyframe> decode_face_track(const Bytes &mask) {
   if (!track.empty())
     validate_track(track);
   return track;
+}
+std::vector<FaceKeyframe> decode_face_track(const Bytes &mask) {
+  return decode_face_parameter_records(face_track_records(mask));
 }
 float face_interpolation_rate(int16_t mode, float t) {
   finite(t);

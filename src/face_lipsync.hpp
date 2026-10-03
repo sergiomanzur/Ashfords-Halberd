@@ -21,6 +21,7 @@ struct LipPlayback {
 std::vector<LipShape> decode_lip_shapes(const Bytes &bytes);
 // bhSetRoom/bhSetLip: indexed resident records, including empty entries.
 std::vector<Bytes> decode_room_lip_clips(const Bytes &room);
+std::vector<Bytes> decode_room_face_masks(const Bytes &room);
 // Own a bounded stream of shape/duration pairs terminated by 0xff.
 LipPlayback start_lip_playback(const Bytes &clip, size_t shape_count);
 // face_bh.c fmSetLipSyncParam; leaves both arguments intact on failure.

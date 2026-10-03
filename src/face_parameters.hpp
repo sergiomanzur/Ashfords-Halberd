@@ -12,6 +12,9 @@ struct FaceKeyframe {
 };
 // Normal MASK PARAM_WORK encoding. Lip tracks use a separate packed encoding.
 std::vector<FaceKeyframe> decode_face_track(const Bytes &mask);
+// Owned raw PARAM_WORK region and ordinary keys, also used by resident tracks.
+Bytes face_track_records(const Bytes &mask);
+std::vector<FaceKeyframe> decode_face_parameter_records(const Bytes &records);
 float face_interpolation_rate(int16_t mode, float t);
 FaceParameters interpolate_face_parameters(FaceParameters previous,
                                            const FaceKeyframe &a,

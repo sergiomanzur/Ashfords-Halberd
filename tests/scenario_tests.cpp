@@ -74,8 +74,7 @@ int main() {
         door_state.flags[11][0] = examination ? 0x800c0 : 0x80000;
         run_scenario(Bytes{51, 0, 0x80, 0, 0, 2, 0, 1, 0}, door_state);
         ck(door_state.flags[6][0] == (event_timer ? 0x248u : 0x48u));
-        ck(door_state.flags[5][0] ==
-           (examination ? 0xff3ffdffu : 0xffbffdffu));
+        ck(door_state.flags[5][0] == (examination ? 0xff3ffdffu : 0xffbffdffu));
         ck(door_state.flags[11][0] == (examination ? 0u : 0x80000u));
         ck(door_state.flags[12][0] == 0);
         ck(bool(door_state.drawing_flags & 1) == examination);
@@ -576,7 +575,7 @@ int main() {
     put(empty_model.model, 20, 0xffffffff);
     put(empty_model.model, 60, 0xffffffff);
     put(empty_model.model, 64, 0xffffffff);
-    Bytes binding_room(2000);
+    Bytes binding_room(4000);
     put(binding_room, 0, 0x41200000);
     put(binding_room, 16, 128);
     put(binding_room, 136, 1132);
@@ -597,19 +596,35 @@ int main() {
     put(binding_room, 20, 1240);
     put(binding_room, 1240, 1300);
     put(binding_room, 1244, 1400);
-    put(binding_room, 1248, 1500);
+    put(binding_room, 1248, 3000);
     std::copy(empty_model.model.begin(), empty_model.model.end(),
               binding_room.begin() + 1300);
     put(binding_room, 32, 1800);
     put(binding_room, 1800, 1);
     put(binding_room, 1804, 1900);
     put(binding_room, 1900, 0xffffffff);
-    for (size_t p : {size_t(1400), size_t(1500)}) {
+    for (size_t p : {size_t(1400)}) {
       put(binding_room, p, uint32_t(empty_model.model.size()));
       std::copy(empty_model.model.begin(), empty_model.model.end(),
                 binding_room.begin() + p + 4);
       put(binding_room, p + 4 + empty_model.model.size(), 0xffffffff);
     }
+    // ID91's absent-MASK finish-room path addresses O_WORK joints 6..10.
+    // Use a valid 11-joint skeleton instead of the old one-joint placeholder.
+    auto maskless = empty_model.model;
+    maskless.resize(16 + 11 * 52);
+    maskless[6] = 11;
+    for (size_t joint = 0; joint < 11; ++joint) {
+      const size_t p = 16 + joint * 52;
+      put(maskless, p, 6);
+      put(maskless, p + 4, 0xffffffff);
+      put(maskless, p + 44,
+          joint < 10 ? uint32_t((joint + 1) * 52) : 0xffffffff);
+      put(maskless, p + 48, 0xffffffff);
+    }
+    put(binding_room, 3000, uint32_t(maskless.size()));
+    std::copy(maskless.begin(), maskless.end(), binding_room.begin() + 3004);
+    put(binding_room, 3004 + maskless.size(), 0xffffffff);
     RoomCollision binding_collision;
     ScenarioState bound_room;
     bound_room.flags[1][0] = 0x12345678;
@@ -628,7 +643,9 @@ int main() {
        bound_room.enemies[0].model_bank->models.size() == 1 &&
        bound_room.enemies[0].motions->size() == 512);
     ck(bound_room.enemies[1].id == 91 &&
-       bound_room.enemies[1].model_flags == 0x120 &&
+       bound_room.enemies[1].model_flags == 0x20 &&
+       bound_room.enemies[1].model_work->joints.size() == 11 &&
+       (bound_room.enemies[1].model_work->joints[10].flags & 4) &&
        bound_room.enemies[2].flags == 0 && !bound_room.enemies[3].motions &&
        bound_room.flags[1][0] == 0x12345678 && bound_room.inventory[0] == 99);
     auto malformed_binding = binding_room;
@@ -966,7 +983,8 @@ int main() {
     tick_scenario_actors(transformed);
     ck(bound.joint_pose[0].position->x == 20 &&
        bound.joint_pose[1].position->y == 7 && bound.frame == 65536);
-    animation.tracks[0].angles.assign(2, std::array<uint16_t, 3>{100, 200, 300});
+    animation.tracks[0].angles.assign(2,
+                                      std::array<uint16_t, 3>{100, 200, 300});
     animation.tracks[1].angles.clear();
     (*animated_bank)[0] = animation;
     bound.frame = 0;
@@ -974,7 +992,8 @@ int main() {
     bound.joint_pose = actor_bind_pose(*bound.model);
     tick_scenario_actors(transformed);
     ck(*bound.joint_pose[1].angles == std::array<uint16_t, 3>{0, 200, 300});
-    ck(transformed.motion_angle_scratch == std::array<uint16_t, 3>{0, 200, 300});
+    ck(transformed.motion_angle_scratch ==
+       std::array<uint16_t, 3>{0, 200, 300});
     auto scratch_copy = transformed;
     scratch_copy.motion_angle_scratch[1] = 99;
     ck(transformed.motion_angle_scratch[1] == 200);

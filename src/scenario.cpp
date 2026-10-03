@@ -3,6 +3,30 @@
 #include <limits>
 #include <stdexcept>
 namespace ashford {
+namespace {
+const ActorModel &actor_model(const ScenarioEntity &entity) {
+  if (entity.face)
+    return entity.face->model.actor;
+  if (!entity.model)
+    throw std::runtime_error("Missing scenario actor model");
+  return *entity.model;
+}
+void render_actor(ScenarioEntity &entity) {
+  const auto &model = actor_model(entity);
+  if (entity.model_work) {
+    ActorPlacement placement;
+    placement.position = entity.position;
+    placement.angles = entity.angles;
+    entity.model_work = calculate_actor_model_work(
+        model, entity.joint_pose, *entity.model_work, placement);
+    entity.rendered_model =
+        pose_actor_model_work(model, entity.joint_pose, *entity.model_work);
+  } else {
+    entity.rendered_model = pose_actor_rotated(model, entity.joint_pose,
+                                               entity.position, entity.angles);
+  }
+}
+} // namespace
 uint32_t scenario_random(ScenarioState &state) {
   // USA ELF rand at 0x125320: wrapped LCG state, 31-bit return.
   state.random_seed = state.random_seed * 1103515245u + 12345u;
@@ -49,6 +73,10 @@ void bind_room_enemies(const Bytes &data, const RoomCollision &collision,
   auto records = decode_room_records(data);
   auto models = decode_room_enemy_models(data);
   auto motions = decode_room_enemy_motion_banks(data);
+  auto face_masks =
+      std::make_shared<const std::vector<Bytes>>(decode_room_face_masks(data));
+  auto lip_clips =
+      std::make_shared<const std::vector<Bytes>>(decode_room_lip_clips(data));
   std::vector<ScenarioEntity> enemies(128);
   std::vector<size_t> slots;
   for (size_t i = 0; i < records.enemies.size(); ++i) {
@@ -70,10 +98,41 @@ void bind_room_enemies(const Bytes &data, const RoomCollision &collision,
   }
   // Original finish-room loading visits authored-count runtime slots,
   // including zeroed trailing slots, independently of model allocation.
-  for (size_t i = 0; i < motions.size(); ++i)
-    enemies.at(i).motions = motions[i];
+  for (size_t i = 0; i < motions.size(); ++i) {
+    auto &entity = enemies.at(i);
+    entity.motions = motions[i];
+    if (entity.id == 91) {
+      if (!entity.model || !entity.model_bank)
+        throw std::runtime_error("Facial room work requires primary model");
+      if (!entity.model_bank->mask.empty()) {
+        entity.face = initialize_face_runtime(
+            *entity.model, entity.model_bank->mask, lip_clips);
+        entity.joint_pose = actor_bind_pose(entity.face->model.actor);
+        entity.model_work = entity.face->model.work;
+      } else {
+        // Original absent-MASK branch keeps ordinary layout and suppresses
+        // motion only on 6..10, with facial model drawing disabled.
+        entity.model_flags &= ~0x100u;
+        entity.joint_pose = actor_bind_pose(*entity.model);
+        if (entity.joint_pose.size() < 11)
+          throw std::runtime_error("Missing-mask facial model is too small");
+        ActorModelWork work;
+        work.joints.resize(entity.joint_pose.size());
+        for (size_t joint = 6; joint <= 10; ++joint)
+          work.joints[joint].flags |= 4;
+        entity.model_work = std::move(work);
+      }
+      ActorPlacement placement;
+      placement.position = entity.position;
+      placement.angles = entity.angles;
+      entity.model_work =
+          calculate_actor_model_work(actor_model(entity), entity.joint_pose,
+                                     *entity.model_work, placement);
+    }
+  }
   state.enemies = std::move(enemies);
   state.enemy_slots = std::move(slots);
+  state.face_masks = std::move(face_masks);
 }
 namespace {
 uint32_t u32(const Bytes &b, size_t p) {
@@ -490,8 +549,7 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
         if (entity.flags & 0x1080)
           throw std::runtime_error(
               "Unsupported linked or retained scenario actor matrix");
-        entity.rendered_model = pose_actor_rotated(
-            *entity.model, entity.joint_pose, entity.position, entity.angles);
+        render_actor(entity);
         pc += 2;
       } else if (operation == 7) {
         if (!state.collision)
@@ -695,6 +753,36 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
       pc += 10;
       break;
     }
+    case 60:
+    case 61:
+    case 62:
+    case 63: {
+      extent(4);
+      const auto opcode = program[pc];
+      auto &entity =
+          indexed(state.enemies, indexed(state.enemy_slots, program[pc + 2]));
+      if (!entity.face)
+        throw std::runtime_error(
+            "Facial script requires bound native mask work");
+      auto &control = entity.face->controller;
+      if (opcode == 60) {
+        if (state.face_masks)
+          select_face_mask(control, *state.face_masks, program[pc + 3], 0);
+        else
+          control.start_frame = 0;
+      } else if (opcode == 61) {
+        control.lip_group = program[pc + 1];
+        select_face_lip(control, program[pc + 3]);
+      } else {
+        const uint32_t flag = opcode == 62 ? 1 : 4;
+        if (!program[pc + 3])
+          control.flags |= flag;
+        else
+          control.flags &= ~flag;
+      }
+      pc += 4;
+      break;
+    }
     case 66:
       extent(4);
       indexed(state.items, program[pc + 1]).angular_speed = program[pc + 2];
@@ -818,7 +906,7 @@ void tick_scenario_actors(ScenarioState &state) {
   for (auto &entity : state.enemies) {
     if (!(entity.flags & 1) || (entity.state_flags & 0x41000000))
       continue;
-    if (entity.id != 67 || entity.modes[0] > 1 ||
+    if ((entity.id != 67 && entity.id != 91) || entity.modes[0] > 1 ||
         (entity.modes[0] == 1 &&
          (entity.modes[2] != 0 ||
           (entity.control2 != 0 && entity.control2 != 10))))
@@ -831,6 +919,9 @@ void tick_scenario_actors(ScenarioState &state) {
       throw std::runtime_error("Unsupported scenario actor motion binding");
     entity.previous_position = entity.position;
     entity.previous_angles = entity.angles;
+    if (entity.id == 91 && entity.face)
+      tick_face_runtime(*entity.face, entity.joint_pose, entity.id,
+                        entity.state_flags, state.flags[11][0]);
     entity.flags = (entity.flags | 0x8100) & ~2u;
     bool update_motion = true;
     if (!entity.modes[0]) {
@@ -856,8 +947,7 @@ void tick_scenario_actors(ScenarioState &state) {
       update_motion = entity.modes[3] == 1;
     }
     if (!update_motion) {
-      entity.rendered_model = pose_actor_rotated(
-          *entity.model, entity.joint_pose, entity.position, entity.angles);
+      render_actor(entity);
       continue;
     }
     if (entity.motion_number >= entity.motions->size())
@@ -870,9 +960,12 @@ void tick_scenario_actors(ScenarioState &state) {
           uint64_t(entity.frame) >= uint64_t(motion.frames) * 65536)
         throw std::runtime_error("Scenario actor frame outside motion");
       if (entity.joint_pose.empty())
-        entity.joint_pose = actor_bind_pose(*entity.model);
+        entity.joint_pose = actor_bind_pose(actor_model(entity));
       MotionApplicationOptions options;
       options.mode = entity.motion_mode;
+      if (entity.model_work)
+        for (const auto &joint : entity.model_work->joints)
+          options.joint_flags.push_back(uint8_t(joint.flags));
       if (entity.blend_count) {
         uint32_t remaining_bits = 65536u - uint32_t(entity.blend_rate);
         int32_t remaining_rate =
@@ -897,8 +990,7 @@ void tick_scenario_actors(ScenarioState &state) {
           motion.frames, int32_t(entity.motion_step), entity.motion_mode,
           entity.frame, entity.frame_direction);
     }
-    entity.rendered_model = pose_actor_rotated(*entity.model, entity.joint_pose,
-                                               entity.position, entity.angles);
+    render_actor(entity);
   }
 }
 } // namespace ashford

@@ -171,8 +171,7 @@ angled jaw anchors, and translated/rotated world placement. The headless retail
 probe prepares room archive entry 2 slot 4 from 27 to 31 joints and draws six
 meshes. This preparation intentionally supports the selected four-added-object
 skin layout. Facial deformation and eye matrices are described below. Lip
-playback is described below; MASK/controller updates remain required before ID
-91 runs in gameplay.
+playback and the selected ID 91 MASK/controller integration are described below.
 
 Normal facial shape keys now decode from the original MASK variable-table
 layout into native `FaceParameters`. Sampling follows the source unsigned-frame
@@ -181,7 +180,7 @@ selective muscle updates, jaw/tongue level scaling and unscaled eye coordinates.
 Cosine interpolation uses the existing Ninja quarter-wave table and its 16383
 reflection, including integer angle truncation. The graveyard MASK has 24
 normal shape keys ending at frame 46. These normal parameters feed the
-deformation path below; controller integration remains pending.
+deformation path and controller integration below.
 
 Selected mode-1 facial deformation now decodes native muscle connections and
 weighted jaw/tongue bindings. It resets only the source's designated vertices,
@@ -200,9 +199,8 @@ source vertices, world placement and failures with constrained allocation.
 
 The retail probe samples the full 24-key shape track at half-frame intervals,
 deforms and draws each of 93 frames with native persistent model work, and
-checks actual triangle movement. This is the `fmCnkCalcFace` dependency, not
-the complete `bhControlMask` path: scheduler gating, lip data and its specific
-copies/inverted eye angles into the runtime joint table remain to be adapted.
+checks actual triangle movement. The `fmCnkCalcFace` dependency is now also
+called by the selected `bhControlMask` adaptation described below.
 
 Native packed lip shape decoding and two-tick playback now adapt
 `fmSetLipSyncParam`, `fmCnkSetParamLip` and `fmCnkSetInterParamLip`.
@@ -220,12 +218,45 @@ successful evaluation, including a late packed-angle failure. Differences
 outside signed 32-bit range fail explicitly instead of depending on C signed
 overflow. Synthetic tests cover all interpolation modes, odd and short clips,
 neutral termination, signed words, malformed inputs and complete state rollback.
-This dependency is not yet called by the gameplay actor scheduler. Original
+This dependency is now called by the selected ID 91 actor scheduler. Original
 `bhSetRoom` supplies resident lip and external mask pointers through the room's
 motion header. Resident lip decoding now follows its enemy-count-plus-two
 pointer and preserves the length-prefixed clip indices, including empty
 records. It respects the next containing section boundary and bank sentinel.
 The private retail probe loads 617 lip clips in 44 of 205 rooms and validates
 12,042 segments; this checks streams without assuming a particular actor's
-shape bank. Actor binding, six-shape group selection, `bhControlMask` gating
-and runtime joint copies are the next integration work.
+shape bank.
+
+Selected native ID 91 facial work now binds at the original finish-room
+lifecycle. `FaceRuntime` owns prepared geometry, immutable shape/clip bindings,
+and mutable controller counters. Resident external mask tracks use the
+enemy-count-plus-one motion pointer. Scenario opcodes 60–63 select and start
+mask/lip playback through the original authored-work mapping. Missing-index
+selection retains the source's last traversed pointer and return behavior.
+
+The controller preserves sampling before frame advance/reset, last-minus-one
+holding, looping and pause flags, actor-ID matching, idle suppression, the
+game-flag override and final-loop gating. Lip groups shift the source shape
+base by six records. Tooth/tongue X and inverted eye X/Y copy into the runtime
+pose; eye Z remains unchanged. Runtime copies honor the stored model header
+size. Late failures cannot partially commit geometry, pose, counters or flags.
+
+Facial updates precede the selected subplayer callback. Prepared geometry and
+persistent O_WORK supply body motion and rendering; joints 6–14 retain their
+original motion masks. The absent-MASK branch clears model flag 0x100 and masks
+ordinary joints 6–10. Synthetic checks cover later body animation and blending
+for control2 values 0 and 10 as well as startup and hold.
+
+The headless retail scheduler probe initializes graveyard entry 2 slot 4 and
+runs 96 joined facial/body/model ticks, with changed geometry on 87 frames and
+unchanged raw asset bytes. Its original motion slot zero is null, so the held
+body frame correctly remains zero. That room has no resident lip bank; a
+separate entry 0 check selects a real clip with original script commands,
+runs it to termination in 12 scheduler ticks, and verifies changed geometry
+on 11 frames without modifying raw assets or the held body frame.
+
+This enables the represented ID 91 startup/hold and selected body-animation
+states. Other actor/controller states fail explicitly. Full graveyard runtime
+entry still requires the ID 1 zombie controller. Combat, decoded audio and
+cross-room save/load remain required before Step 1 is complete; New Game
+remains disabled.
