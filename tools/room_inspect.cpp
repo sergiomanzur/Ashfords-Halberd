@@ -145,6 +145,7 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_model_ticks=0,zombie_cache_draws=0,zombie_cache_changed_draws=0;
         size_t zombie_mouth_draws=0,zombie_mouth_changed_draws=0;
         size_t zombie_blood_birth_probes=0,zombie_water_birth_probes=0;
+        size_t zombie_close_pursuit_ticks=0,zombie_walk_phase_boundaries=0;
         size_t zombie_motion_sound_requests=0, zombie_motion_vibration_requests=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
@@ -782,6 +783,39 @@ int wmain(int argc,wchar_t** argv) {
                                             ++zombie_foot_zero_probes;
                                         }
                                     }
+                                    auto close=initialized;
+                                    auto& tracker=close.enemies[root];
+                                    tracker.modes={1,1,2,0};tracker.zombie_flags|=0x400;
+                                    tracker.zombie_work->player_distance=10;
+                                    ScenarioEntity near_player;
+                                    near_player.flags=0x118;near_player.floor=tracker.floor;
+                                    const auto close_yaw=ninja_sin_cos(uint16_t(tracker.angles[1]));
+                                    near_player.position={tracker.position.x-close_yaw[0]*10,
+                                        tracker.position.y,tracker.position.z-close_yaw[1]*10};
+                                    tracker.zombie_work->target_x=near_player.position.x;
+                                    tracker.zombie_work->target_z=near_player.position.z;
+                                    for(size_t tick=0;tick<18;++tick) {
+                                        tick_zombie_close_pursuit(close,root,near_player);
+                                        ++zombie_close_pursuit_ticks;
+                                    }
+                                    if(tracker.motion_number!=(tracker.type==5?125u:117u) ||
+                                       close.enemies[body].motion_number!=(tracker.type==5?325u:317u) ||
+                                       tracker.zombie_work->pursuit_transition_timer!=0 ||
+                                       tracker.zombie_work->pursuit_phase_word!=1 || tracker.model->model!=raw)
+                                        throw std::runtime_error("Retail source close-pursuit/paired transition mismatch");
+                                    for(size_t joint=0;joint<cached.joints.size();++joint)
+                                        if(tracker.model_work->joints[joint].matrix!=cached.joints[joint].matrix)
+                                            throw std::runtime_error("Retail pursuit scalar state changed cached model");
+                                    const auto old_frames=tracker.motions->at(tracker.motion_number)->frames;
+                                    tracker.frame=int32_t((old_frames-1)*65536u);
+                                    change_zombie_walk_motion(close,root);
+                                    const auto new_frames=tracker.motions->at(tracker.motion_number)->frames;
+                                    if(uint32_t(tracker.frame)!=new_frames*65536u ||
+                                       close.enemies[body].motion_number!=119)
+                                        throw std::runtime_error("Retail source legacy walking phase boundary mismatch");
+                                    // Literal source metadata reaches a terminal key. Full scheduler
+                                    // integration must resolve this sampling boundary before enabling play.
+                                    ++zombie_walk_phase_boundaries;
                                     auto blood=initialized;
                                     auto& bitten=blood.enemies[root];
                                     const auto birth_seed=blood.random_seed;
@@ -1339,6 +1373,10 @@ int wmain(int argc,wchar_t** argv) {
                     throw std::runtime_error("Retail native effect birth coverage mismatch");
                 std::cout<<"Verified "<<zombie_blood_birth_probes<<" blood/particle and "<<zombie_water_birth_probes
                          <<" duplicate step birth probes using original cached models and room ground/water\n";
+                if(zombie_close_pursuit_ticks!=zombie_brain_roots*18 || zombie_walk_phase_boundaries!=zombie_brain_roots)
+                    throw std::runtime_error("Retail close-pursuit source state coverage mismatch");
+                std::cout<<"Applied "<<zombie_close_pursuit_ticks<<" isolated source close-pursuit states and "
+                         <<zombie_walk_phase_boundaries<<" literal walking phase boundaries; terminal-key integration pending\n";
                 if(zombie_model_ticks!=zombie_set_motion_ticks || zombie_cache_draws!=zombie_brain_roots*3 ||
                    zombie_cache_changed_draws!=zombie_brain_roots*2)
                     throw std::runtime_error("Retail CalcEnemy/cache drawing coverage mismatch");

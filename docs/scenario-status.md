@@ -702,3 +702,24 @@ rooms,3200native routing calls,10blood/particle probes,10duplicate step probes,
 4800exact zero-drift paths and30changed same-cache mouth draws. A fresh packaged
 dummy-SDL profile passes241ticks/240renders/53movement ticks,10focus-blocked
 ticks, main-menu return and INI creation. No desktop windows were opened.
+
+Native MV02 close pursuit now includes source startup, steering, acceleration,
+fast-walk selection, disengagement, wall recovery and transition/voice tails.
+ChgWalkMtn preserves paired selection, same-motion retention and the original
+double fixed-point shift; FastWalkCheck retains the active-root exclusions.
+Updates stage motion/scalars/RNG/requests until consumed context validates,
+without copying models or poses. USA ELF confirms the legacy phase shift.
+
+All48 headless checks pass. The final205-room scan adds180isolated pursuit
+state updates and10literal phase-boundary probes using original paired motion
+banks. The existing motion/cache/effect/mouth probes still pass. Fresh packaged
+dummy-SDL smoke passes241ticks,240renders,53movement ticks,10focus-blocked
+ticks, main-menu return and INI creation; the executable/ZIP are refreshed.
+Source review found no Critical/Important discrepancies; nonzero same-motion
+frame/blend retention coverage is a deferred Minor.
+
+These probes verify pursuit state and metadata. The legacy remap can reach the
+terminal motion key, whose sampling must be resolved before controller
+integration. Full enemy actions/combat, effect playback, decoded audio,
+inventory and cross-room saves remain pending. Step1 stays active and New Game
+stays disabled.

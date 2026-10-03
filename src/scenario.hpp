@@ -62,6 +62,9 @@ struct ZombieExtendedWork {
   uint8_t awareness = 0, awareness_timeout = 0; // EXP0_UC(0x28/0x29).
   uint8_t route_id = 0, route_timer = 0;        // EXP0_UC(0x2a/0x2b).
   uint8_t damage_rotation_frame = 0;            // EXP0_UC(0x2c).
+  int8_t attack_delay = 0;                      // EXP0_C(0x2f).
+  int32_t pursuit_phase_word = 0;               // EXP0_I/F(0x94), shared bits.
+  int32_t pursuit_transition_timer = 0;         // EXP0_I(0x98).
   float target_x = 0, target_z = 0;             // EXP0_F(0x58/0x60).
   bool path_blocked = false;                    // Nonzero EXP0 pointer(0x70).
   std::optional<size_t> stair_target;           // EXP0 pointer(0x74).

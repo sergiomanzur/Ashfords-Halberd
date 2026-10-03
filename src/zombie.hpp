@@ -75,6 +75,11 @@ void tick_zombie_idle(ScenarioState &state, size_t work);
 // en01.c::MV01 walking state callback; full Move/SetMtn dispatch is separate.
 void tick_zombie_walk(ScenarioState &state, size_t work,
                       const ScenarioEntity &player);
+// en01.c MV02 close pursuit and its paired walking-transition policy.
+void tick_zombie_close_pursuit(ScenarioState &state, size_t work,
+                               const ScenarioEntity &player);
+void change_zombie_walk_motion(ScenarioState &state, size_t work);
+bool zombie_fast_walk_active(const ScenarioState &state, size_t work);
 void tick_zombie_neck(ScenarioState &state, size_t work,
                       const ActorModelWork &player);
 } // namespace ashford
