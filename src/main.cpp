@@ -1,6 +1,8 @@
 #include "core.hpp"
 #include "text.hpp"
 #include "viewer.hpp"
+#include "runtime_view.hpp"
+#include <array>
 #include <SDL.h>
 #include <SDL_syswm.h>
 #define WIN32_LEAN_AND_MEAN
@@ -98,7 +100,7 @@ void apply_display(SDL_Window* window, SDL_Renderer* renderer, const Settings& s
     if (SDL_RenderSetVSync(renderer, settings.vsync ? 1 : 0) < 0)
         throw std::runtime_error("This renderer cannot change vertical sync.");
 }
-int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::path& archive_override={}) {
+int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::path& archive_override={},bool runtime_smoke=false,const fs::path& system_override={}) {
     Instance instance(root);
     recover_import(root);
     auto settings_path = root / "AshfordsHalberd.ini";
@@ -119,8 +121,20 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
     if (!renderer) throw std::runtime_error(SDL_GetError());
     SDL_RenderSetLogicalSize(renderer.get(), 1120, 720);
     Text text(renderer.get());
-    bool ready = cache_valid(root)||scene_smoke, running = true, first_launch = !ready && !smoke;
-    int page = scene_smoke?3:0, selected = 0, frames = 0;
+    bool ready = cache_valid(root)||scene_smoke||runtime_smoke, running = true, first_launch = !ready && !smoke;
+    int page = runtime_smoke?4:scene_smoke?3:0, selected = 0, frames = 0;
+    std::unique_ptr<RuntimeView> native;
+    std::array<bool,SDL_NUM_SCANCODES> runtime_keys{};
+    uint64_t runtime_clock=SDL_GetPerformanceCounter();
+    double runtime_accumulator=0;
+    size_t runtime_movement=0;
+    bool runtime_focused=true;
+    size_t runtime_focus_blocked=0;
+    auto open_native=[&]{
+        native=std::make_unique<RuntimeView>(renderer.get(),archive_override.empty()?root/"assets/RDX_LNK.AFS":archive_override,system_override.empty()?root/"assets/SYSTEM.AFS":system_override);
+        runtime_keys.fill(false);runtime_focused=true;runtime_clock=SDL_GetPerformanceCounter();runtime_accumulator=0;frames=0;runtime_movement=0;
+    };
+    if(runtime_smoke)open_native();
     std::unique_ptr<RoomViewer> viewer;
     auto open_viewer=[&]{
         viewer=std::make_unique<RoomViewer>(renderer.get(),archive_override.empty()?root/"assets/RDX_LNK.AFS":archive_override);
@@ -132,8 +146,20 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
     std::string notice;
     std::unique_ptr<ImportJob> job;
     std::vector<SDL_GameController*> controllers;
-    auto attach = [&](int index) { if (SDL_IsGameController(index)) { auto* pad = SDL_GameControllerOpen(index); if (pad) controllers.push_back(pad); } };
+    auto attach = [&](int index) { if (SDL_IsGameController(index)) {auto id=SDL_JoystickGetDeviceInstanceID(index);for(auto* existing:controllers)if(SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(existing))==id)return; auto* pad = SDL_GameControllerOpen(index); if (pad) controllers.push_back(pad); } };
     for (int i = 0; i < SDL_NumJoysticks(); ++i) attach(i);
+    struct VirtualPad {
+        int index=-1;SDL_Joystick* joystick=nullptr;
+        ~VirtualPad(){if(joystick)SDL_JoystickClose(joystick);if(index>=0)SDL_JoystickDetachVirtual(index);}
+    } virtual_pad;
+    if(runtime_smoke){
+        SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");
+        virtual_pad.index=SDL_JoystickAttachVirtual(SDL_JOYSTICK_TYPE_GAMECONTROLLER,SDL_CONTROLLER_AXIS_MAX,SDL_CONTROLLER_BUTTON_MAX,0);
+        if(virtual_pad.index<0)throw std::runtime_error(SDL_GetError());
+        virtual_pad.joystick=SDL_JoystickOpen(virtual_pad.index);
+        if(!virtual_pad.joystick || !SDL_IsGameController(virtual_pad.index))throw std::runtime_error("Could not create headless controller");
+        attach(virtual_pad.index);
+    }
     struct Pads { std::vector<SDL_GameController*>& pads; ~Pads() { for (auto* pad : pads) SDL_GameControllerClose(pad); } } pads {controllers};
     if (!smoke) {
         try { apply_display(window.get(), renderer.get(), settings); }
@@ -166,7 +192,8 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
                 if (selected == 1) { if(!ready){notice="Import your ISO in Game data first.";return;}open_viewer();page=3;notice.clear(); }
                 else if (selected == 2) { page = 1; selected = 0; notice.clear(); }
                 else if (selected == 3) { page = 2; selected = 0; notice.clear(); }
-                else if (selected == 4) running = false;
+                else if (selected == 4) {if(!ready){notice="Import your ISO in Game data first.";return;}open_native();page=4;notice.clear();}
+                else if (selected == 5) running = false;
             } else if (page == 1) {
                 auto next = settings;
                 if (selected == 0) {
@@ -202,6 +229,12 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
                 back |= event.cbutton.button == SDL_CONTROLLER_BUTTON_B;
             }
             if (!job) {
+                if(page==4){
+                    if(back){page=0;selected=4;runtime_keys.fill(false);notice.clear();continue;}
+                    if(event.type==SDL_WINDOWEVENT && (event.window.event==SDL_WINDOWEVENT_FOCUS_LOST || event.window.event==SDL_WINDOWEVENT_FOCUS_GAINED)){runtime_focused=event.window.event==SDL_WINDOWEVENT_FOCUS_GAINED;runtime_keys.fill(false);}
+                    if(runtime_focused && (event.type==SDL_KEYDOWN || event.type==SDL_KEYUP)){auto scancode=event.key.keysym.scancode;if(scancode>=0 && scancode<SDL_NUM_SCANCODES)runtime_keys[size_t(scancode)]=event.type==SDL_KEYDOWN;}
+                    continue;
+                }
                 if(page==3){
                     if(back){page=0;selected=1;notice.clear();continue;}
                     bool left=event.type==SDL_KEYDOWN && event.key.keysym.sym==SDLK_LEFT;
@@ -223,7 +256,7 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
                     }
                     continue;
                 }
-                int count = page == 0 ? 5 : page == 1 ? 5 : 2;
+                int count = page == 0 ? 6 : page == 1 ? 5 : 2;
                 if (up) selected = (selected + count - 1) % count;
                 if (down) selected = (selected + 1) % count;
                 if (back) { if (page) { page = 0; selected = 0; notice.clear(); } else running = false; }
@@ -243,6 +276,41 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
         if (!running) break;
         auto* r = renderer.get();
         SDL_SetRenderDrawColor(r, dark.r, dark.g, dark.b, 255); SDL_RenderClear(r);
+        if(page==4){
+            uint16_t pad=0;
+            if(runtime_keys[SDL_SCANCODE_W]||runtime_keys[SDL_SCANCODE_UP])pad|=1;
+            if(runtime_keys[SDL_SCANCODE_S]||runtime_keys[SDL_SCANCODE_DOWN])pad|=2;
+            if(runtime_keys[SDL_SCANCODE_A]||runtime_keys[SDL_SCANCODE_LEFT])pad|=4;
+            if(runtime_keys[SDL_SCANCODE_D]||runtime_keys[SDL_SCANCODE_RIGHT])pad|=8;
+            if(runtime_keys[SDL_SCANCODE_LSHIFT]||runtime_keys[SDL_SCANCODE_RSHIFT])pad|=0x400;
+            for(auto* controller:controllers){
+                auto x=SDL_GameControllerGetAxis(controller,SDL_CONTROLLER_AXIS_LEFTX),y=SDL_GameControllerGetAxis(controller,SDL_CONTROLLER_AXIS_LEFTY);
+                if(y< -8000 || SDL_GameControllerGetButton(controller,SDL_CONTROLLER_BUTTON_DPAD_UP))pad|=1;
+                if(y>8000 || SDL_GameControllerGetButton(controller,SDL_CONTROLLER_BUTTON_DPAD_DOWN))pad|=2;
+                if(x< -8000 || SDL_GameControllerGetButton(controller,SDL_CONTROLLER_BUTTON_DPAD_LEFT))pad|=4;
+                if(x>8000 || SDL_GameControllerGetButton(controller,SDL_CONTROLLER_BUTTON_DPAD_RIGHT))pad|=8;
+                if(SDL_GameControllerGetButton(controller,SDL_CONTROLLER_BUTTON_X))pad|=0x400;
+            }
+            if(!runtime_focused){pad=0;++runtime_focus_blocked;}
+            auto now=SDL_GetPerformanceCounter();
+            runtime_accumulator+=std::min(.25,double(now-runtime_clock)/SDL_GetPerformanceFrequency());runtime_clock=now;
+            size_t steps=runtime_smoke?1:std::min(size_t(8),size_t(runtime_accumulator*60));
+            try {
+                for(size_t step=0;step<steps;++step){auto before=native->state().world.player.position;native->tick(pad);if(runtime_smoke && !runtime_focused && (native->state().scenario.flags[6][0]&1) && native->state().world.player.previous_pad)throw std::runtime_error("Controller input continued after focus loss");auto after=native->state().world.player.position;if(before.x!=after.x || before.z!=after.z)++runtime_movement;}
+                if(!runtime_smoke)runtime_accumulator-=double(steps)/60;
+                SDL_Rect image{160,55,800,600};native->draw(image);
+            }catch(const std::exception& error){if(runtime_smoke)throw;page=0;selected=4;notice=error.what();continue;}
+            text.draw("CORRIDOR PREVIEW",68,18,16,gold);
+            text.draw("WASD/Arrows or left stick: Move   SHIFT/X: Run   ESC/B: Back",68,673,15,white);
+            text.draw("Movement preview / combat, interactions and saves are in development",170,631,13,gold);
+            SDL_RenderPresent(r);++frames;
+            if(runtime_smoke && (frames==180 || frames==240)){
+                if(frames==180 && SDL_JoystickSetVirtualAxis(virtual_pad.joystick,SDL_CONTROLLER_AXIS_LEFTY,-32768)<0)throw std::runtime_error(SDL_GetError());
+                SDL_Event e{};e.type=SDL_KEYDOWN;e.key.keysym.sym=frames==180?SDLK_w:SDLK_ESCAPE;e.key.keysym.scancode=frames==180?SDL_SCANCODE_W:SDL_SCANCODE_ESCAPE;SDL_PushEvent(&e);
+            }
+            if(runtime_smoke && (frames==200 || frames==210)){SDL_Event e{};e.type=SDL_WINDOWEVENT;e.window.event=frames==200?SDL_WINDOWEVENT_FOCUS_LOST:SDL_WINDOWEVENT_FOCUS_GAINED;SDL_PushEvent(&e);}
+            SDL_Delay(runtime_smoke?0:1);continue;
+        }
         if(page==3){
             SDL_Rect image{160,55,800,600};viewer->draw(image);
             text.draw("ROOM VIEWER  /  DEVELOPMENT BUILD",68,18,16,gold);
@@ -277,7 +345,7 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
         text.draw("Halberd", 68, 163, 60, white, true);
         text.draw("CODE VERONICA X  /  WINDOWS", 72, 243, 14, muted, false, true);
         std::vector<std::string> labels;
-        if (page == 0) labels = {"New game", "Room viewer", "Options", "Game data", "Quit"};
+        if (page == 0) labels = {"New game", "Room viewer", "Options", "Game data", "Corridor preview", "Quit"};
         else if (page == 1) labels = {
             "Resolution     " + std::to_string(settings.width) + " x " + std::to_string(settings.height),
             "Window mode     " + settings.mode,
@@ -309,13 +377,14 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
             text.draw("SLUS-20184  /  USA", 683, 401, 17, white);
             text.draw("Development build 0.2\nRoom viewer available. Gameplay is in development.", 683, 471, 17, muted, false, false, 352);
         }
-        if (!notice.empty()) text.draw(notice, 72, 590, 16, gold, false, false, 950);
+        if (!notice.empty()) text.draw(notice, 72, 620, 16, gold, false, false, 950);
         fill(r, 68, 641, 967, 1, {58, 64, 64, 255});
         text.draw("ARROWS / D-PAD   Navigate       ENTER / A   Select       ESC / B   Back", 72, 667, 13, muted);
         text.draw("NATIVE WINDOWS BUILD", 837, 667, 12, muted);
         SDL_RenderPresent(r);
         if (first_launch && !job) { first_launch = false; try { choose(); } catch (const std::exception& error) { message(window.get(), error.what()); running = false; } }
-        if(scene_smoke){std::ofstream(root/"scene-menu-return.txt")<<"Returned to main menu.\n";running=false;}
+        if(runtime_smoke){if(frames!=240 || !runtime_movement || runtime_focus_blocked!=10)throw std::runtime_error("Native runtime input smoke failed");save_settings(settings_path,settings);std::ofstream(root/"runtime-smoke.txt")<<"ticks="<<native->ticks()<<"\nrendered_frames="<<frames<<"\nmovement_ticks="<<runtime_movement<<"\nfocus_blocked_ticks="<<runtime_focus_blocked<<"\nmenu_return=1\n";running=false;}
+        else if(scene_smoke){std::ofstream(root/"scene-menu-return.txt")<<"Returned to main menu.\n";running=false;}
         else if (smoke && ++frames == 3) {
             save_settings(settings_path, settings);
             auto persisted = load_settings(settings_path);
@@ -335,8 +404,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     if (!raw) return 1;
     std::vector<std::wstring> args(raw, raw + argc); LocalFree(raw);
     fs::path root;
-    bool command = false, smoke = false,scene_smoke=false;
-    fs::path archive_override;
+    bool command = false, smoke = false,scene_smoke=false,runtime_smoke=false;
+    fs::path archive_override,system_override;
     try {
         root = user_root();
         for (std::size_t i = 1; i < args.size(); ++i) {
@@ -346,6 +415,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             }
             if (args[i] == L"--smoke-test") smoke = true;
             if(args[i]==L"--scene-smoke-test"){scene_smoke=true;smoke=true;command=true;}
+            if(args[i]==L"--runtime-smoke-test"){runtime_smoke=true;smoke=true;command=true;}
+            if(args[i]==L"--system"){if(++i>=args.size())throw std::runtime_error("Missing system archive argument.");system_override=fs::absolute(fs::path(args[i]));}
             if(args[i]==L"--archive"){if(++i>=args.size())throw std::runtime_error("Missing archive argument.");archive_override=fs::absolute(fs::path(args[i]));}
             if (args[i] == L"--inspect-iso" || args[i] == L"--import-iso" || args[i] == L"--check-cache") command = true;
         }
@@ -368,7 +439,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             }
             if (args[i] == L"--check-cache") { recover_import(root); return cache_valid(root) ? 0 : 1; }
         }
-        return run_app(root, smoke,scene_smoke,archive_override);
+        return run_app(root, smoke,scene_smoke,archive_override,runtime_smoke,system_override);
     } catch (const std::exception& error) {
         if (!root.empty()) { std::ofstream log(root / "last-error.txt"); log << error.what() << '\n'; }
         if (!command && !smoke) MessageBoxW(nullptr, wide(error.what()).c_str(), L"Ashford's Halberd", MB_OK | MB_ICONERROR);

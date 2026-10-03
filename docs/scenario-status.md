@@ -106,7 +106,7 @@ slot order with the original per-ID reuse. The probe initializes the corridor
 actor and verifies its empty-bank hold before script selection. Other actor
 controllers and their initialization,
 mirroring, linked matrices and joint overrides remain to port. The application
-gameplay loop is not yet connected to these native updates.
+preview loop is now connected to these native updates; full gameplay remains pending.
 `bind_room_enemies` now constructs the original 128 runtime slots from active
 authored records, retains complete immutable model banks, aliases the primary
 model, calculates floor and assigns the regular motion banks in runtime order.
@@ -117,7 +117,7 @@ Synthetic tests cover compaction, signed yaw, ignored authored X/Z rotation,
 ID-dependent model flags and failure rollback. The retail probe binds enemies
 in all 205 rooms and uses the resulting corridor state for startup and its
 complete event. Object/item asset loading and bindings now exist; their
-remaining special controllers and application integration remain pending.
+remaining special controllers and complete gameplay remain pending.
 Player/effect bindings and sound commands remain unsupported.
 
 Native `initialize_scenario` follows `bhInitEvent`'s state/script ordering:
@@ -134,7 +134,7 @@ retention, context 15 after scheduling and room-control cursor isolation.
 The headless retail probe runs all four corridor initialization states and a
 complete initialization/control/actor/event sequence through the 150-frame
 animation. Sound commands 3/4, remaining special object controllers and
-application integration still remain to implement.
+complete gameplay still remain to implement.
 
 Native `bind_room_props` carries decoded room objects and pickups into the
 script-addressable vectors. Object slots 0–3 retain player attachments; room
@@ -157,8 +157,8 @@ restoration and the introduction require separate controller paths.
 `AshfordRoomInspect RDX_LNK.AFS report.tsv --runtime-check SYSTEM.AFS` loads
 Claire's original package and uses this shared runtime loader for all four
 corridor initialization cases. The existing scenario diagnostic remains
-available without a player archive. The application frame loop and playable
-menu entry are still pending; this loader alone does not make the game playable.
+available without a player archive. The complete New Game entry remains
+pending; this loader alone does not complete the playable slice.
 
 The shared `tick_room_runtime` now updates represented actor controllers,
 healthy unarmed player movement/collision/posing, simple props and pickups,
@@ -166,8 +166,8 @@ then room control/events. Player frame checks use the updated motion counter;
 the player and prop subsystem gates are respected. The retail runtime probe
 runs 240 ticks for each of the four corridor initialization cases, including
 60 ticks of forward input, and checks player/scenario frame synchronization
-and pickup model rebuilding. This is a shared simulation loop; it is not yet
-wired to the application input/render loop.
+and pickup model rebuilding. This shared simulation loop is now wired to the
+application's corridor preview.
 The retail probe passed 960 joined ticks, with player displacement on all
 240 ticks of forward input across the four entry cases.
 
@@ -181,7 +181,7 @@ cycle, seed values, object rotation, previous transforms, subsystem gates,
 hidden-object sleep behavior and unsupported matrices. Linked/retained
 matrices, weapon objects, object collision, alpha fading and special object
 controllers fail explicitly. The highlight drawing overlay, effects, light,
-sound, interactions, armed/damaged player states and application integration
+sound, interactions, armed/damaged player states and complete gameplay
 remain pending.
 
 `compose_room_runtime` now combines prepared room, player, enemy, object and
@@ -193,10 +193,26 @@ visibility rules control inclusion. Linked/retained matrices and morphing
 draw modes still fail explicitly. Tests cover texture remapping, sentinel and
 capacity boundaries, immutable inputs, hidden pickups and object categories.
 The retail runtime probe rendered 16 combined original-camera snapshots
-headlessly across its four entry cases. Lighting, highlight overlays and the
-application input/render loop remain pending.
+headlessly across its four entry cases. Lighting and highlight overlays remain
+pending; the application corridor preview now uses this input/render loop.
 Each of those 16 images differed from the same camera's room-only render,
 confirming that runtime entities contributed visible pixels.
+
+The application now exposes a main-menu **Corridor preview** using the shared
+native runtime. WASD/arrows and controller stick/D-pad control baseline
+movement; Shift/controller X runs; Escape/controller B returns to the menu.
+Simulation runs at a fixed 60 Hz with bounded catch-up, and prepared geometry
+is drawn through SDL using original camera cuts. Display preferences continue
+to use the existing INI. Focus loss suppresses keyboard/controller movement.
+The preview is not the completed Step 1: interactions, connected-room travel,
+enemy combat, inventory, audio and save/load still need implementation.
+
+`tests/native_runtime_smoke.py EXE RDX_LNK.AFS SYSTEM.AFS fresh-profile` performs
+headless application verification with SDL dummy/software drivers. It uses
+the user's retail assets, injects keyboard input and a virtual controller,
+checks focus loss with a held stick, renders 240 frames and returns to the
+main menu. It is a separate optional retail diagnostic; no game assets are
+added to the standard synthetic CTest fixtures or distribution.
 
 The retail RM_0010 control script sets RoomCaseNo before SetDoorCall into
 stage 0, room 2, position 0. Persistent flags choose the first-visit or return

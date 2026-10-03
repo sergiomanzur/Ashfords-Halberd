@@ -78,8 +78,8 @@ The headless retail scenario probe decoded 1,914 object/pickup models across
 all 205 rooms, including nine skinned objects. The existing corridor lifecycle,
 150-frame actor animation and scripted door probes also passed.
 
-Step 1 is still incomplete: there is no playable application mode yet. Next is
-integrating the new [movement/collision and camera simulation](player-movement-status.md)
-into application input, original event-controlled room entry and animated
-transition posing, followed by interactions, transitions, enemies, combat,
-inventory, decoded audio and versioned save/load across the selected room pair.
+Step 1 is still incomplete. The main-menu corridor preview now connects native
+movement, animated actors and original room cameras to application input and
+rendering. Interactions, connected-room transitions, enemies/combat, inventory,
+decoded audio and versioned save/load across the selected room pair remain to
+implement before the complete playable slice is ready.
