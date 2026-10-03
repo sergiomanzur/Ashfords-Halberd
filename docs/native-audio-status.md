@@ -1,7 +1,8 @@
 # Native original sound assets
 
-The native library now decodes the sound assets required by the selected
-Step1 rooms. **Playback and the playable slice remain incomplete.** New Game
+The native library decodes the selected Step1 sound assets and synthesizes
+the original ambient sequences offline. **Runtime playback and the playable
+slice remain incomplete.** New Game
 is disabled; original scenario opcode148 still rejects explicitly because
 its sequenced playback service is unfinished.
 
@@ -25,7 +26,8 @@ its sequenced playback service is unfinished.
   or event allocations.
 - All indexed MIDI blocks in SQ, including source running status, one-byte
   note-off, high-bit delta omission, tempo, pitch and loop control events.
-  Loop controls are preserved as events; they are not executed by this decoder.
+  Loop controls are preserved as events; the separate native playback clock
+  executes the selected ambient sequences' endless loops.
 - `AshfordAudioInspect` exports private WAV/HD/BD and sample/event TSVs without
   opening an audio device. It requires a fresh output directory and decodes
   all selected records before creating output. It is a developer tool and is
@@ -100,10 +102,73 @@ Their complete notices are preserved in `licenses/` and the Windows package.
 No vgmstream/VGMTrans runtime dependency, PS2 SDK or IOP driver execution is
 introduced. `MANATEE.DRV` is not executed by the native port.
 
+## Native sequence synthesis
+
+`SceSequencer` executes the selected ambient SQ loops using controller99's
+start/end marker, controller6's loop number and controller38's endless count.
+It jumps to the event after the start number without resetting wall time,
+channel state, tempo or released sample tails. Integer rational deadlines
+retain fractional frames across tempo changes and loop repetitions. Events
+occur at the first48kHz frame at or after their timestamp, in source order.
+Finite/nested loop forms explicitly reject until their semantics are proven.
+
+`SoundEnvelope` and `SampleVoice` produce native PCM from the original ADSR
+words, four-point interpolation, Q12 pitch, sample rates and exclusive sample
+loops. The independently written envelope and mathematical interpolation
+coefficients use pinned [primary SPU documentation](https://psx-spx.consoledev.net/soundprocessingunitspu/)
+(psx-spx6184740310ee418c24e069e7e118ba94a367ee34); the PS2 rate/parameter
+layout is informed by the pinned VGMTrans reference above. **This is a native
+synthesis candidate, not proof of PS2 hardware output parity.** Fast
+exponential rates, driver gain/pan behavior and loop timing still require
+original-game reference acceptance. No GPL emulator implementation is copied,
+compiled or added to the runtime.
+
+`SceMixer` binds original indexed programs/splits/velocity layers, transpose
+and detune, multiplicative gain and additive stereo pan. Channel volume,
+expression and pan changes affect active voices. Direct and effect sends
+remain four distinct int32 buses; an effect-only sample cannot appear in the
+direct bus. Banks are held by shared immutable ownership, never pointers into
+a caller-owned temporary. Callers must not mutate a shared bank during playback.
+Limits are48 voices,48000 frames per block and65536 scheduled events per block;
+overflow/invalid indices/parameters and unsupported active branches reject.
+Pitch controllers, active modulation/key-follow/groups/crossfade/velocity
+curves and non-core0 sends remain explicit unsupported states. Oversubscribed
+voices report an error; original voice stealing is still required where used.
+
+Focused headless tests verify rational timing/tempo changes, loop guards,
+fractional deadlines, block partition invariance, envelope phases, signed
+interpolation vectors, sample-loop history, wave rate/octave/detune, note-off,
+live volume/pan changes, distinct sends, sparse/malformed instruments and caps.
+
+Private production-library audit `local/audio_mixer_retail_audit.cpp` decoded
+both original bank3 sequences in sound keys20/21 and rendered36 seconds each:
+1728000 frames, two sequence repetitions, peak4 voices for sequence0 and7 for
+sequence1. All four buses contain nonzero PCM. Repeating each render with
+different block partitions produced identical frames. The four private
+diagnostic WAVs contain dry L/R and effect-send L/R,48kHz PCM16; they are not a
+final reverberated mix and no audio device was opened. Evidence:
+`local/audio-mixer-original36.log`, `local/audio-mixer-original36/`.
+
+The complete build/package passed80/80 headless CTests. A fresh packaged
+dummy-SDL profile passed241 ticks/240 renders/53 movement ticks, focus blocking,
+menu return and INI persistence. Fresh original-entry probes retained10 roots,
+10 bodies/52 auxiliaries and120 corridor updates; both graveyard variants still
+explicitly reject opcode148 at offset10. Evidence:
+`local/native-sequence-mixer-full-build.log`,
+`local/native-sequence-mixer-ui-smoke.log`, `local/audio-mixer-entry-audit.log`.
+
+One fresh read-only review found no Critical/Important issues. Deferred Minors:
+specify/enforce the mixer's status after a rendering exception (the clock can
+already have advanced); add independent nonzero-fraction interpolation vectors
+and a regression with retained channel state/release tails spanning a sequence
+loop. Current tests and original-asset proofs do not establish those additional
+independent checks or hardware parity.
+
 ## Next required integration
 
-Implement sequenced voices, pitch/resampling, original envelopes, instrument
-gain/pan/modulation, effects/reverb and source fades. Connect decoded PCM to
+Complete required native effects/reverb and source fades, validate synthesis
+against original-game reference, and implement remaining active instrument
+branches where required by the slice. Connect the sequenced PCM buses to
 native SDL audio with separate music/voice/effects volumes, verified using the
 dummy driver. Preserve original148 request timing and room fade-in behavior.
 Decode required ADX music/voices separately. Then prove audio through actual

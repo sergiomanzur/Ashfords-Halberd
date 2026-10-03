@@ -24,6 +24,12 @@ add_library(ashford_assets src/assets.cpp src/scene.cpp src/render.cpp src/camer
 target_include_directories(ashford_assets PUBLIC src)
 
 target_sources(ashford_assets PRIVATE src/audio_adpcm.cpp src/audio_assets.cpp src/audio_sequence.cpp)
+target_sources(ashford_assets PRIVATE src/audio_timing.cpp src/audio_voice.cpp src/audio_mixer.cpp)
+add_executable(audio-playback-tests tests/audio_playback_tests.cpp)
+target_link_libraries(audio-playback-tests PRIVATE ashford_assets)
+add_test(NAME audio-sequence-timing COMMAND audio-playback-tests timing)
+add_test(NAME audio-native-voice COMMAND audio-playback-tests voice)
+add_test(NAME audio-sequence-mixing COMMAND audio-playback-tests mixer)
 add_executable(audio-asset-tests tests/audio_asset_tests.cpp)
 target_link_libraries(audio-asset-tests PRIVATE ashford_assets)
 add_test(NAME audio-asset-decoding COMMAND audio-asset-tests adpcm)
