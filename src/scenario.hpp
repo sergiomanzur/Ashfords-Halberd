@@ -10,6 +10,7 @@ namespace ashford {
 class RoomScenario;
 struct RoomEntity;
 struct RoomRoutes;
+struct NativeEffectPool;
 class ScenarioProgram {
 public:
   size_t size() const { return block_->size() - offset_; }
@@ -60,7 +61,7 @@ struct ZombieExtendedWork {
   uint8_t personality = 0;
   uint8_t awareness = 0, awareness_timeout = 0; // EXP0_UC(0x28/0x29).
   uint8_t route_id = 0, route_timer = 0;        // EXP0_UC(0x2a/0x2b).
-  uint8_t damage_rotation_frame = 0;           // EXP0_UC(0x2c).
+  uint8_t damage_rotation_frame = 0;            // EXP0_UC(0x2c).
   float target_x = 0, target_z = 0;             // EXP0_F(0x58/0x60).
   bool path_blocked = false;                    // Nonzero EXP0 pointer(0x70).
   std::optional<size_t> stair_target;           // EXP0 pointer(0x74).
@@ -106,10 +107,10 @@ struct ScenarioEntity {
   int32_t frame = 0, blend_count = 0, control1 = 0, control2 = 0;
   int32_t control0 = 0; // Original ct0, distinct from ct1/ct2/ct3.
   int32_t control3 = 0, highlight_yaw = 0;
-  int16_t torso_yaw = 0; // BH_PWORK::wax.
+  int16_t torso_yaw = 0;  // BH_PWORK::wax.
   int16_t turn_speed = 0; // BH_PWORK::way.
-  float speed = 0; // BH_PWORK::spd.
-  float shape_count = 0; // BH_PWORK::shp_ct, consumed by draw-time morphology.
+  float speed = 0;        // BH_PWORK::spd.
+  float shape_count = 0;  // BH_PWORK::shp_ct, consumed by draw-time morphology.
   uint32_t frame_direction = 0;
   uint16_t motion_attribute = 0;
   int motion_boundary = 0;
@@ -124,6 +125,8 @@ struct ScenarioEntity {
   std::optional<ZombiePartExtendedWork> zombie_part_work;
   EnemyGeometry geometry;
   std::array<int32_t, 64> damage{};
+  int32_t damage_joint = 0; // BH_PWORK::djnt_no.
+  Vec3 damage_velocity{};   // BH_PWORK::dvx/dvy/dvz.
   uint32_t combo_flags = 0;
   int32_t combo_timeout = 0;
   int32_t look_joint = 0;
@@ -175,7 +178,10 @@ struct ScenarioState {
   std::vector<CollisionRecord> interactions;
   std::optional<RoomCollision> collision;
   std::vector<CollisionRecord> dynamic_miscellaneous; // sys->metcp.
-  std::vector<CollisionRecord> dynamic_walls; // sys->mwalp.
+  std::vector<CollisionRecord> dynamic_walls;         // sys->mwalp.
+  std::vector<CollisionRecord> dynamic_floors;        // sys->mflrp.
+  // Immutable native effect state: active events replace only this pool value.
+  std::shared_ptr<const NativeEffectPool> effect_pool;
   std::vector<EnemySoundRequest> pending_enemy_sounds;
   std::vector<EnemyVibrationRequest> pending_enemy_vibrations;
   std::shared_ptr<const RoomRoutes> routes;

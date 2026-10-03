@@ -1,3 +1,4 @@
+#include "effects.hpp"
 #include "zombie.hpp"
 #include <cmath>
 #include <iostream>
@@ -273,6 +274,40 @@ int main() {
     tick_zombie_motion(s, 0, hooks);
     ck(near(s.enemies[0].position.x, 95) && near(s.enemies[0].position.z, 190),
        "SetMtn must apply original foot callback after pose sampling");
+    {
+      auto native = fixture();
+      native.enemies[0].motion_number = 8;
+      native.enemies[0].frame = 28 * 65536;
+      tick_zombie_motion(native, 0, native_zombie_motion_effects());
+      ck(native.enemies[0].frame == 29 * 65536 && native.effect_pool &&
+             native.effect_pool->works[0].id == 5 &&
+             native.effect_pool->works[1].id == 302 &&
+             native.enemies[0].damage_joint == 11,
+         "Native effects must use incoming frame before channel advance");
+      auto failed = fixture();
+      auto &root = failed.enemies[0];
+      root.motion_number = 8;
+      root.frame = 28 * 65536;
+      root.damage_joint = 6;
+      root.damage_velocity = {7, 8, 9};
+      auto old_pool = std::make_shared<NativeEffectPool>();
+      old_pool->works[0].flags = 1;
+      old_pool->works[0].id = 108;
+      failed.effect_pool = old_pool;
+      const auto old_pose = root.joint_pose;
+      auto failure = native_zombie_motion_effects();
+      failure.water = [](ScenarioState &state, size_t, int32_t) {
+        state.random_seed = 999;
+        throw std::runtime_error("Failure after native Kami creation");
+      };
+      bad([&] { tick_zombie_motion(failed, 0, failure); });
+      ck(failed.effect_pool == old_pool && root.damage_joint == 6 &&
+             root.damage_velocity.x == 7 && root.damage_velocity.y == 8 &&
+             root.damage_velocity.z == 9 && root.frame == 28 * 65536 &&
+             failed.random_seed == 1 &&
+             root.joint_pose[0].position->x == old_pose[0].position->x,
+         "Late SetMtn failure must restore native effects and damage fields");
+    }
     for (int invalid = 0; invalid < 4; ++invalid) {
       s = fixture();
       auto before = s.enemies[0].joint_pose;

@@ -1,3 +1,4 @@
+#include "effects.hpp"
 #include "room.hpp"
 #include "runtime.hpp"
 #include <cmath>
@@ -99,7 +100,7 @@ int main() {
     flt(runtime_data, 2220, 100);
     flt(runtime_data, 2224, 100);
     flt(runtime_data, 2228, 100);
-    runtime_data[2250] = 255; // Same-region queries do not read the diagonal.
+    runtime_data[2250] = 255;  // Same-region queries do not read the diagonal.
     put(runtime_data, 264, 0); // No authored enemies in this fixture.
     put(runtime_data, 20, 1800);
     put(runtime_data, 1800, 1850);
@@ -155,8 +156,16 @@ int main() {
     persistent.routes = old_routes;
     persistent.dynamic_miscellaneous.resize(2);
     persistent.dynamic_walls.resize(2);
-    persistent.pending_enemy_sounds.push_back({0,{1,2,3},99});
-    persistent.pending_enemy_vibrations.push_back({0,1,10});
+    persistent.dynamic_floors.resize(2);
+    auto old_effects = std::make_shared<NativeEffectPool>();
+    old_effects->works[0].flags = 0x81;
+    old_effects->scratch.angles[0] = 77;
+    old_effects->scratch.floor = -3;
+    old_effects->scratch.position = {4, 5, 6};
+    old_effects->ground_wall = 2;
+    persistent.effect_pool = old_effects;
+    persistent.pending_enemy_sounds.push_back({0, {1, 2, 3}, 99});
+    persistent.pending_enemy_vibrations.push_back({0, 1, 10});
     auto runtime =
         load_room_runtime(runtime_data, 0, 1, 1, persistent, entry_player);
     ck(runtime.scenario.routes && runtime.scenario.routes != old_routes &&
@@ -165,7 +174,19 @@ int main() {
        persistent.routes == old_routes);
     ck(runtime.scenario.dynamic_miscellaneous.empty() &&
        persistent.dynamic_miscellaneous.size() == 2);
-    ck(runtime.scenario.dynamic_walls.empty() && persistent.dynamic_walls.size() == 2);
+    ck(runtime.scenario.dynamic_walls.empty() &&
+       persistent.dynamic_walls.size() == 2);
+    ck(runtime.scenario.dynamic_floors.empty() &&
+       persistent.dynamic_floors.size() == 2);
+    ck(runtime.scenario.effect_pool && persistent.effect_pool == old_effects &&
+       runtime.scenario.effect_pool != old_effects &&
+       runtime.scenario.effect_pool->scratch.angles[0] == 77 &&
+       runtime.scenario.effect_pool->scratch.floor == -3 &&
+       runtime.scenario.effect_pool->scratch.position.y == 5 &&
+       !runtime.scenario.effect_pool->ground_wall &&
+       old_effects->works[0].flags == 0x81);
+    for (const auto &work : runtime.scenario.effect_pool->works)
+      ck(work.flags == 0);
     ck(runtime.scenario.pending_enemy_sounds.empty() &&
        persistent.pending_enemy_sounds.size() == 1);
     ck(runtime.scenario.pending_enemy_vibrations.empty() &&
@@ -205,9 +226,11 @@ int main() {
     ck(transition.scenario.routes == current_routes);
     ck(transition.scenario.room == 1 && transition.scenario.door &&
        transition.world.player.position.x == -10 &&
-       transition.scenario.inventory[0] == 99 && transition.previous_pad == 0x200);
+       transition.scenario.inventory[0] == 99 &&
+       transition.previous_pad == 0x200);
     transition_room_runtime(transition, runtime_data, entry_player);
-    ck(transition.scenario.routes && transition.scenario.routes != current_routes &&
+    ck(transition.scenario.routes &&
+       transition.scenario.routes != current_routes &&
        transition.scenario.routes->regions.size() == 1);
     ck(transition.scenario.stage == 2 && transition.scenario.room == 3 &&
        !transition.scenario.door && !(transition.scenario.flags[10][0] & 1) &&
@@ -217,14 +240,17 @@ int main() {
        transition.scenario.flags[6][0] == 0xffffffff &&
        transition.scenario.drawing_flags == 0xffffffff &&
        transition.world.player.position.x == 15);
-    bad([&] { transition_room_runtime(transition, runtime_data, entry_player); });
-    auto& scheduled = transition.scenario.tasks[1];
+    bad([&] {
+      transition_room_runtime(transition, runtime_data, entry_player);
+    });
+    auto &scheduled = transition.scenario.tasks[1];
     scheduled.program = transition.scenario.scenario->program(0);
     scheduled.active = true;
     scheduled.pc = 0;
     const auto before_timer = transition.scenario.event_timer;
     tick_scenario_tasks(transition.scenario);
-    ck(scheduled.pc == 8 && transition.scenario.event_timer == before_timer + 1);
+    ck(scheduled.pc == 8 &&
+       transition.scenario.event_timer == before_timer + 1);
     auto saved_entry = persistent;
     saved_entry.flags[10][0] |= 0x800000;
     bad([&] {
@@ -242,7 +268,8 @@ int main() {
        !running.world.player.entering &&
        running.scenario.player_frame == running.world.player.frame);
     auto touching = running;
-    touching.scenario.flags[6][0] &= ~2u; // Isolate the original player contact pass.
+    touching.scenario.flags[6][0] &=
+        ~2u; // Isolate the original player contact pass.
     auto &obstacle = touching.scenario.enemies[0];
     obstacle.flags = 0x49;
     obstacle.state_flags = 0;
@@ -255,7 +282,8 @@ int main() {
     obstacle.collision_offset.x = 2;
     const auto before_contact = touching.world.player.position;
     tick_room_runtime(touching, entry_player, entry_tables, 0);
-    ck(std::abs(touching.world.player.position.z - (before_contact.z - 4)) < .002f &&
+    ck(std::abs(touching.world.player.position.z - (before_contact.z - 4)) <
+           .002f &&
        obstacle.state_flags == 4 && obstacle.secondary_flags == 1);
     auto immovable = running;
     immovable.scenario.flags[6][0] &= ~2u;

@@ -1,5 +1,6 @@
 #pragma once
 #include "scene.hpp"
+#include <optional>
 namespace ashford {
 struct CollisionRecord {
   uint8_t flags = 0, type = 0, id = 0;
@@ -16,6 +17,18 @@ struct RoomCollision {
 RoomCollision decode_room_collision(const Bytes &data);
 int8_t player_floor_number(const RoomCollision &room, float height);
 bool player_in_water(const RoomCollision &room, Vec3 position);
+struct GroundQuery {
+  float height = -1000;
+  // Original static-then-dynamic wall index (sys->htp).
+  std::optional<size_t> wall;
+};
+GroundQuery query_ground_position(const RoomCollision &room,
+                                  const std::vector<CollisionRecord> &dynamic,
+                                  Vec3 position);
+// bhCheckWater: first inclusive flags1/type3/prm0=1 static or dynamic floor.
+std::optional<size_t> query_water(const RoomCollision &room,
+                                  const std::vector<CollisionRecord> &dynamic,
+                                  Vec3 position);
 struct CollisionBody {
   Vec3 position;
   float radius = 3.5f, height = 16.5f;

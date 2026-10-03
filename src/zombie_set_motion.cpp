@@ -15,6 +15,8 @@ struct ScalarSnapshot {
   uint16_t attribute;
   int boundary;
   Vec3 position;
+  int32_t damage_joint;
+  Vec3 damage_velocity;
   std::array<int32_t, 3> angles;
   float speed, shape;
   uint8_t reaction;
@@ -27,6 +29,8 @@ struct ScalarSnapshot {
     attribute = e.motion_attribute;
     boundary = e.motion_boundary;
     position = e.position;
+    damage_joint = e.damage_joint;
+    damage_velocity = e.damage_velocity;
     angles = e.angles;
     speed = e.speed;
     shape = e.shape_count;
@@ -41,6 +45,8 @@ struct ScalarSnapshot {
     e.motion_attribute = attribute;
     e.motion_boundary = boundary;
     e.position = position;
+    e.damage_joint = damage_joint;
+    e.damage_velocity = damage_velocity;
     e.angles = angles;
     e.speed = speed;
     e.shape_count = shape;
@@ -56,6 +62,7 @@ struct MotionTransaction {
   std::array<uint16_t, 3> scratch;
   uint32_t seed;
   size_t sounds, vibrations;
+  std::shared_ptr<const NativeEffectPool> effect_pool;
   bool committed = false;
   MotionTransaction(ScenarioState &s, size_t index, size_t posed,
                     std::optional<size_t> linked)
@@ -64,7 +71,8 @@ struct MotionTransaction {
         has_parent(linked && *linked != index),
         pose(s.enemies[posed].joint_pose), scratch(s.motion_angle_scratch),
         seed(s.random_seed), sounds(s.pending_enemy_sounds.size()),
-        vibrations(s.pending_enemy_vibrations.size()) {}
+        vibrations(s.pending_enemy_vibrations.size()),
+        effect_pool(s.effect_pool) {}
   ~MotionTransaction() {
     if (committed)
       return;
@@ -76,6 +84,7 @@ struct MotionTransaction {
     state.random_seed = seed;
     state.pending_enemy_sounds.resize(sounds);
     state.pending_enemy_vibrations.resize(vibrations);
+    state.effect_pool = std::move(effect_pool);
   }
 };
 void zero_root(std::vector<JointPose> &pose, size_t joint) {

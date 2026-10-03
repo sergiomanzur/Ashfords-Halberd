@@ -58,12 +58,16 @@ std::optional<int32_t> choose_zombie_sound(const ScenarioEntity &enemy,
                                            const std::vector<int32_t> &playing);
 void tick_zombie_motion_table(ScenarioState &state, size_t work, int32_t frame,
                               const std::vector<int32_t> &playing = {});
-// Synchronous source effect dependencies. Hooks append requests/update RNG;
-// backend storage must stage its own changes if it can fail. Required for
-// mode0<5; a caller must not replace needed source effects with a silent no-op.
+// Synchronous source effect dependencies. Native birth stages an immutable
+// pool; SetMtn restores it and damage fields on failure. External backend
+// storage must stage its own changes if it can fail. Required for mode0<5; a
+// caller must not replace needed source effects with a silent no-op.
 struct ZombieMotionEffects {
   std::function<void(ScenarioState &, size_t, int32_t)> kami, water;
 };
+void tick_zombie_kami_effect(ScenarioState &state, size_t work, int32_t frame);
+void tick_zombie_water_effect(ScenarioState &state, size_t work, int32_t frame);
+ZombieMotionEffects native_zombie_motion_effects();
 int tick_zombie_motion(ScenarioState &state, size_t work,
                        const ZombieMotionEffects &effects = {},
                        const std::vector<int32_t> &playing = {});

@@ -12,6 +12,7 @@
 #include "face_lipsync.hpp"
 #include "runtime.hpp"
 #include "zombie.hpp"
+#include "effects.hpp"
 #include "enemy_targeting.hpp"
 #include "enemy_navigation.hpp"
 #include "enemy_movement.hpp"
@@ -140,9 +141,10 @@ int wmain(int argc,wchar_t** argv) {
         size_t zombie_search_neck_ticks=0;
         size_t zombie_walk_ticks=0, zombie_root_displacements=0, zombie_speed_samples=0;
         size_t zombie_motion_table_ticks=0, zombie_foot_zero_probes=0;
-        size_t zombie_set_motion_ticks=0,zombie_dry_effect_checks=0;
+        size_t zombie_set_motion_ticks=0,zombie_native_effect_checks=0;
         size_t zombie_model_ticks=0,zombie_cache_draws=0,zombie_cache_changed_draws=0;
         size_t zombie_mouth_draws=0,zombie_mouth_changed_draws=0;
+        size_t zombie_blood_birth_probes=0,zombie_water_birth_probes=0;
         size_t zombie_motion_sound_requests=0, zombie_motion_vibration_requests=0;
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
@@ -678,29 +680,23 @@ int wmain(int argc,wchar_t** argv) {
                                                 throw std::runtime_error("Retail original walking root key produced invalid displacement/speed");
                                         }
                                     }
-                                    // Source SetMtn -> CalcEnemy in work-slot order. These
-                                    // explicit dry-effect probes reject required effects;
-                                    // full effects/Move and mouth morph drawing remain separate.
-                                    const ZombieMotionEffects dry_effects{
-                                        [&](ScenarioState& state,size_t slot,int32_t) {
-                                            const auto motion=state.enemies[slot].motion_number;
-                                            if(motion!=0 && motion!=40 && motion!=41 && motion!=125 &&
-                                               motion!=200 && motion!=240 && motion!=241 && motion!=325)
-                                                throw std::runtime_error("Retail dry SetMtn probe selected a motion requiring Kami effect inspection");
-                                            ++zombie_dry_effect_checks;
+                                    // Real source effect routing in SetMtn -> CalcEnemy work order.
+                                    const ZombieMotionEffects native_effects{
+                                        [&](ScenarioState& state,size_t slot,int32_t frame) {
+                                            tick_zombie_kami_effect(state,slot,frame);
+                                            ++zombie_native_effect_checks;
                                         },
-                                        [&](ScenarioState& state,size_t slot,int32_t) {
-                                            if(state.enemies[slot].state_flags&0x100000)
-                                                throw std::runtime_error("Retail dry SetMtn probe requires a water effect backend");
-                                            ++zombie_dry_effect_checks;
+                                        [&](ScenarioState& state,size_t slot,int32_t frame) {
+                                            tick_zombie_water_effect(state,slot,frame);
+                                            ++zombie_native_effect_checks;
                                         }};
                                     auto planted=walking;
                                     std::optional<Scene> first_cache_draw;
                                     for(size_t tick=0;tick<80;++tick) {
                                         const auto before_sounds=planted.pending_enemy_sounds.size();
-                                        tick_zombie_motion(planted,root,dry_effects);++zombie_set_motion_ticks;++zombie_motion_table_ticks;
+                                        tick_zombie_motion(planted,root,native_effects);++zombie_set_motion_ticks;++zombie_motion_table_ticks;
                                         calculate_zombie_model(planted,root);++zombie_model_ticks;
-                                        tick_zombie_motion(planted,body,dry_effects);++zombie_set_motion_ticks;++zombie_motion_table_ticks;
+                                        tick_zombie_motion(planted,body,native_effects);++zombie_set_motion_ticks;++zombie_motion_table_ticks;
                                         calculate_zombie_model(planted,body);++zombie_model_ticks;
                                         zombie_motion_sound_requests+=planted.pending_enemy_sounds.size()-before_sounds;
                                         auto& current=planted.enemies[root];
@@ -786,6 +782,50 @@ int wmain(int argc,wchar_t** argv) {
                                             ++zombie_foot_zero_probes;
                                         }
                                     }
+                                    auto blood=initialized;
+                                    auto& bitten=blood.enemies[root];
+                                    const auto birth_seed=blood.random_seed;
+                                    bitten.motion_number=8;
+                                    tick_zombie_kami_effect(blood,root,28);
+                                    tick_zombie_kami_effect(blood,root,38);
+                                    if(!blood.effect_pool || blood.effect_pool->works[0].id!=5 ||
+                                       blood.effect_pool->works[1].id!=302 || blood.effect_pool->works[4].id!=302 ||
+                                       blood.effect_pool->works[7].id!=5 || bitten.damage_joint!=11 ||
+                                       blood.effect_pool->works[1].linked_parent!=root ||
+                                       blood.effect_pool->works[1].particle_storage!=std::array<size_t,2>{2,3} ||
+                                       blood.effect_pool->works[4].particle_storage!=std::array<size_t,2>{5,6} ||
+                                       blood.random_seed!=birth_seed || bitten.model->model!=raw)
+                                        throw std::runtime_error("Retail cached zombie source blood birth mismatch");
+                                    for(size_t joint=0;joint<cached.joints.size();++joint)
+                                        if(bitten.model_work->joints[joint].matrix!=cached.joints[joint].matrix)
+                                            throw std::runtime_error("Retail blood birth changed cached model");
+                                    ++zombie_blood_birth_probes;
+                                    auto water=initialized;
+                                    auto& wet=water.enemies[root];
+                                    wet.motion_number=33;wet.state_flags|=0x100000;
+                                    tick_zombie_water_effect(water,root,12);
+                                    size_t rings=0,splashes=0;
+                                    if(!water.effect_pool)throw std::runtime_error("Retail step birth missing effect pool");
+                                    for(const auto& effect:water.effect_pool->works)if(effect.flags&1) {
+                                        if(effect.id==108) {
+                                            ++rings;
+                                            const auto& matrix=cached.joints[0].matrix;
+                                            if(effect.position.x!=float(matrix[3]) || effect.position.y!=float(matrix[7]) ||
+                                               effect.position.z!=float(matrix[11]) || effect.linked_joint!=15)
+                                                throw std::runtime_error("Retail step ring did not use original cached root");
+                                        } else if(effect.id==11) {
+                                            ++splashes;
+                                            if(effect.scale.x!=2 || effect.type!=1 || effect.linked_parent)
+                                                throw std::runtime_error("Retail step splash metadata mismatch");
+                                        } else throw std::runtime_error("Unexpected retail step effect birth");
+                                    }
+                                    if(rings!=2 || splashes%3 || splashes>6 || water.random_seed!=birth_seed ||
+                                       wet.model->model!=raw)
+                                        throw std::runtime_error("Retail duplicate step events or creation RNG mismatch");
+                                    for(size_t joint=0;joint<cached.joints.size();++joint)
+                                        if(wet.model_work->joints[joint].matrix!=cached.joints[joint].matrix)
+                                            throw std::runtime_error("Retail step birth changed cached model");
+                                    ++zombie_water_birth_probes;
                                     auto vibration=initialized;
                                     auto& attack=vibration.enemies[root];
                                     if(!attack.motions->at(8) || attack.motions->at(8)->frames<=24)
@@ -1291,10 +1331,14 @@ int wmain(int argc,wchar_t** argv) {
                 std::cout<<"Applied "<<zombie_motion_table_ticks<<" isolated native motion-table callbacks with "
                          <<zombie_motion_sound_requests<<" sound requests and "<<zombie_motion_vibration_requests
                          <<" vibration requests; verified "<<zombie_foot_zero_probes<<" exact zero-drift cached foot paths\n";
-                if(zombie_set_motion_ticks!=zombie_brain_roots*160 || zombie_dry_effect_checks!=zombie_set_motion_ticks*2)
-                    throw std::runtime_error("Retail SetMtn/dry-effect probe coverage mismatch");
+                if(zombie_set_motion_ticks!=zombie_brain_roots*160 || zombie_native_effect_checks!=zombie_set_motion_ticks*2)
+                    throw std::runtime_error("Retail SetMtn/native-effect probe coverage mismatch");
                 std::cout<<"Advanced "<<zombie_set_motion_ticks<<" paired source SetMtn calls with "
-                         <<zombie_dry_effect_checks<<" proven dry effect callbacks\n";
+                         <<zombie_native_effect_checks<<" native Kami/Water routing calls\n";
+                if(zombie_blood_birth_probes!=zombie_brain_roots || zombie_water_birth_probes!=zombie_brain_roots)
+                    throw std::runtime_error("Retail native effect birth coverage mismatch");
+                std::cout<<"Verified "<<zombie_blood_birth_probes<<" blood/particle and "<<zombie_water_birth_probes
+                         <<" duplicate step birth probes using original cached models and room ground/water\n";
                 if(zombie_model_ticks!=zombie_set_motion_ticks || zombie_cache_draws!=zombie_brain_roots*3 ||
                    zombie_cache_changed_draws!=zombie_brain_roots*2)
                     throw std::runtime_error("Retail CalcEnemy/cache drawing coverage mismatch");

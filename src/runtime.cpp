@@ -1,4 +1,5 @@
 #include "runtime.hpp"
+#include "effects.hpp"
 #include "zombie.hpp"
 #include <algorithm>
 #include <stdexcept>
@@ -193,6 +194,13 @@ RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
   persistent.collision = result.collision;
   persistent.dynamic_miscellaneous.clear();
   persistent.dynamic_walls.clear();
+  persistent.dynamic_floors.clear();
+  if (persistent.effect_pool) {
+    // bhClearEffect zeros eff[], retaining sys->ef. Old room indices expire.
+    auto cleared = std::make_shared<NativeEffectPool>();
+    cleared->scratch = persistent.effect_pool->scratch;
+    persistent.effect_pool = std::move(cleared);
+  }
   persistent.pending_enemy_sounds.clear();
   persistent.pending_enemy_vibrations.clear();
   persistent.routes =

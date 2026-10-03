@@ -672,3 +672,33 @@ All42 headless checks pass, the Windows build/ZIP are refreshed, and a fresh
 packaged dummy-SDL smoke passes241 ticks,240 rendered frames,53 movement
 ticks,10 focus-blocked ticks, main-menu return and INI creation. The final
 205-room scan passes with the completed runtime composition integration.
+
+Native KamiEffect and WaterEffect now route all original event-table rows into
+the source 512-slot effect pool. Blood births preserve linked joint11, both
+three-slot particle groups, colors, normalized direction and partial allocation
+failure. Water steps preserve duplicate events, cached joint offsets, ripple
+before splash order, original scales and static-then-dynamic ground/water
+queries. Birth consumes no RNG; particle playback initializes later in the
+source. SetMtn uses the incoming frame and rolls back the immutable effect pool
+and damage fields on a later failure. Room changes clear effect slots/dynamic
+floors while retaining the global EF template.
+
+The final source review identified scratch retention and signed16 splash yaw
+differences; both have RED-to-GREEN regressions. The triangle query also retains
+the source rounded py+h comparison. EF template angles/floor/model version use
+their original widths, with effect-work widening/narrowing at allocation.
+All45 headless checks pass and the Windows executable/ZIP are refreshed.
+The retail inspector now uses actual native routers in its paired motion/cache
+loop, with separate blood/particle and duplicate step birth probes against
+original cached models and room ground/water data.
+
+These are effect allocations and metadata. Particle updates, effect texture
+binding and visible playback remain pending, together with full enemy actions
+and combat, decoded audio, inventory and cross-room saves. Step1 remains active
+and New Game stays disabled.
+
+Final verification after source corrections:45/45 headless checks;205retail
+rooms,3200native routing calls,10blood/particle probes,10duplicate step probes,
+4800exact zero-drift paths and30changed same-cache mouth draws. A fresh packaged
+dummy-SDL profile passes241ticks/240renders/53movement ticks,10focus-blocked
+ticks, main-menu return and INI creation. No desktop windows were opened.
