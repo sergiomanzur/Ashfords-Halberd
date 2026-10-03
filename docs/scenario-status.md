@@ -960,3 +960,33 @@ Fresh packaged dummy-SDL smoke passes241ticks/240renders/53moves/
 Source review found no material defects. Deferred Minor coverage: terminal
 body validation failure after fragments/RNG; late-bank rollback is tested and
 the same rollback guard covers the inspected body path. Step1 remains active.
+
+Native PlayerLink prerequisites now retain all twelve authored Claire/Chris/
+Steve XZ tables (660pairs), four character mappings including player3Chris
+reuse, and checked clip/frame lookup. An independent pinned-source verifier
+compares all1320float32 words. Source Dansa queries now select the first
+eligible inclusive XZ area on the current signed floor, update state20000
+with the original30gate, and generate uncovered temporary N/E/S/W boundaries
+from actual work radius and current or remembered area. These pure services
+return caller-owned walls; the pending stateful WallEx must append/use/remove
+them. They do not move height or complete PlayerLink world alignment.
+
+Focused checks cover authored samples, full Chris reuse, malformed bounds,
+static/dynamic ordering, edges, ignored height, state gates, remembered-area
+fallback, all four boundary coordinates, adjacent-area coverage and consumed
+geometry failures. A separate north-only fallback fixture prevents reading
+unused old depth. Original scans pass205rooms:57areas/570static+merged
+center/edge points/430temporary boundaries (N/E/S/W86/108/134/102), and2200
+Claire frames across ten initialized graveyard roots/four enemy-bank clips.
+All previous NG02, grab and corridor probes remain passing. Stateful WallEx/
+Wall2/PlayerLink, root encounter dispatch/combat, particle playback/drawing,
+decoded audio, inventory and versioned saves remain required for Step1;
+New Game remains disabled.
+
+Final PlayerLink prerequisite verification:62/62headless checks,205original
+rooms,57step areas/570static+merged points/430temporary boundaries,2200Claire
+frames across10roots, all previous NG02/grab/corridor probes. Fresh packaged
+dummy-SDL smoke passes241ticks/240renders/53moves/10focus-blocked ticks/
+main-menu return/INI creation. EXE/ZIP refreshed; source review found no issues.
+This verifies the providers; complete PlayerLink and the playable slice remain
+in progress.

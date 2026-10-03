@@ -77,6 +77,79 @@ Bytes read(std::ifstream& file, uint64_t offset, size_t size) {
         throw std::runtime_error("Could not read archive extent");
     return bytes;
 }
+struct StepProbeCounts {
+    size_t areas=0, queries=0, walls=0;
+    std::array<size_t,4> sides{};
+};
+void verify_authored_steps(const RoomCollision& original,StepProbeCounts& counts) {
+    auto source_query=[&](int8_t floor,float x,float z)->std::optional<size_t> {
+        for(size_t i=0;i<original.miscellaneous.size();++i) {
+            const auto& r=original.miscellaneous[i];
+            if((r.flags&1) && r.type==2 && r.parameters[0] && r.floor==floor &&
+               r.position.x<=x && r.position.x+r.size.x>=x &&
+               r.position.z<=z && r.position.z+r.size.z>=z)return i;
+        }
+        return {};
+    };
+    for(const auto& authored:original.miscellaneous) {
+        if(!(authored.flags&1) || authored.type!=2 || !authored.parameters[0] ||
+           authored.size.x<0 || authored.size.z<0)continue;
+        ++counts.areas;
+        const float cx=authored.position.x+.5f*authored.size.x;
+        const float cz=authored.position.z+.5f*authored.size.z;
+        const std::array<Vec3,5> points={Vec3{cx,0,cz},
+            Vec3{cx,0,authored.position.z},Vec3{authored.position.x+authored.size.x,0,cz},
+            Vec3{cx,0,authored.position.z+authored.size.z},Vec3{authored.position.x,0,cz}};
+        // Preserve authored order while exercising both static-only metadata and
+        // the merged static/dynamic index contract of the future WallEx caller.
+        for(bool merged:{false,true}) {
+            auto room=original;
+            std::vector<CollisionRecord> dynamic;
+            if(merged) {
+                const auto middle=room.miscellaneous.begin()+room.miscellaneous.size()/2;
+                dynamic.assign(middle,room.miscellaneous.end());
+                room.miscellaneous.erase(middle,room.miscellaneous.end());
+            }
+            for(const auto& point:points) {
+                CollisionBody body;body.position=point;body.floor=authored.floor;
+                body.radius=3.5f;body.state_flags=0x20081;
+                const auto selected=source_query(body.floor,point.x,point.z);
+                if(!selected || query_step_area(room,dynamic,body.floor,point.x,point.z)!=selected ||
+                   check_step_state(room,dynamic,body)!=0x20081)
+                    throw std::runtime_error("Retail source step center/edge/index/state mismatch");
+                const auto result=build_step_limits(room,dynamic,body,{});
+                if(result.remembered_area!=selected || result.state_flags!=body.state_flags)
+                    throw std::runtime_error("Retail step selected area/state retention mismatch");
+                const auto& pop=original.miscellaneous.at(*selected);
+                const std::array<Vec3,4> probes={Vec3{point.x,0,point.z-3.5f},
+                    Vec3{point.x+3.5f,0,point.z},Vec3{point.x,0,point.z+3.5f},Vec3{point.x-3.5f,0,point.z}};
+                const std::array<Vec3,4> positions={
+                    Vec3{pop.position.x-7.f,pop.position.y,pop.position.z-8.75f},
+                    Vec3{1.75f+(pop.position.x+pop.size.x),pop.position.y,pop.position.z-7.f},
+                    Vec3{pop.position.x-7.f,pop.position.y,1.75f+(pop.position.z+pop.size.z)},
+                    Vec3{pop.position.x-8.75f,pop.position.y,pop.position.z-7.f}};
+                const std::array<Vec3,4> sizes={Vec3{pop.size.x+14.f,1.f,7.f},
+                    Vec3{7.f,1.f,pop.size.z+14.f},Vec3{pop.size.x+14.f,1.f,7.f},
+                    Vec3{7.f,1.f,pop.size.z+14.f}};
+                size_t wall=0;
+                for(size_t side=0;side<4;++side) {
+                    if(source_query(body.floor,probes[side].x,probes[side].z))continue;
+                    const auto& r=result.walls.at(wall++);
+                    const auto p=positions[side],s=sizes[side];
+                    if(r.position.x!=p.x || r.position.y!=p.y || r.position.z!=p.z ||
+                       r.size.x!=s.x || r.size.y!=s.y || r.size.z!=s.z || r.flags!=1 ||
+                       r.type!=1 || r.floor!=body.floor || r.attribute!=0x800000 ||
+                       r.parameters!=std::array<uint8_t,4>{})
+                        throw std::runtime_error("Retail temporary step wall/source order mismatch");
+                    ++counts.sides[side];++counts.walls;
+                }
+                if(wall!=result.walls.size())
+                    throw std::runtime_error("Retail covered step probes generated extra walls");
+                ++counts.queries;
+            }
+        }
+    }
+}
 int wmain(int argc,wchar_t** argv) {
     try {
         bool collision_check=argc==4 && std::wstring(argv[3])==L"--collision-check";
@@ -159,6 +232,8 @@ int wmain(int argc,wchar_t** argv) {
         size_t lip_rooms=0, lip_clips=0, lip_segments=0;
         size_t facial_actor_startups=0, facial_actor_ticks=0, facial_actor_changed_frames=0;
         size_t facial_lip_ticks=0, facial_lip_changed_frames=0;
+        StepProbeCounts step_probes;
+        size_t player_link_roots=0,player_link_frames=0;
         for(size_t i=0;i<entries.size();++i) {
             try {
                 auto data=expand(read(file,entries[i].offset,entries[i].size));
@@ -173,6 +248,7 @@ int wmain(int argc,wchar_t** argv) {
                     }
                 }
                 auto collision=decode_room_collision(data);
+                if(scenario_check)verify_authored_steps(collision,step_probes);
                 auto records=decode_room_records(data);
                 const auto routes=decode_room_routes(data);
                 route_regions+=routes.regions.size();
@@ -595,6 +671,24 @@ int wmain(int argc,wchar_t** argv) {
                             placement.angles={0,int32_t(player_entry.player.yaw),0};
                             const auto claire=calculate_actor_model_work(player.models.at(0),actor_bind_pose(player.models.at(0)),{},placement);
                             for(auto root:roots) {
+                                // Complete table ranges against original Claire clips;
+                                // world alignment/Wall2 remain separate dependencies.
+                                const auto& grab_bank=initialized.enemies[root].motions;
+                                for(uint32_t clip:{401u,402u,404u,405u}) {
+                                    if(!grab_bank || clip>=grab_bank->size() || !grab_bank->at(clip))
+                                        throw std::runtime_error("Retail zombie bank is missing Claire PlayerLink clip");
+                                    const auto& motion=grab_bank->at(clip).value();
+                                    const uint32_t count=clip<404?60:50;
+                                    if(motion.frames!=count)
+                                        throw std::runtime_error("Retail Claire PlayerLink clip/table length differs");
+                                    for(uint32_t frame=0;frame<count;++frame) {
+                                        const auto p=zombie_player_link_offset(0,clip,int32_t(frame));
+                                        if(!std::isfinite(p.x) || p.y!=0 || !std::isfinite(p.z))
+                                            throw std::runtime_error("Retail Claire PlayerLink table offset invalid");
+                                        ++player_link_frames;
+                                    }
+                                }
+                                ++player_link_roots;
                                 auto& owner=targeting.enemies[root];
                                 const auto cached=*owner.model_work;
                                 const auto raw=owner.model->model;
@@ -1842,10 +1936,21 @@ int wmain(int argc,wchar_t** argv) {
             std::cout<<"Queried "<<enemy_floor_probes<<" authored enemy floor trigger centers\n";
             if(!enemy_stair_probes)throw std::runtime_error("Missing authored stair query coverage");
             std::cout<<"Queried "<<enemy_stair_probes<<" authored stair trigger centers\n";
+            if(!step_probes.areas || step_probes.queries!=step_probes.areas*10 ||
+               std::find(step_probes.sides.begin(),step_probes.sides.end(),0)!=step_probes.sides.end())
+                throw std::runtime_error("Missing retail step area/four boundary directions coverage");
+            std::cout<<"Probed "<<step_probes.areas<<" authored step areas at "<<step_probes.queries
+                     <<" static/merged center/edge points; "<<step_probes.walls<<" temporary boundaries (N/E/S/W "
+                     <<step_probes.sides[0]<<'/'<<step_probes.sides[1]<<'/'<<step_probes.sides[2]<<'/'
+                     <<step_probes.sides[3]<<")\n";
             if(!route_regions || !route_queries)throw std::runtime_error("Missing retail native route coverage");
             std::cout<<"Decoded "<<route_regions<<" route regions and queried "<<route_queries
                      <<" native center-to-center routes; "<<invalid_route_hops<<" out-of-range source hops excluded\n";
             if(runtime_check) {
+                if(player_link_roots!=zombie_parameters || player_link_frames!=player_link_roots*220)
+                    throw std::runtime_error("Missing retail Claire PlayerLink table/frame range coverage");
+                std::cout<<"Verified "<<player_link_frames<<" original Claire PlayerLink frame offsets across "
+                         <<player_link_roots<<" roots and four authored clips\n";
                 if(zombie_view_probes!=zombie_parameters || zombie_neck_updates!=zombie_parameters*64)
                     throw std::runtime_error("Missing retail native zombie targeting coverage");
                 std::cout<<"Probed "<<zombie_view_probes<<" actual personality view cones and applied "

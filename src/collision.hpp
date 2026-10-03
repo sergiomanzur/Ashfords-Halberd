@@ -44,6 +44,28 @@ struct CollisionBody {
   int8_t floor = 0;
   uint32_t flags = 0, state_flags = 0;
 };
+// hitchk.c::bhCheckDansaAtari: first inclusive active/type2/prm0!=0 area
+// on the supplied floor, indexed through static then dynamic miscellaneous.
+// Y is not consumed by this query or the bhCheckDansa state update.
+std::optional<size_t>
+query_step_area(const RoomCollision &room,
+                const std::vector<CollisionRecord> &dynamic, int8_t floor,
+                float x, float z);
+uint32_t check_step_state(const RoomCollision &room,
+                          const std::vector<CollisionRecord> &dynamic,
+                          const CollisionBody &body);
+struct StepLimitResult {
+  uint32_t state_flags = 0;
+  std::optional<size_t> remembered_area;
+  std::vector<CollisionRecord> walls;
+};
+// bhSetDansaLimitAtari: actual work position/radius, current or remembered
+// area, uncovered N/E/S/W probes. Returned walls must be appended/used/removed
+// by the later stateful WallEx transaction; this service mutates no room data.
+StepLimitResult build_step_limits(const RoomCollision &room,
+                                  const std::vector<CollisionRecord> &dynamic,
+                                  const CollisionBody &body,
+                                  std::optional<size_t> remembered_area);
 struct CollisionResult {
   Vec3 position;
   size_t hits = 0;

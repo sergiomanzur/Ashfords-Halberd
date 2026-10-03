@@ -2,6 +2,10 @@
 #include "scenario.hpp"
 #include <functional>
 namespace ashford {
+// en01.c PlayerLink's authored XZ trajectory for four characters/clips1/2/4/5.
+// Frame is an integer authored frame index; returned Y is zero.
+Vec3 zombie_player_link_offset(uint8_t player_id, uint32_t motion_number,
+                                int32_t frame);
 struct ZombiePersonality {
   float attack_distance = 0, notice_distance = 0;
   int32_t view_angle = 0, health_percent = 0, attack_bonus = 0;
