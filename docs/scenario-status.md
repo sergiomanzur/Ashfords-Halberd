@@ -774,3 +774,30 @@ Deferred Minor review findings: exact two-facing angular boundary tests and a
 retail assertion that accepts either grab flag rather than requiring both.
 The native implementation sets both, with an exact flags regression in unit
 coverage. These diagnostic limits do not complete the combat/playable slice.
+
+The native player-side held/lunge grab controller now ports complete PlyDG00
+states0..8: five-tick facing alignment, character/facing clip selection,
+escape and fatal-release cleanup, directional input clearing, retained base
+motion-bank restoration, and original voice/sound requests. It keeps source
+signed16 waxp separate from signed32 ayp and the authored angular speed.
+Player extended status flags remain distinct from ordinary work flags.
+
+EnemyPushChk now preserves the original128-slot scan, exclusions, strict3D
+distance, facing/knockback modes, probabilistic early return before distance,
+and the source write to the attacker's linked body. Player/enemy scalars,
+queues, input and RNG commit only after all consumed context validates.
+Retail dependency probes pass2340player-grab states and2260original Claire
+motion/cache samples, with20escapes and20fatal releases across both facings
+and all10graveyard roots. These probes apply the original clips to Claire's
+hierarchy; enemy NG00 damage and PlayerLink coupling remain separate required
+work. Standing-grab PlyDG01 rejects explicitly when its dispatch is enabled.
+Full combat, audio playback, inventory and cross-room saves remain pending;
+New Game stays disabled and Step1 remains in progress.
+
+Final verification:53/53headless checks and205retail rooms pass with the new
+player-grab probes and all previous probes retained. Fresh packaged dummy-SDL
+smoke passes241ticks/240renders/53movement ticks/10focus-blocked ticks,
+main-menu return and INI creation; executable/ZIP refreshed. Fresh source review
+found no Critical/Important production defects. Deferred Minor coverage:
+combined push plus failed-release rollback and negative-angle rounding. Existing
+separate rollback and positive/exact180 alignment checks pass.

@@ -80,6 +80,9 @@ struct ZombiePartExtendedWork {
   // untouched words on reinitialization; damage-state meanings are separate.
   std::vector<uint32_t> words;
 };
+struct PlayerExtendedWork {
+  uint32_t status_flags = 0; // Player EXP1_I(0), distinct from BH_PWORK flags.
+};
 struct ScenarioEntity {
   uint32_t flags = 0, state_flags = 0, secondary_flags = 0;
   int32_t angular_speed = 0;
@@ -111,14 +114,19 @@ struct ScenarioEntity {
   int32_t frame = 0, blend_count = 0, control1 = 0, control2 = 0;
   int32_t control0 = 0; // Original ct0, distinct from ct1/ct2/ct3.
   int32_t control3 = 0, highlight_yaw = 0;
-  int16_t torso_yaw = 0;  // BH_PWORK::wax.
-  int16_t turn_speed = 0; // BH_PWORK::way.
-  float speed = 0;        // BH_PWORK::spd.
-  float shape_count = 0;  // BH_PWORK::shp_ct, consumed by draw-time morphology.
+  int32_t yaw_correction = 0;  // BH_PWORK::ayp.
+  int16_t grab_yaw_offset = 0; // BH_PWORK::waxp.
+  int16_t torso_yaw = 0;       // BH_PWORK::wax.
+  int16_t turn_speed = 0;      // BH_PWORK::way.
+  float speed = 0;             // BH_PWORK::spd.
+  float shape_count = 0; // BH_PWORK::shp_ct, consumed by draw-time morphology.
   uint32_t frame_direction = 0;
   uint16_t motion_attribute = 0;
   int motion_boundary = 0;
   std::shared_ptr<const std::vector<std::optional<Motion>>> motions;
+  std::shared_ptr<const MotionBank> base_motions; // BH_PWORK::mnwPb.
+  std::optional<PlayerExtendedWork> player_work;
+  uint32_t attack_flags = 0; // BH_PWORK::at_flg.
   std::array<int8_t, 8> clip_joints{};
   std::optional<size_t> linked_parent;
   int32_t linked_joint = 0;
@@ -187,6 +195,7 @@ struct ScenarioState {
   // Immutable native effect state: active events replace only this pool value.
   std::shared_ptr<const NativeEffectPool> effect_pool;
   std::vector<EnemySoundRequest> pending_enemy_sounds;
+  std::vector<int32_t> pending_player_voices; // CallPlayerVoice source tokens.
   std::vector<EnemyVibrationRequest> pending_enemy_vibrations;
   std::shared_ptr<const RoomRoutes> routes;
   std::shared_ptr<const std::vector<std::optional<Motion>>> room_motions;
@@ -210,6 +219,7 @@ struct ScenarioState {
   uint32_t player_state_flags = 0;
   uint32_t player_work_flags = 0;
   uint32_t player_secondary_flags = 0;
+  uint32_t input_held = 0; // sys->pad_on; source directional bits are low4.
   uint32_t drawing_flags = 0;
 };
 // Native control and event scheduling subset. Unsupported instructions fail
