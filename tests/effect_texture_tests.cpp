@@ -178,6 +178,20 @@ void reference() {
             "Original alpha helper capture mismatch");
   }
 }
+void updates() {
+  Bytes source;
+  record(source, 0x00494c50, metadata(2));
+  record(source, 0x324d4954, picture(2));
+  auto update = metadata(2);
+  word(update, 16, 0x0000ff01);
+  record(source, 0x00494c50, update);
+  record(source, 0x324d4954, picture(2));
+  record(source, 0x00494c50, metadata(1));
+  record(source, 0x324d4954, picture(1));
+  terminal(source);
+  require(decode_texture_pack(source, 0).size() == 4,
+          "Family54 palette-only update must not emit a texture");
+}
 void validation() {
   const auto stable = pack();
   for (size_t length : {size_t(0), size_t(3), size_t(31), size_t(35),
@@ -193,7 +207,7 @@ void validation() {
     word(invalid, 32, count);
     reject([&] { decode_texture_pack(invalid, 0); });
   }
-  for (uint32_t descriptor : {0x0000ff01u, 0x00000000u, 0x0001ff00u}) {
+  for (uint32_t descriptor : {0xffff0000u, 0x0010fe00u}) {
     auto invalid = stable;
     word(invalid, 40, descriptor);
     reject([&] { decode_texture_pack(invalid, 0); });
@@ -274,6 +288,8 @@ int main(int argc, char **argv) {
       reference();
     else if (mode == "validation")
       validation();
+    else if (mode == "updates")
+      updates();
     else
       throw std::runtime_error("Unknown test mode");
     std::cout << "Native effect texture " << mode << " passed\n";

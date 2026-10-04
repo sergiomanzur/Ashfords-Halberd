@@ -1,4 +1,4 @@
-#include "scene.hpp"
+#include "texture.hpp"
 #include <algorithm>
 #include <stdexcept>
 // Native file pixels and shared palettes from recvx-decomp ps2_texture.c,
@@ -80,10 +80,8 @@ void validate_palette(const Picture &p, bool shared, size_t variants) {
       p.clut_bytes < required || p.clut_bytes < size_t(p.colors) * 4)
     throw std::runtime_error("Unsupported or truncated TIM2 palette");
 }
-Texture decode_picture(const Bytes &data, const Picture &p, bool shared,
-                       size_t variant = 0) {
+Texture decode_picture(const Bytes &data, const Picture &p) {
   Texture result{p.width, p.height, Bytes(p.pixels * 4)};
-  const size_t palette = p.palette + variant * (p.type == 4 ? 128 : 1024);
   for (size_t i = 0; i < p.pixels; ++i) {
     size_t color = p.source + i * 4;
     if (p.type != 3) {
@@ -92,24 +90,15 @@ Texture decode_picture(const Bytes &data, const Picture &p, bool shared,
                            : (data[p.source + i / 2] >> (i % 2 * 4)) & 15;
       // ClutCopy selects0..7,16..23 for indexed4; ClutCopy256 swaps8/16
       // in each32-color group. Ordinary CSM1 palettes use the same selection.
-      if (shared || !(p.clut_type & 0x80))
+      if (!(p.clut_type & 0x80))
         index = (index & ~24u) | ((index & 8u) << 1) | ((index & 16u) >> 1);
-      if (!shared && size_t(index) * 4 + 4 > p.clut_bytes)
+      if (size_t(index) * 4 + 4 > p.clut_bytes)
         throw std::runtime_error("TIM2 palette index exceeds stored colors");
-      color = palette + index * 4;
+      color = p.palette + index * 4;
     }
     for (size_t channel = 0; channel < 3; ++channel)
       result.rgba[i * 4 + channel] = data[color + channel];
     unsigned alpha = data[color + 3];
-    if (shared) {
-      const auto original = data[p.file + 12];
-      if (alpha && !data[color] && !data[color + 1] && !data[color + 2])
-        alpha = 0;
-      if (original == 2)
-        alpha |= alpha >> 4;
-      if (original == 2 || original == 6)
-        alpha = (alpha + 1) >> 1;
-    }
     // Native RGBA stores full-range alpha; source drawing consumes GS0..128.
     result.rgba[i * 4 + 3] = uint8_t(std::min(255u, alpha * 2));
   }
@@ -125,11 +114,97 @@ void validate_shared(const Bytes &data, const Picture &p,
     throw std::runtime_error("Unsupported shared TIM2 preparation");
   if (palettes.empty())
     throw std::runtime_error("Shared TIM2 requires its PLI metadata");
-  for (auto descriptor : palettes)
-    if (descriptor != 0x0000ff00)
-      throw std::runtime_error("Shared palette updates or explicit banks "
-                               "require their native service");
   validate_palette(p, true, palettes.size());
+}
+void charge_pixels(NativeEffectTextureLibrary &library, size_t pixels) {
+  if (library.emitted_pixels > pixel_limit ||
+      pixels > pixel_limit - library.emitted_pixels ||
+      library.textures.size() >= 4096)
+    throw std::runtime_error("Texture pack limit exceeded");
+  library.emitted_pixels += pixels;
+}
+void load_shared(const Bytes &data, const Picture &p,
+                 const std::vector<uint32_t> &palettes,
+                 NativeEffectTextureLibrary &library) {
+  validate_shared(data, p, palettes);
+  const size_t colors = p.type == 4 ? 16 : 256;
+  const size_t stride = p.type == 4 ? 128 : 1024;
+  Reader r{data};
+  for (size_t variant = 0; variant < palettes.size(); ++variant) {
+    const auto descriptor = palettes[variant];
+    unsigned bank = (descriptor >> 8) & 255;
+    if (bank == 255) {
+      if (library.next_bank >= 64)
+        throw std::runtime_error("Invalid automatic palette cursor");
+      bank = library.next_bank;
+      library.next_bank += uint16_t(colors / 16);
+      if (library.next_bank >= 64)
+        library.next_bank -= 32;
+    }
+    const size_t first = bank * 16 + (descriptor >> 16);
+    if (first > library.palette.size() ||
+        colors > library.palette.size() - first)
+      throw std::runtime_error("Palette write exceeds native memory");
+    for (size_t index = 0; index < colors; ++index) {
+      const size_t source_index =
+          (index & ~size_t(24)) | ((index & 8) << 1) | ((index & 16) >> 1);
+      const size_t source = p.palette + variant * stride + source_index * 4;
+      auto &color = library.palette[first + index];
+      std::copy_n(data.begin() + source, 4, color.begin());
+      unsigned alpha = color[3];
+      if (alpha && !color[0] && !color[1] && !color[2])
+        alpha = 0;
+      if (data[p.file + 12] == 2)
+        alpha |= alpha >> 4;
+      if (data[p.file + 12] == 2 || data[p.file + 12] == 6)
+        alpha = (alpha + 1) >> 1;
+      color[3] = uint8_t(alpha);
+      library.initialized.set(first + index);
+    }
+    if (descriptor & 255)
+      continue;
+    NativeEffectTextureBinding binding;
+    binding.bank = uint8_t(bank & 63); // Packed32-bit gidx retains only6 bits.
+    binding.shared_bank = true;
+    if (variant) {
+      // njLoadTexture's0x41010000 alias copies the preceding texture entry,
+      // not this TIM2's pixels. Palette-only entries do not advance that entry.
+      if (library.textures.empty())
+        throw std::runtime_error("Palette alias has no preceding texture");
+      binding.image = library.textures.back().image;
+      binding.direct = library.textures.back().direct;
+      binding.global_index = library.textures.back().global_index;
+    } else {
+      const uint32_t global_index = r.u32(p.file + 8) & 0x3ffffff;
+      binding.global_index = global_index;
+      for (const auto &existing : library.textures)
+        if (existing.shared_bank && existing.bank == binding.bank &&
+            existing.global_index == global_index) {
+          binding.image = existing.image;
+          binding.direct = existing.direct;
+          break;
+        }
+      if (!binding.image && !binding.direct) {
+        // Check output budget before retaining pixels for a new binding.
+        if (library.emitted_pixels > pixel_limit ||
+            p.pixels > pixel_limit - library.emitted_pixels)
+          throw std::runtime_error("Texture pack limit exceeded");
+        auto image = std::make_shared<NativeIndexedTexture>();
+        image->width = p.width;
+        image->height = p.height;
+        image->type = p.type;
+        const size_t bytes = p.type == 4 ? (p.pixels + 1) / 2 : p.pixels;
+        image->indices.assign(data.begin() + p.source,
+                              data.begin() + p.source + bytes);
+        binding.image = std::move(image);
+      }
+    }
+    const size_t pixels =
+        binding.image ? size_t(binding.image->width) * binding.image->height
+                      : size_t(binding.direct->width) * binding.direct->height;
+    charge_pixels(library, pixels);
+    library.textures.push_back(std::move(binding));
+  }
 }
 } // namespace
 Texture decode_tim2(const Bytes &data, size_t offset, size_t size) {
@@ -138,17 +213,23 @@ Texture decode_tim2(const Bytes &data, size_t offset, size_t size) {
     throw std::runtime_error("Unsupported TIM2 transfer format " +
                              std::to_string(p.format));
   validate_palette(p, false, 1);
-  return decode_picture(data, p, false);
+  return decode_picture(data, p);
 }
-std::vector<Texture> decode_texture_pack(const Bytes &data, size_t offset) {
+NativeEffectTextureRange
+load_effect_texture_pack(const Bytes &data, size_t offset,
+                         NativeEffectTextureLibrary &library) {
   Reader r{data};
-  std::vector<Texture> textures;
+  auto staged = library; // Shared immutable images make rollback inexpensive.
+  const size_t first = staged.textures.size();
   std::vector<uint32_t> palettes;
-  size_t p = offset, total_pixels = 0;
+  size_t p = offset;
   for (size_t records = 0; records < 4096; ++records) {
     const auto magic = r.u32(p);
-    if (magic == 0xffffffff)
-      return textures;
+    if (magic == 0xffffffff) {
+      const auto count = staged.textures.size() - first;
+      library = std::move(staged);
+      return {first, count};
+    }
     r.range(p, 32);
     const size_t size = r.u32(p + 4), payload = p + 32;
     r.range(payload, size);
@@ -168,25 +249,64 @@ std::vector<Texture> decode_texture_pack(const Bytes &data, size_t offset) {
     } else if (magic == 0x324d4954) {
       const auto picture = read_picture(data, payload, size);
       const bool shared = picture.format >= 5 && picture.format < 9;
-      size_t variants = 1;
       if (shared) {
-        validate_shared(data, picture, palettes);
-        variants = palettes.size();
+        load_shared(data, picture, palettes, staged);
       } else {
         if (picture.format > 4 && picture.format != 16)
           throw std::runtime_error("Unsupported TIM2 transfer format " +
                                    std::to_string(picture.format));
         validate_palette(picture, false, 1);
+        charge_pixels(staged, picture.pixels);
+        NativeEffectTextureBinding binding;
+        binding.global_index = r.u32(picture.file + 8);
+        binding.direct =
+            std::make_shared<Texture>(decode_picture(data, picture));
+        staged.textures.push_back(std::move(binding));
       }
-      if (picture.pixels > (pixel_limit - total_pixels) / variants)
-        throw std::runtime_error("Texture pack limit exceeded");
-      total_pixels += picture.pixels * variants;
-      for (size_t variant = 0; variant < variants; ++variant)
-        textures.push_back(decode_picture(data, picture, shared, variant));
     } else
       throw std::runtime_error("Unsupported texture pack record");
     p = payload + size;
   }
   throw std::runtime_error("Unterminated texture pack");
+}
+Texture resolve_effect_texture(const NativeEffectTextureLibrary &library,
+                               size_t texture) {
+  if (texture >= library.textures.size())
+    throw std::runtime_error("Effect texture index exceeds library");
+  const auto &binding = library.textures[texture];
+  if (binding.direct && !binding.image)
+    return *binding.direct;
+  if (!binding.image || binding.direct)
+    throw std::runtime_error("Invalid native texture binding");
+  const auto &image = *binding.image;
+  const size_t pixels = size_t(image.width) * image.height;
+  if (!image.width || !image.height || image.width > 4096 ||
+      image.height > 4096 || (image.type != 4 && image.type != 5) ||
+      binding.bank >= 64 ||
+      image.indices.size() != (image.type == 4 ? (pixels + 1) / 2 : pixels))
+    throw std::runtime_error("Invalid native indexed texture");
+  const size_t first =
+      size_t(image.type == 4 ? binding.bank : binding.bank & 0x30) * 16;
+  Texture result{image.width, image.height, Bytes(pixels * 4)};
+  for (size_t i = 0; i < pixels; ++i) {
+    const auto index = image.type == 4
+                           ? (image.indices[i / 2] >> (i % 2 * 4)) & 15
+                           : image.indices[i];
+    if (!library.initialized.test(first + index))
+      throw std::runtime_error("Effect texture samples an unloaded palette");
+    const auto &color = library.palette[first + index];
+    std::copy_n(color.begin(), 3, result.rgba.begin() + i * 4);
+    result.rgba[i * 4 + 3] = uint8_t(std::min(255u, unsigned(color[3]) * 2));
+  }
+  return result;
+}
+std::vector<Texture> decode_texture_pack(const Bytes &data, size_t offset) {
+  NativeEffectTextureLibrary library;
+  const auto range = load_effect_texture_pack(data, offset, library);
+  std::vector<Texture> textures;
+  textures.reserve(range.count);
+  for (size_t i = range.first; i < range.first + range.count; ++i)
+    textures.push_back(resolve_effect_texture(library, i));
+  return textures;
 }
 } // namespace ashford
