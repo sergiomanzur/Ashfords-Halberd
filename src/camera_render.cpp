@@ -6,7 +6,7 @@
 namespace ashford {
 namespace {
 struct Vertex {
-  double x, y, z, u, v;
+  double x, y, z, u, v, fog;
 };
 double edge(const Vertex &a, const Vertex &b, double x, double y) {
   return (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x);
@@ -14,7 +14,8 @@ double edge(const Vertex &a, const Vertex &b, double x, double y) {
 } // namespace
 RasterImage render_camera(const Scene &scene, const Camera &camera,
                           uint32_t width, uint32_t height,
-                          AmbientMaterial *retained_material) {
+                          AmbientMaterial *retained_material,
+                          bool *completed_fog_state) {
   auto material =
       retained_material ? *retained_material : AmbientMaterial{255, 255, 255};
   if (!width || !height || width > 2048 || height > 2048 ||
@@ -24,6 +25,19 @@ RasterImage render_camera(const Scene &scene, const Camera &camera,
     if (!tex.width || !tex.height ||
         tex.rgba.size() != uint64_t(tex.width) * tex.height * 4)
       throw std::runtime_error("Invalid camera texture");
+  std::optional<NativeFog> authored_fog;
+  if (!scene.fog && camera.fog)
+    authored_fog =
+        NativeFog{true, camera.fog->color & 0xffffff,
+                  generate_fog_table(camera.fog->near_z, camera.fog->far_z)};
+  const auto *fog = scene.fog      ? &*scene.fog
+                    : authored_fog ? &*authored_fog
+                                   : nullptr;
+  bool drawing_fog = fog                   ? fog->enabled
+                     : completed_fog_state ? *completed_fog_state
+                                           : false;
+  NativeFog sampled_fog = fog ? *fog : NativeFog{};
+  sampled_fog.enabled = true;
   RasterImage image{width, height, Bytes(size_t(width) * height * 3)};
   for (size_t i = 0; i < image.rgb.size(); i += 3) {
     image.rgb[i] = 18;
@@ -39,6 +53,8 @@ RasterImage render_camera(const Scene &scene, const Camera &camera,
   constexpr double near_clip = 1, far_clip = 20000;
   size_t total = 0;
   for (const auto &mesh : scene.meshes) {
+    if (mesh.fog_state)
+      drawing_fog = *mesh.fog_state;
     if (mesh.object < 512 &&
         (camera.hidden[mesh.object / 32] & (0x80000000u >> (mesh.object % 32))))
       continue;
@@ -65,6 +81,7 @@ RasterImage render_camera(const Scene &scene, const Camera &camera,
     const auto ambient =
         scene.ambient ? selected_ambient(*scene.ambient, mesh.ambient_target)
                       : std::array<float, 3>{1, 1, 1};
+    const bool use_fog = fog && drawing_fog && mesh.fog_enabled;
     for (const auto &triangle : mesh.triangles) {
       if (triangle.ambient_material)
         material = *triangle.ambient_material;
@@ -76,7 +93,9 @@ RasterImage render_camera(const Scene &scene, const Camera &camera,
         auto p = camera_point(camera, corner.position);
         if (!std::isfinite(corner.u) || !std::isfinite(corner.v))
           throw std::runtime_error("Non-finite camera UV");
-        polygon.push_back({p.x, p.y, p.z, corner.u, corner.v});
+        polygon.push_back(
+            {p.x, p.y, p.z, corner.u, corner.v,
+             use_fog ? fog_power(sampled_fog, 1.f / p.z) : 255.f});
       }
       // Sutherland-Hodgman in camera space. Clip before division and integer
       // casts.
@@ -104,11 +123,13 @@ RasterImage render_camera(const Scene &scene, const Camera &camera,
           double dc = distance(current);
           if ((dp >= 0) != (dc >= 0)) {
             double t = dp / (dp - dc);
-            clipped.push_back({previous.x + t * (current.x - previous.x),
-                               previous.y + t * (current.y - previous.y),
-                               previous.z + t * (current.z - previous.z),
-                               previous.u + t * (current.u - previous.u),
-                               previous.v + t * (current.v - previous.v)});
+            clipped.push_back(
+                {previous.x + t * (current.x - previous.x),
+                 previous.y + t * (current.y - previous.y),
+                 previous.z + t * (current.z - previous.z),
+                 previous.u + t * (current.u - previous.u),
+                 previous.v + t * (current.v - previous.v),
+                 previous.fog + t * (current.fog - previous.fog)});
           }
           if (dc >= 0)
             clipped.push_back(current);
@@ -122,6 +143,8 @@ RasterImage render_camera(const Scene &scene, const Camera &camera,
         for (auto &p : vertices) {
           p.x = width * .5 + p.x * fx / p.z;
           p.y = height * .5 - p.y * fy / p.z;
+          // GS vertex F is an unsigned byte after the source float conversion.
+          p.fog = std::trunc(std::clamp(p.fog, 0., 255.));
         }
         double area =
             edge(vertices[0], vertices[1], vertices[2].x, vertices[2].y);
@@ -165,6 +188,9 @@ RasterImage render_camera(const Scene &scene, const Camera &camera,
                    w2 = 1 - w0 - w1;
             if (w0 < 0 || w1 < 0 || w2 < 0)
               continue;
+            const double fog_factor = w0 * vertices[0].fog +
+                                      w1 * vertices[1].fog +
+                                      w2 * vertices[2].fog;
             w0 /= vertices[0].z;
             w1 /= vertices[1].z;
             w2 /= vertices[2].z;
@@ -198,8 +224,14 @@ RasterImage render_camera(const Scene &scene, const Camera &camera,
                   scene.ambient
                       ? double(ambient[channel] * (material[channel] / 255.f))
                       : light;
+              double shade = std::clamp(base * factor, 0., 255.);
+              if (use_fog) {
+                const double fog_color =
+                    (fog->color >> (16 - channel * 8)) & 255;
+                shade = fog_color + (shade - fog_color) * (fog_factor / 256.);
+              }
               image.rgb[pixel * 3 + channel] =
-                  uint8_t(std::clamp(base * factor, 0., 255.));
+                  uint8_t(std::clamp(shade, 0., 255.));
             }
           }
       }
@@ -209,6 +241,8 @@ RasterImage render_camera(const Scene &scene, const Camera &camera,
   }
   if (retained_material)
     *retained_material = material;
+  if (completed_fog_state)
+    *completed_fog_state = scene.ending_fog_state.value_or(drawing_fog);
   return image;
 }
 } // namespace ashford

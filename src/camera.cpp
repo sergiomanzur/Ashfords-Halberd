@@ -79,6 +79,7 @@ std::vector<RoomCut> decode_room_cuts(const Bytes &data) {
       d.base.perspective = r.u32(start + 84);
       for (size_t j = 0; j < 16; ++j)
         d.base.hidden[j] = r.u32(start + 88 + j * 4);
+      d.fog = {r.u32(start + 184), r.f(start + 188), r.f(start + 192)};
     }
     cuts.push_back(cut);
   }
@@ -138,6 +139,9 @@ Camera resolve_camera(const RoomCut &cut, size_t variant) {
     throw std::runtime_error("Invalid camera variant");
   const auto &d = cut.variants[variant];
   auto camera = d.base;
+  camera.fog.reset();
+  if (d.flags & 8)
+    camera.fog = d.fog;
   if (d.flags & 32) {
     uint32_t sum = 0;
     for (unsigned i = 0; i < 4; ++i)

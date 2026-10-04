@@ -88,8 +88,11 @@ Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
   if (runtime.scene.ambient && !runtime.scenario.ambient)
     throw std::runtime_error("Missing current runtime ambient work");
   result.ambient = runtime.scenario.ambient;
+  result.fog = runtime.scenario.fog.active;
+  bool drawing_fog = runtime.scenario.fog.active.enabled;
   size_t triangles = 0;
-  auto append = [&](const Scene &scene, AmbientTarget target, bool model_clipping) {
+  auto append = [&](const Scene &scene, AmbientTarget target,
+                    bool model_clipping, bool fog_enabled = true) {
     size_t offset = result.textures.size();
     if (scene.textures.size() > 65535 - offset ||
         result.meshes.size() + scene.meshes.size() > 16384)
@@ -99,6 +102,8 @@ Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
     for (auto mesh : scene.meshes) {
       mesh.ambient_target = target;
       mesh.model_clipping = model_clipping;
+      mesh.fog_enabled = fog_enabled;
+      mesh.fog_state = drawing_fog && fog_enabled;
       triangles += mesh.triangles.size();
       if (triangles > 2000000)
         throw std::runtime_error("Runtime scene triangle limit exceeded");
@@ -113,13 +118,20 @@ Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
     }
   };
   auto posed = [&](const ScenarioEntity &entity, AmbientTarget target,
-                   bool model_clipping) {
+                   bool model_clipping, bool suppress_fog = false) {
     if (entity.flags & 0x1080 || entity.model_flags & 6)
       throw std::runtime_error(
           "Unsupported runtime draw matrix or morphing mode");
     if (!entity.rendered_model)
       throw std::runtime_error("Missing prepared runtime entity pose");
-    append(*entity.rendered_model, target, model_clipping);
+    const bool toggle_fog = suppress_fog &&
+                            (runtime.scenario.flags[10][0] & 2) &&
+                            (entity.model_flags & 0x10);
+    if (toggle_fog)
+      drawing_fog = false;
+    append(*entity.rendered_model, target, model_clipping, !toggle_fog);
+    if (toggle_fog)
+      drawing_fog = true; // Original njFogEnable is unconditional here.
   };
   auto cut_visible = [&](const ScenarioEntity &entity) {
     if (!(entity.flags & 0x40000000) || runtime.scenario.flags[11][0] & 0x40 ||
@@ -146,8 +158,10 @@ Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
           (!(entity.state_flags & 0x1000000) || runtime.scenario.player_sleep_ticks) &&
           !((runtime.scenario.flags[11][0] & 0x4000) && (entity.model_flags & 0x40)) &&
           cut_visible(entity)) {
-        posed(entity, pass == 0 ? AmbientTarget::Object : AmbientTarget::Character,
-              object_clipping || (pass != 2 && (entity.model_flags & 8)));
+        posed(entity,
+              pass == 0 ? AmbientTarget::Object : AmbientTarget::Character,
+              object_clipping || (pass != 2 && (entity.model_flags & 8)),
+              pass != 2);
         if (pass != 2)
           object_clipping = true; // bhDrawObject restores njControl3D(0x100).
       }
@@ -156,7 +170,7 @@ Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
     for (const auto &entity : runtime.scenario.items)
       if (entity.flags & 1 && !(entity.state_flags & 0x1000000) &&
           !(entity.model_flags & 1) && cut_visible(entity))
-        posed(entity, AmbientTarget::Item, true);
+        posed(entity, AmbientTarget::Item, true, true);
   if (draw_flags & 2)
     for (size_t work = 0; work < runtime.scenario.enemies.size(); ++work) {
       const auto &entity = runtime.scenario.enemies[work];
@@ -180,7 +194,67 @@ Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
     }
   if (draw_flags & 1)
     append(runtime.player_scene, AmbientTarget::Character, false);
+  result.ending_fog_state = drawing_fog;
   return result;
+}
+namespace {
+bool bind_current_fog(const RoomRuntime &runtime, FogWork &fog,
+                      FogParameters &room, uint32_t st, uint32_t &gm,
+                      uint32_t &effects) {
+  const bool eye = bool(gm & 0x40);
+  const CameraDefinition *definition = nullptr;
+  if (!eye) {
+    if (!runtime.world.cut)
+      return false;
+    const size_t cut = *runtime.world.cut;
+    if (cut >= runtime.cuts.size())
+      throw std::runtime_error("Current fog cut outside room");
+    definition = &runtime.cuts[cut].variants[0];
+    // cut.c::bhControlActiveCamera recomputes these ranges from the camera
+    // each frame. Authored values alone cannot bind that source behavior.
+    if (definition->flags & 0xc0)
+      throw std::runtime_error("Unsupported dynamic camera fog binding");
+  }
+  if (!runtime.fog_bound || runtime.fog_eye != eye ||
+      (!eye && runtime.fog_cut != runtime.world.cut)) {
+    if (eye)
+      select_fog_eye(fog, room, st, gm);
+    else {
+      select_fog_cut(fog, definition->fog, bool(definition->flags & 8), st, gm,
+                     effects);
+    }
+  }
+  return true;
+}
+void publish_fog_binding(RoomRuntime &runtime, FogWork fog, FogParameters room,
+                         uint32_t st, uint32_t gm, uint32_t effects) {
+  runtime.scenario.fog = std::move(fog);
+  runtime.room_fog = room;
+  runtime.scenario.flags[10][0] = st;
+  runtime.scenario.flags[11][0] = gm;
+  runtime.scenario.effect_flags = effects;
+  runtime.fog_cut = runtime.world.cut;
+  runtime.fog_bound = true;
+  runtime.fog_eye = bool(gm & 0x40);
+}
+void bind_entry_fog(RoomRuntime &runtime) {
+  auto fog = runtime.scenario.fog;
+  auto room = runtime.room_fog;
+  auto st = runtime.scenario.flags[10][0], gm = runtime.scenario.flags[11][0];
+  auto effects = runtime.scenario.effect_flags;
+  if (bind_current_fog(runtime, fog, room, st, gm, effects))
+    publish_fog_binding(runtime, std::move(fog), room, st, gm, effects);
+}
+} // namespace
+void control_room_fog(RoomRuntime &runtime) {
+  auto fog = runtime.scenario.fog;
+  auto room = runtime.room_fog;
+  auto st = runtime.scenario.flags[10][0], gm = runtime.scenario.flags[11][0];
+  auto effects = runtime.scenario.effect_flags;
+  if (!bind_current_fog(runtime, fog, room, st, gm, effects))
+    return;
+  control_fog(fog, st, gm);
+  publish_fog_binding(runtime, std::move(fog), room, st, gm, effects);
 }
 void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
                        const PlayerTranslationTables &translations,
@@ -265,6 +339,7 @@ void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
   tick_wall_damage_timers(scenario);
   tick_scenario_props(scenario);
   control_scenario(scenario);
+  control_room_fog(runtime);
 }
 RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
                               size_t entry, ScenarioState persistent,
@@ -279,6 +354,7 @@ RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
   result.scene = decode_room_scene(data);
   result.collision = decode_room_collision(data);
   result.cuts = decode_room_cuts(data);
+  result.room_fog = decode_room_fog(data);
   result.world = enter_room(records, entry, result.collision, result.cuts);
   // Healthy unarmed entry: bhInitRoomChangePlayer samples the initial pose
   // before advancing the motion counter visible to initialization scripts.
@@ -343,7 +419,9 @@ RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
   }
   synchronize_runtime_player(result, player);
   bind_room_effects(data, result.scenario);
+  bind_entry_fog(result); // room.c::bhCheckCut precedes system.c::bhInitEvent.
   initialize_scenario(result.scenario, &result.player_work);
+  control_room_fog(result);
   if (sounds) {
     result.sound_assets = sounds(stage, room, result.scenario.room_sound_case);
     result.scenario.room_sound_case =

@@ -733,6 +733,18 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
                                         program[pc + 1], program[pc + 2] == 0);
       pc += 4;
       break;
+    case 76:
+      extent(6);
+      if (program[pc + 5] == 0) {
+        state.fog.override_color =
+            uint32_t(program[pc + 1]) << 24 | uint32_t(program[pc + 2]) << 16 |
+            uint32_t(program[pc + 3]) << 8 | program[pc + 4];
+        state.flags[10][0] |= 0x100000;
+      } else
+        state.flags[10][0] &= ~0x100000u;
+      state.flags[11][0] |= 0x10;
+      pc += 6;
+      break;
     case 68:
       extent(6);
       if (!state.ambient || program[pc + 4] >= 4)

@@ -1,6 +1,7 @@
 #pragma once
 #include "ambient.hpp"
 #include "assets.hpp"
+#include "fog.hpp"
 #include <array>
 #include <optional>
 namespace ashford {
@@ -29,6 +30,8 @@ struct Mesh {
   std::optional<AmbientMaterial> ending_ambient_material;
   std::optional<ModelBounds> bounds;
   bool model_clipping = false;
+  bool fog_enabled = true;
+  std::optional<bool> fog_state;
 };
 struct Texture {
   uint32_t width = 0, height = 0;
@@ -49,6 +52,8 @@ struct Scene {
   std::vector<Mesh> meshes;
   std::vector<Texture> textures;
   std::optional<RoomAmbient> ambient;
+  std::optional<NativeFog> fog;
+  std::optional<bool> ending_fog_state;
 };
 Scene decode_room_scene(const Bytes &data);
 } // namespace ashford

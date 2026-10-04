@@ -205,6 +205,7 @@ struct ScenarioState {
   std::vector<CollisionRecord> interactions;
   std::optional<RoomCollision> collision;
   std::optional<RoomAmbient> ambient;
+  FogWork fog;
   std::vector<CollisionRecord> dynamic_miscellaneous; // sys->metcp.
   std::vector<CollisionRecord> dynamic_walls;         // sys->mwalp.
   std::vector<CollisionRecord> dynamic_floors;        // sys->mflrp.

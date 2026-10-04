@@ -8,6 +8,7 @@ struct Camera {
   float distance = 0;
   uint32_t perspective = 8192;
   std::array<uint32_t, 16> hidden{};
+  std::optional<FogParameters> fog;
 };
 struct CameraDefinition {
   Camera base;
@@ -15,6 +16,7 @@ struct CameraDefinition {
   Vec3 tracking;
   std::array<float, 4> heights{};
   std::array<int16_t, 4> rolls{};
+  FogParameters fog;
 };
 struct CutArea {
   uint32_t attribute = 0;

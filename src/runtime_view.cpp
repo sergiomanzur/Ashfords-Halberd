@@ -85,7 +85,7 @@ void RuntimeView::draw(const SDL_Rect &destination) {
   auto image = render_camera(
       compose_room_runtime(runtime_, runtime_.scenario.drawing_flags, 0),
       resolve_camera(runtime_.cuts.at(*runtime_.world.cut), 0), 320, 240,
-      &ambient_material_);
+      &ambient_material_, &runtime_.scenario.fog.active.enabled);
   if (SDL_UpdateTexture(texture_.get(), nullptr, image.rgb.data(), 320 * 3) <
           0 ||
       SDL_RenderCopy(renderer_, texture_.get(), nullptr, &destination) < 0)

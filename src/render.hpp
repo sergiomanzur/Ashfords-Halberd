@@ -13,5 +13,6 @@ RasterImage render_overview(const Scene &scene, uint32_t width,
 // session; invalid frames do not publish a replacement material value.
 RasterImage render_camera(const Scene &scene, const Camera &camera,
                           uint32_t width, uint32_t height,
-                          AmbientMaterial *retained_material = nullptr);
+                          AmbientMaterial *retained_material = nullptr,
+                          bool *completed_fog_state = nullptr);
 } // namespace ashford

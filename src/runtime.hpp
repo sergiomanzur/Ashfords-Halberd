@@ -17,7 +17,12 @@ struct RoomRuntime {
   ScenarioState scenario;
   std::shared_ptr<const RoomSoundAssets> sound_assets;
   uint16_t previous_pad = 0;
+  FogParameters room_fog;
+  std::optional<size_t> fog_cut;
+  bool fog_bound = false, fog_eye = false;
 };
+// Select current authored cut values, then process original fixed-tick EOR fog.
+void control_room_fog(RoomRuntime &runtime);
 // Retained healthy unarmed work/caches consumed by native enemy callbacks.
 // Model/motion resources are bound once; normal-anchor timing is caller-owned.
 void synchronize_runtime_player(RoomRuntime &runtime,
