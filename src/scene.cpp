@@ -1,4 +1,5 @@
 #include "scene.hpp"
+#include "ninja_matrix.hpp"
 // File layouts and chunk behavior follow the MIT-licensed recvx-decomp:
 // binfunc.c, ps2_NinjaCnk.c, ps2_NaMatrix.c, ps2_texture.c and types.h.
 #include <algorithm>
@@ -75,6 +76,8 @@ Mesh chunks(const Reader &r, size_t base, size_t model, const Matrix &world,
     return mesh;
   size_t p = base + vo;
   std::vector<Vec3> vertices(65536);
+  std::vector<Vec3> normals(65536);
+  const auto normal_matrix = detail::ninja_load(world);
   std::vector<bool> valid(65536);
   bool ended = false;
   for (size_t n = 0; n < 4096; ++n) {
@@ -97,6 +100,8 @@ Mesh chunks(const Reader &r, size_t base, size_t model, const Matrix &world,
       throw std::runtime_error("Invalid PS2 vertex chunk length");
     for (size_t i = 0; i < count; ++i) {
       vertices[start + i] = transform(world, r.vec(p + 64 + i * 32));
+      normals[start + i] =
+          detail::ninja_vector(normal_matrix, r.vec(p + 80 + i * 32));
       valid[start + i] = true;
     }
     p += bytes;
@@ -175,6 +180,7 @@ Mesh chunks(const Reader &r, size_t base, size_t model, const Matrix &world,
           throw std::runtime_error("Triangle references missing vertex");
         Corner c;
         c.position = vertices[index];
+        c.normal = normals[index];
         if (type != 64) {
           c.u = float(take()) / (type == 65 ? 255.f : 1023.f);
           c.v = float(take()) / (type == 65 ? 255.f : 1023.f);

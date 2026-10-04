@@ -11,6 +11,9 @@ struct Vec3 {
 struct Corner {
   Vec3 position;
   float u = 0, v = 0;
+  // Chunk51 authored normal transformed by the current linear model matrix.
+  // Ninja keeps its length; translation and normalization are not applied.
+  Vec3 normal{};
 };
 struct Triangle {
   std::array<Corner, 3> corners;

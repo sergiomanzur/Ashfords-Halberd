@@ -339,8 +339,13 @@ std::vector<SkinNode> decode_skin(const Bytes &data, size_t count,
           joint += 4;
         if (joint >= count || level > 9)
           throw std::runtime_error("Invalid skin vertex binding");
+        // npCalcSkin/npCalcSkinFM use literals, not multiplication by0.1:
+        // some products round to a different float (notably levels6/8).
+        static constexpr std::array<float, 10> levels{
+            0.1000000015f, 0.200000003f,  0.3000000119f, 0.400000006f,  0.5f,
+            0.6000000238f, 0.6999999881f, 0.8000000119f, 0.8999999762f, 1.0f};
         node.vertices.push_back(
-            {uint16_t(joint), float(level + 1) * 0.1f, uint16_t(packed)});
+            {uint16_t(joint), levels[level], uint16_t(packed)});
       }
     }
   }

@@ -264,16 +264,42 @@ Scene draw_actor(const ActorModel &actor, const std::vector<JointPose> &pose,
             local = {local.x + bind[i].x - bind[weight.joint].x,
                      local.y + bind[i].y - bind[weight.joint].y,
                      local.z + bind[i].z - bind[weight.joint].z};
-          auto a = point(unrotated[weight.joint], local),
-               b = point(world[weight.joint], local);
-          Vec3 out{a.x + weight.rotation_weight * (b.x - a.x),
+          const auto b = point(world[weight.joint], local);
+          auto out = b;
+          if (weight.rotation_weight != 1) {
+            const auto a = point(unrotated[weight.joint], local);
+            out = {a.x + weight.rotation_weight * (b.x - a.x),
                    a.y + weight.rotation_weight * (b.y - a.y),
                    a.z + weight.rotation_weight * (b.z - a.z)};
-          for (size_t axis = 0; axis < 3; ++axis)
+          }
+          // npCalcSkin/FM transform and blend the second xyz record as a
+          // vector. Bind conversion affects positions only; normals retain
+          // their original length, and level9 takes the rotated result
+          // directly.
+          const auto n = r.vec(vertex + 80 + v * 32);
+          const auto nb =
+              detail::ninja_vector(detail::ninja_load(world[weight.joint]), n);
+          auto normal = nb;
+          if (weight.rotation_weight != 1) {
+            const auto na = detail::ninja_vector(
+                detail::ninja_load(unrotated[weight.joint]), n);
+            normal = {detail::ninja_finite(na.x + weight.rotation_weight *
+                                                      (nb.x - na.x)),
+                      detail::ninja_finite(na.y + weight.rotation_weight *
+                                                      (nb.y - na.y)),
+                      detail::ninja_finite(na.z + weight.rotation_weight *
+                                                      (nb.z - na.z))};
+          }
+          for (size_t axis = 0; axis < 3; ++axis) {
             write(posed, vertex + 64 + v * 32 + axis * 4,
                   axis == 0   ? out.x
                   : axis == 1 ? out.y
                               : out.z);
+            write(posed, vertex + 80 + v * 32 + axis * 4,
+                  axis == 0   ? normal.x
+                  : axis == 1 ? normal.y
+                              : normal.z);
+          }
         }
         // npCalcSkin outputs actor-space vertices and bypasses the owner
         // matrix.

@@ -42,6 +42,15 @@ inline Vec3 ninja_point(const NinjaMatrix &m, Vec3 p) {
           ninja_finite(((m[4] * p.x + m[5] * p.y) + m[6] * p.z) + m[7]),
           ninja_finite(((m[8] * p.x + m[9] * p.y) + m[10] * p.z) + m[11])};
 }
+// ps2_NaMatrix.c::njCalcVector and njCnkCvVn use only matrix xyz columns.
+inline Vec3 ninja_vector(const NinjaMatrix &m, Vec3 v) {
+  ninja_finite(v.x);
+  ninja_finite(v.y);
+  ninja_finite(v.z);
+  return {ninja_finite((m[0] * v.x + m[1] * v.y) + m[2] * v.z),
+          ninja_finite((m[4] * v.x + m[5] * v.y) + m[6] * v.z),
+          ninja_finite((m[8] * v.x + m[9] * v.y) + m[10] * v.z)};
+}
 inline void ninja_translate(NinjaMatrix &m, Vec3 p) {
   const auto translated = ninja_point(m, p);
   m[3] = translated.x;
