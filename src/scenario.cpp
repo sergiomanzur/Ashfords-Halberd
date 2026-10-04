@@ -733,6 +733,21 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
                                         program[pc + 1], program[pc + 2] == 0);
       pc += 4;
       break;
+    case 13: {
+      extent(4);
+      // event.c::bhDieCk uses ten bits, unlike bhEneSetCk's nine-bit index.
+      const auto count = word(pc + 2);
+      auto &defeated = flag(3, count);
+      const uint32_t mask = 0x80000000u >> (count & 31);
+      if (!(defeated & mask)) {
+        const auto &enemy =
+            indexed(state.enemies, indexed(state.enemy_slots, program[pc + 1]));
+        if (enemy.flags & 2u)
+          defeated |= mask;
+      }
+      pc += 4;
+      break;
+    }
     case 76:
       extent(6);
       if (program[pc + 5] == 0) {
