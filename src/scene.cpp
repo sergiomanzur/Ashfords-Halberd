@@ -66,6 +66,10 @@ Mesh chunks(const Reader &r, size_t base, size_t model, const Matrix &world,
   r.range(model, 24);
   Mesh mesh;
   mesh.object = object;
+  // njCnkDrawModelLocal transforms center with the current model/view matrix
+  // but uses the disk radius unchanged, including for scaled objects.
+  mesh.bounds = ModelBounds{transform(world, r.vec(model + 8)),
+                            r.f32(model + 20)};
   const auto vo = r.u32(model), po = r.u32(model + 4);
   if (vo == 0xffffffff || po == 0xffffffff)
     return mesh;
@@ -103,6 +107,7 @@ Mesh chunks(const Reader &r, size_t base, size_t model, const Matrix &world,
   ended = false;
   uint16_t texture = 0;
   std::array<uint8_t, 4> color{255, 255, 255, 255};
+  std::optional<AmbientMaterial> ambient_material;
   for (size_t n = 0; n < 4096; ++n) {
     r.range(p, 2);
     auto type = r.b[p];
@@ -129,6 +134,15 @@ Mesh chunks(const Reader &r, size_t base, size_t model, const Matrix &world,
         if (end - p < 8)
           throw std::runtime_error("Truncated diffuse material");
         color = {r.b[p + 6], r.b[p + 5], r.b[p + 4], r.b[p + 7]};
+      }
+      if (type == 18 || type == 19 || type == 22 || type == 23) {
+        const size_t ambient = type == 19 || type == 23 ? 8 : 4;
+        const size_t specular = type == 22 || type == 23 ? 4 : 0;
+        if (end - p < ambient + 4 + specular)
+          throw std::runtime_error("Truncated ambient material");
+        ambient_material = AmbientMaterial{r.b[p + ambient + 2],
+                                            r.b[p + ambient + 1],
+                                            r.b[p + ambient]};
       }
       p = end;
       continue;
@@ -174,6 +188,7 @@ Mesh chunks(const Reader &r, size_t base, size_t model, const Matrix &world,
         Triangle t;
         t.texture = type == 64 ? 0xffff : texture;
         t.color = color;
+        t.ambient_material = ambient_material;
         t.corners = {corners[i - 2], corners[i - 1], corners[i]};
         if (((i & 1) != 0) ^ (signed_count < 0))
           std::swap(t.corners[0], t.corners[1]);
@@ -191,6 +206,7 @@ Mesh chunks(const Reader &r, size_t base, size_t model, const Matrix &world,
   }
   if (!ended)
     throw std::runtime_error("Unterminated polygon list");
+  mesh.ending_ambient_material = ambient_material;
   return mesh;
 }
 } // namespace
@@ -396,7 +412,10 @@ Scene decode_room_scene(const Bytes &data) {
   if (!model_table || !tex_table || !r.u32(tex_table))
     throw std::runtime_error("Missing room scene tables");
   Scene s;
+  s.ambient = decode_room_ambient(data);
   s.meshes = decode_model(data, r.u32(model_table),true);
+  for (auto &mesh : s.meshes)
+    mesh.model_clipping = true; // game.c::bhAllDrawModel, njControl3D(0x2500).
   s.textures = decode_texture_pack(data, r.u32(tex_table + 4));
   for (const auto &m : s.meshes)
     for (const auto &t : m.triangles)

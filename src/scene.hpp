@@ -1,6 +1,8 @@
 #pragma once
+#include "ambient.hpp"
 #include "assets.hpp"
 #include <array>
+#include <optional>
 namespace ashford {
 struct Vec3 {
   float x = 0, y = 0, z = 0;
@@ -13,11 +15,20 @@ struct Triangle {
   std::array<Corner, 3> corners;
   uint16_t texture = 0;
   std::array<uint8_t, 4> color{255, 255, 255, 255};
+  std::optional<AmbientMaterial> ambient_material;
+};
+struct ModelBounds {
+  Vec3 center;
+  float radius = 0;
 };
 struct Mesh {
   uint32_t object = 0;
   std::vector<Triangle> triangles;
   bool initially_hidden = false;
+  AmbientTarget ambient_target = AmbientTarget::Room;
+  std::optional<AmbientMaterial> ending_ambient_material;
+  std::optional<ModelBounds> bounds;
+  bool model_clipping = false;
 };
 struct Texture {
   uint32_t width = 0, height = 0;
@@ -37,6 +48,7 @@ std::vector<Texture> decode_texture_pack(const Bytes &data, size_t offset);
 struct Scene {
   std::vector<Mesh> meshes;
   std::vector<Texture> textures;
+  std::optional<RoomAmbient> ambient;
 };
 Scene decode_room_scene(const Bytes &data);
 } // namespace ashford

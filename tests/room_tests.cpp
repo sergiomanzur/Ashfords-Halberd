@@ -181,8 +181,13 @@ int main() {
     persistent.effect_pool = old_effects;
     persistent.pending_enemy_sounds.push_back({0, {1, 2, 3}, 99});
     persistent.pending_enemy_vibrations.push_back({0, 1, 10});
+    persistent.ambient.emplace();
+    persistent.ambient->colors[0] = {9, 8, 7};
     auto runtime =
         load_room_runtime(runtime_data, 0, 1, 1, persistent, entry_player);
+    ck((runtime.scenario.ambient && runtime.scene.ambient &&
+       runtime.scenario.ambient->colors == runtime.scene.ambient->colors &&
+       runtime.scenario.ambient->colors[0] == std::array<float, 3>{0, 0, 0}));
     auto with_case = runtime_data;
     const Bytes sound_case{182, 1, 0};
     std::copy(sound_case.begin(), sound_case.end(), with_case.begin() + 2108);
@@ -285,17 +290,28 @@ int main() {
     transition.scenario.flags[10][0] |= 1;
     transition.previous_pad = 0x200;
     transition.scenario.random_seed = 42;
+    transition.scenario.ambient->colors[0] = {9, 8, 7};
     bad([&] { transition_room_runtime(transition, Bytes{}, entry_player); });
     const auto current_routes = transition.scenario.routes;
     auto bad_routes = runtime_data;
     put(bad_routes, 128 + 0x2c, 2500);
     bad([&] { transition_room_runtime(transition, bad_routes, entry_player); });
+    auto bad_ambient = runtime_data;
+    bad_ambient[128 + 0x3b8] = 4;
+    bad([&] { transition_room_runtime(transition, bad_ambient, entry_player); });
+    ck((transition.scenario.ambient->colors[0] == std::array<float, 3>{9, 8, 7}));
     ck(transition.scenario.routes == current_routes);
     ck(transition.scenario.room == 1 && transition.scenario.door &&
        transition.world.player.position.x == -10 &&
        transition.scenario.inventory[0] == 99 &&
        transition.previous_pad == 0x200);
-    transition_room_runtime(transition, runtime_data, entry_player);
+    auto destination_ambient = runtime_data;
+    flt(destination_ambient, 128 + 0x3bc, .8f);
+    flt(destination_ambient, 128 + 0x3cc, .7f);
+    flt(destination_ambient, 128 + 0x3dc, .6f);
+    transition_room_runtime(transition, destination_ambient, entry_player);
+    ck((transition.scenario.ambient->colors[0] == std::array<float, 3>{.8f, .7f, .6f} &&
+       transition.scene.ambient->colors[0] == transition.scenario.ambient->colors[0]));
     ck(transition.scenario.routes &&
        transition.scenario.routes != current_routes &&
        transition.scenario.routes->regions.size() == 1);

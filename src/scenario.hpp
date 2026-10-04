@@ -1,4 +1,5 @@
 #pragma once
+#include "ambient.hpp"
 #include "actor.hpp"
 #include "assets.hpp"
 #include "audio_background.hpp"
@@ -203,6 +204,7 @@ struct ScenarioState {
   std::array<EnemyCallbackKind, 100> enemy_callbacks{};
   std::vector<CollisionRecord> interactions;
   std::optional<RoomCollision> collision;
+  std::optional<RoomAmbient> ambient;
   std::vector<CollisionRecord> dynamic_miscellaneous; // sys->metcp.
   std::vector<CollisionRecord> dynamic_walls;         // sys->mwalp.
   std::vector<CollisionRecord> dynamic_floors;        // sys->mflrp.

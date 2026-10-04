@@ -13,7 +13,10 @@ double edge(const Vertex &a, const Vertex &b, double x, double y) {
 }
 } // namespace
 RasterImage render_camera(const Scene &scene, const Camera &camera,
-                          uint32_t width, uint32_t height) {
+                          uint32_t width, uint32_t height,
+                          AmbientMaterial *retained_material) {
+  auto material =
+      retained_material ? *retained_material : AmbientMaterial{255, 255, 255};
   if (!width || !height || width > 2048 || height > 2048 ||
       camera.perspective < 2 || camera.perspective >= 32768)
     throw std::runtime_error("Invalid camera raster parameters");
@@ -33,12 +36,38 @@ RasterImage render_camera(const Scene &scene, const Camera &camera,
   double tan_half =
       std::tan(double(camera.perspective / 2) * 6.283185307179586 / 65536.);
   double fx = width * .5 / tan_half * 1.174, fy = width * .5 / tan_half;
+  constexpr double near_clip = 1, far_clip = 20000;
   size_t total = 0;
   for (const auto &mesh : scene.meshes) {
     if (mesh.object < 512 &&
         (camera.hidden[mesh.object / 32] & (0x80000000u >> (mesh.object % 32))))
       continue;
+    if (mesh.model_clipping && mesh.bounds) {
+      const auto &bounds = *mesh.bounds;
+      if (!std::isfinite(bounds.radius))
+        throw std::runtime_error("Non-finite source model radius");
+      if (bounds.radius > 0) {
+        const auto center = camera_point(camera, bounds.center);
+        const double radius = bounds.radius;
+        if (center.z + radius < near_clip || far_clip < center.z - radius)
+          continue;
+        // Source sphere projection tests Center.x/y without multiplying them
+        // by the aspect; only projected radius receives that scale.
+        const double projection = std::abs(fy / center.z);
+        const double rw = radius * projection * 1.174;
+        const double rh = radius * projection;
+        const double sx = center.x * projection, sy = center.y * projection;
+        if (sx + rw < -double(width) * .5 || width * .5 < sx - rw ||
+            sy + rh < -double(height) * .5 || height * .5 < sy - rh)
+          continue;
+      }
+    }
+    const auto ambient =
+        scene.ambient ? selected_ambient(*scene.ambient, mesh.ambient_target)
+                      : std::array<float, 3>{1, 1, 1};
     for (const auto &triangle : mesh.triangles) {
+      if (triangle.ambient_material)
+        material = *triangle.ambient_material;
       if (++total > 2000000 || (triangle.texture != 0xffff &&
                                 triangle.texture >= scene.textures.size()))
         throw std::runtime_error("Invalid camera scene");
@@ -55,9 +84,9 @@ RasterImage render_camera(const Scene &scene, const Camera &camera,
         auto distance = [&](Vertex p) {
           switch (plane) {
           case 0:
-            return p.z - 1.;
+            return p.z - near_clip;
           case 1:
-            return 20000. - p.z;
+            return far_clip - p.z;
           case 2:
             return p.x + p.z * width * .5 / fx;
           case 3:
@@ -162,13 +191,24 @@ RasterImage render_camera(const Scene &scene, const Camera &camera,
             if (color[3] < 128)
               continue;
             depth[pixel] = z;
-            for (int channel = 0; channel < 3; ++channel)
+            for (int channel = 0; channel < 3; ++channel) {
+              const double base =
+                  scene.ambient && !texture ? 255 : color[channel];
+              const double factor =
+                  scene.ambient
+                      ? double(ambient[channel] * (material[channel] / 255.f))
+                      : light;
               image.rgb[pixel * 3 + channel] =
-                  uint8_t(std::min(255., color[channel] * light));
+                  uint8_t(std::clamp(base * factor, 0., 255.));
+            }
           }
       }
     }
+    if (mesh.ending_ambient_material)
+      material = *mesh.ending_ambient_material;
   }
+  if (retained_material)
+    *retained_material = material;
   return image;
 }
 } // namespace ashford

@@ -9,6 +9,9 @@ struct RasterImage {
 // Development overview camera, independent of SDL or a desktop window.
 RasterImage render_overview(const Scene &scene, uint32_t width,
                             uint32_t height);
+// Retain Ninja ambient material across models/frames in the caller's renderer
+// session; invalid frames do not publish a replacement material value.
 RasterImage render_camera(const Scene &scene, const Camera &camera,
-                          uint32_t width, uint32_t height);
+                          uint32_t width, uint32_t height,
+                          AmbientMaterial *retained_material = nullptr);
 } // namespace ashford

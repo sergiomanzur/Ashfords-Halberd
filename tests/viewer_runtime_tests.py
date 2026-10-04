@@ -8,6 +8,8 @@ def u(p,v):struct.pack_into('<I',b,p,v)
 def h(p,v):struct.pack_into('<H',b,p,v)
 def f(p,v):struct.pack_into('<f',b,p,v)
 f(0,10);u(16,128);u(128,1132);u(256,2);u(20,2600);u(2600,2700);u(32,3240);u(3240,1);u(3244,3300)
+# Author white room ambient for the red texture upload assertion.
+for channel in range(3):f(128+0x3bc+channel*16,1.0)
 for cut in range(2):
  for v in range(2):u(1132+cut*680+32+v*196+84,16384)
 m=2700;base=m+16;b[m:m+4]=b'MDL\x80';h(m+4,16);h(m+6,1);u(m+12,0)
@@ -25,7 +27,7 @@ encoded=bytearray();cursor=0
 while len(b)-cursor>=8:encoded.append(255);encoded.extend(b[cursor:cursor+8]);cursor+=8
 tail=b[cursor:];encoded.append(((1<<len(tail))-1)|(1<<(len(tail)+1)));encoded.extend(tail);encoded.extend(b'\0\0')
 archive=root/'日本語-synthetic.AFS';archive.write_bytes(b'AFS\0'+struct.pack('<IIIII',2,24,len(encoded),24+len(encoded),len(encoded))+encoded+encoded)
-env=os.environ.copy();env['SDL_VIDEODRIVER']='dummy';env['SDL_RENDER_DRIVER']='software'
+env=os.environ.copy();env['SDL_VIDEODRIVER']='dummy';env['SDL_RENDER_DRIVER']='software';env['SDL_AUDIODRIVER']='dummy'
 ini=root/'profile/AshfordsHalberd.ini'
 ini.parent.mkdir(exist_ok=True)
 ini.write_text('[Viewer]\nroom=9999\ncut=4095\nvariant=1\n')

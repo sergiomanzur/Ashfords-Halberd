@@ -733,6 +733,14 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
                                         program[pc + 1], program[pc + 2] == 0);
       pc += 4;
       break;
+    case 68:
+      extent(6);
+      if (!state.ambient || program[pc + 4] >= 4)
+        throw std::runtime_error("Missing or invalid scenario ambient slot");
+      state.ambient->colors[program[pc + 4]] = {
+          .1f * program[pc + 1], .1f * program[pc + 2], .1f * program[pc + 3]};
+      pc += 6;
+      break;
     case 14: {
       extent(6);
       auto count = word(pc + 2);

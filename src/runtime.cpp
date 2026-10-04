@@ -85,8 +85,11 @@ void transition_room_runtime(RoomRuntime &runtime, const Bytes &destination,
 Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
                            uint32_t camera_flags) {
   Scene result;
+  if (runtime.scene.ambient && !runtime.scenario.ambient)
+    throw std::runtime_error("Missing current runtime ambient work");
+  result.ambient = runtime.scenario.ambient;
   size_t triangles = 0;
-  auto append = [&](const Scene &scene) {
+  auto append = [&](const Scene &scene, AmbientTarget target, bool model_clipping) {
     size_t offset = result.textures.size();
     if (scene.textures.size() > 65535 - offset ||
         result.meshes.size() + scene.meshes.size() > 16384)
@@ -94,6 +97,8 @@ Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
     result.textures.insert(result.textures.end(), scene.textures.begin(),
                            scene.textures.end());
     for (auto mesh : scene.meshes) {
+      mesh.ambient_target = target;
+      mesh.model_clipping = model_clipping;
       triangles += mesh.triangles.size();
       if (triangles > 2000000)
         throw std::runtime_error("Runtime scene triangle limit exceeded");
@@ -107,13 +112,14 @@ Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
       result.meshes.push_back(std::move(mesh));
     }
   };
-  auto posed = [&](const ScenarioEntity &entity) {
+  auto posed = [&](const ScenarioEntity &entity, AmbientTarget target,
+                   bool model_clipping) {
     if (entity.flags & 0x1080 || entity.model_flags & 6)
       throw std::runtime_error(
           "Unsupported runtime draw matrix or morphing mode");
     if (!entity.rendered_model)
       throw std::runtime_error("Missing prepared runtime entity pose");
-    append(*entity.rendered_model);
+    append(*entity.rendered_model, target, model_clipping);
   };
   auto cut_visible = [&](const ScenarioEntity &entity) {
     if (!(entity.flags & 0x40000000) || runtime.scenario.flags[11][0] & 0x40 ||
@@ -126,7 +132,31 @@ Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
     });
   };
   if (draw_flags & 0x20)
-    append(runtime.scene);
+    append(runtime.scene, AmbientTarget::Room, true);
+  // bhDrawObjItm emits normal objects, half-light objects, special objects,
+  // then items before the main enemy/player pass. Material state is shared.
+  bool object_clipping = false; // njControl3D(0x2400) after room drawing.
+  for (int pass = 0; pass < 3; ++pass)
+    for (const auto &entity : runtime.scenario.objects) {
+      const int group = entity.id >= 1000 ? 1
+                        : entity.type == 5 && entity.angular_speed != 0 ? 2 : 0;
+      uint32_t gate = entity.id >= 1000 ? (entity.id < 1210 ? 2 : 1) : 4;
+      if (group == pass && draw_flags & 4 && draw_flags & gate &&
+          entity.flags & 1 && !(entity.model_flags & 1) &&
+          (!(entity.state_flags & 0x1000000) || runtime.scenario.player_sleep_ticks) &&
+          !((runtime.scenario.flags[11][0] & 0x4000) && (entity.model_flags & 0x40)) &&
+          cut_visible(entity)) {
+        posed(entity, pass == 0 ? AmbientTarget::Object : AmbientTarget::Character,
+              object_clipping || (pass != 2 && (entity.model_flags & 8)));
+        if (pass != 2)
+          object_clipping = true; // bhDrawObject restores njControl3D(0x100).
+      }
+    }
+  if (draw_flags & 8)
+    for (const auto &entity : runtime.scenario.items)
+      if (entity.flags & 1 && !(entity.state_flags & 0x1000000) &&
+          !(entity.model_flags & 1) && cut_visible(entity))
+        posed(entity, AmbientTarget::Item, true);
   if (draw_flags & 2)
     for (size_t work = 0; work < runtime.scenario.enemies.size(); ++work) {
       const auto &entity = runtime.scenario.enemies[work];
@@ -143,29 +173,13 @@ Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
             continue;
         }
         if (entity.id == 1 && entity.zombie_work)
-          append(draw_zombie_model(runtime.scenario, work));
+          append(draw_zombie_model(runtime.scenario, work), AmbientTarget::Character, false);
         else
-          posed(entity);
+          posed(entity, AmbientTarget::Character, false);
       }
     }
-  for (const auto &entity : runtime.scenario.objects) {
-    uint32_t gate = entity.id >= 1000 ? (entity.id < 1210 ? 2 : 1) : 4;
-    if (draw_flags & 4 && draw_flags & gate && entity.flags & 1 &&
-        !(entity.model_flags & 1) &&
-        (!(entity.state_flags & 0x1000000) ||
-         runtime.scenario.player_sleep_ticks) &&
-        !((runtime.scenario.flags[11][0] & 0x4000) &&
-          (entity.model_flags & 0x40)) &&
-        cut_visible(entity))
-      posed(entity);
-  }
-  if (draw_flags & 8)
-    for (const auto &entity : runtime.scenario.items)
-      if (entity.flags & 1 && !(entity.state_flags & 0x1000000) &&
-          !(entity.model_flags & 1) && cut_visible(entity))
-        posed(entity);
   if (draw_flags & 1)
-    append(runtime.player_scene);
+    append(runtime.player_scene, AmbientTarget::Character, false);
   return result;
 }
 void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
@@ -296,6 +310,7 @@ RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
   persistent.player_work_flags =
       (persistent.player_work_flags & 0x20119) | 0x118;
   persistent.collision = result.collision;
+  persistent.ambient = result.scene.ambient;
   persistent.dynamic_miscellaneous.clear();
   persistent.dynamic_walls.clear();
   persistent.dynamic_floors.clear();
