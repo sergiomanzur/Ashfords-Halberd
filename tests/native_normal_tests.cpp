@@ -271,6 +271,25 @@ void skin() {
     equal(normal(preconverted.meshes[0].triangles[0].corners[0]), expected,
           "Bind conversion incorrectly translated normal");
   }
+  // Source level9 copies the rotated endpoint directly. Blending finite
+  // opposite endpoints would overflow even when the required result is finite.
+  auto endpoint = fixture();
+  for (size_t i = 0; i < 3; ++i)
+    put(endpoint.actor.skin, 16 + i * 4, 0x01090000);
+  vector(endpoint.actor.model, endpoint.vertex + 80, {3.e38f, 0, 0});
+  auto endpoint_pose = actor_bind_pose(endpoint.actor);
+  endpoint_pose[1].angles = std::array<int32_t, 3>{0, 0, 32768};
+  auto endpoint_work =
+      calculate_actor_model_work(endpoint.actor, endpoint_pose);
+  endpoint_work.joints[1].matrix = {-1, 0, 0, 0, 0, -1, 0, 0,
+                                    0,  0, 1, 0, 0, 0,  0, 1};
+  const auto endpoint_scene =
+      pose_actor_model_work(endpoint.actor, endpoint_pose, endpoint_work);
+  const auto endpoint_normal =
+      normal(endpoint_scene.meshes[0].triangles[0].corners[0]);
+  ck(std::isfinite(endpoint_normal.x) &&
+         bits(endpoint_normal.x) == bits(-3.e38f),
+     "Level9 must copy finite endpoint without evaluating overflowing blend");
   auto f = fixture(1, false);
   const auto rigid =
       pose_actor_rotated(f.actor, {}, {500, 600, 700}, {0, 0, 16384});

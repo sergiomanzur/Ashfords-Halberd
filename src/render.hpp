@@ -14,5 +14,6 @@ RasterImage render_overview(const Scene &scene, uint32_t width,
 RasterImage render_camera(const Scene &scene, const Camera &camera,
                           uint32_t width, uint32_t height,
                           AmbientMaterial *retained_material = nullptr,
-                          bool *completed_fog_state = nullptr);
+                          bool *completed_fog_state = nullptr,
+                          LightMaterial *retained_light_material = nullptr);
 } // namespace ashford

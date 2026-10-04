@@ -89,10 +89,33 @@ Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
     throw std::runtime_error("Missing current runtime ambient work");
   result.ambient = runtime.scenario.ambient;
   result.fog = runtime.scenario.fog.active;
+  if (runtime.scene.lighting && !runtime.scenario.lighting)
+    throw std::runtime_error("Missing current native runtime lighting");
+  result.lighting = runtime.scenario.lighting;
+  auto current_light = runtime.scenario.drawing_lighting
+                           ? runtime.scenario.drawing_lighting
+                           : runtime.scenario.lighting;
+  auto light_work = runtime.scenario.drawing_light_work.value_or(
+      runtime.scenario.lights.value_or(RoomLights{}));
+  const bool easy = runtime.scenario.flags[11][0] & 0x80;
+  auto set_light = [&](bool half) {
+    if (runtime.scenario.lighting)
+      current_light =
+          drawing_lights(light_work, *runtime.scenario.lighting, easy, half);
+  };
+  auto draw_mode = [&](int type) -> uint8_t {
+    if (type < 0 || type > 3)
+      throw std::runtime_error("Invalid native entity drawing type");
+    if (easy && type < 2)
+      type += 2;
+    constexpr uint8_t table[4] = {1, 3, 0, 2};
+    return table[type];
+  };
   bool drawing_fog = runtime.scenario.fog.active.enabled;
   size_t triangles = 0;
   auto append = [&](const Scene &scene, AmbientTarget target,
-                    bool model_clipping, bool fog_enabled = true) {
+                    bool model_clipping, bool fog_enabled = true,
+                    uint8_t mode = 1) {
     size_t offset = result.textures.size();
     if (scene.textures.size() > 65535 - offset ||
         result.meshes.size() + scene.meshes.size() > 16384)
@@ -104,6 +127,8 @@ Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
       mesh.model_clipping = model_clipping;
       mesh.fog_enabled = fog_enabled;
       mesh.fog_state = drawing_fog && fog_enabled;
+      mesh.lighting = current_light;
+      mesh.draw_mode = mode;
       triangles += mesh.triangles.size();
       if (triangles > 2000000)
         throw std::runtime_error("Runtime scene triangle limit exceeded");
@@ -129,7 +154,8 @@ Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
                             (entity.model_flags & 0x10);
     if (toggle_fog)
       drawing_fog = false;
-    append(*entity.rendered_model, target, model_clipping, !toggle_fog);
+    append(*entity.rendered_model, target, model_clipping, !toggle_fog,
+           draw_mode(entity.draw_type));
     if (toggle_fog)
       drawing_fog = true; // Original njFogEnable is unconditional here.
   };
@@ -144,11 +170,17 @@ Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
     });
   };
   if (draw_flags & 0x20)
-    append(runtime.scene, AmbientTarget::Room, true);
+    append(runtime.scene, AmbientTarget::Room, true, true, easy ? 0 : 1);
   // bhDrawObjItm emits normal objects, half-light objects, special objects,
   // then items before the main enemy/player pass. Material state is shared.
   bool object_clipping = false; // njControl3D(0x2400) after room drawing.
-  for (int pass = 0; pass < 3; ++pass)
+  for (int pass = 0; pass < 3; ++pass) {
+    if ((draw_flags & 4) && !(runtime.scenario.flags[10][0] & 0x20)) {
+      if (pass == 0)
+        set_light(false);
+      if (pass == 1)
+        set_light(true);
+    }
     for (const auto &entity : runtime.scenario.objects) {
       const int group = entity.id >= 1000 ? 1
                         : entity.type == 5 && entity.angular_speed != 0 ? 2 : 0;
@@ -166,11 +198,28 @@ Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
           object_clipping = true; // bhDrawObject restores njControl3D(0x100).
       }
     }
+  }
+  if (!(runtime.scenario.flags[10][0] & 0x20))
+    set_light(false); // bhDrawObjItm restores even with item draw flag clear.
   if (draw_flags & 8)
     for (const auto &entity : runtime.scenario.items)
       if (entity.flags & 1 && !(entity.state_flags & 0x1000000) &&
-          !(entity.model_flags & 1) && cut_visible(entity))
+          !(entity.model_flags & 1) && cut_visible(entity)) {
+        if (current_light && runtime.scenario.lighting) {
+          if (entity.model_flags & 0x80) {
+            current_light->has_direction = true;
+            current_light->direction.vector =
+                light_direction({57344, entity.yaw_correction, 0});
+            current_light->direction.color.fill(.1f * entity.angular_speed);
+          } else {
+            current_light->has_direction =
+                runtime.scenario.lighting->has_direction;
+            current_light->direction = runtime.scenario.lighting->direction;
+          }
+        }
         posed(entity, AmbientTarget::Item, true, true);
+      }
+  set_light(true); // game.c unconditionally changes light before enemy/player.
   if (draw_flags & 2)
     for (size_t work = 0; work < runtime.scenario.enemies.size(); ++work) {
       const auto &entity = runtime.scenario.enemies[work];
@@ -187,14 +236,32 @@ Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
             continue;
         }
         if (entity.id == 1 && entity.zombie_work)
-          append(draw_zombie_model(runtime.scenario, work), AmbientTarget::Character, false);
+          append(draw_zombie_model(runtime.scenario, work),
+                 AmbientTarget::Character, false, true,
+                 draw_mode(entity.draw_type));
         else
           posed(entity, AmbientTarget::Character, false);
       }
     }
   if (draw_flags & 1)
-    append(runtime.player_scene, AmbientTarget::Character, false);
+    append(runtime.player_scene, AmbientTarget::Character, false, true,
+           draw_mode(runtime.player_work.draw_type));
   result.ending_fog_state = drawing_fog;
+  if (runtime.scenario.lights) {
+    // The supported light event53 changes enable bit1 after this frame's
+    // drawing boundary. Preserve it while publishing drawing clocks/flags.
+    auto preserve_event_enable = [](auto &draw, const auto &live) {
+      if (draw.size() != live.size())
+        throw std::runtime_error(
+            "Light event changed current room work extent");
+      for (size_t i = 0; i < draw.size(); ++i)
+        draw[i].flags = (draw[i].flags & ~1u) | (live[i].flags & 1u);
+    };
+    preserve_event_enable(light_work.normal, runtime.scenario.lights->normal);
+    preserve_event_enable(light_work.events, runtime.scenario.lights->events);
+    result.ending_light_work = std::move(light_work);
+  }
+  result.ending_lighting = current_light;
   return result;
 }
 namespace {
@@ -255,6 +322,34 @@ void control_room_fog(RoomRuntime &runtime) {
     return;
   control_fog(fog, st, gm);
   publish_fog_binding(runtime, std::move(fog), room, st, gm, effects);
+}
+void control_room_lights(RoomRuntime &runtime) {
+  if (!runtime.scenario.lights) {
+    if (runtime.scene.lighting)
+      throw std::runtime_error("Missing native room light work");
+    return;
+  }
+  auto work = *runtime.scenario.lights;
+  Camera camera;
+  CameraDefinition definition;
+  if (runtime.world.cut) {
+    if (*runtime.world.cut >= runtime.cuts.size())
+      throw std::runtime_error("Current light cut outside room");
+    definition = runtime.cuts[*runtime.world.cut].variants[0];
+    camera = resolve_camera(runtime.cuts[*runtime.world.cut], 0);
+    if (!runtime.light_bound || runtime.light_cut != runtime.world.cut)
+      select_light_cut(work, definition);
+  } else if (!work.normal.empty() || !work.events.empty())
+    throw std::runtime_error(
+        "Native room lights require current camera binding");
+  auto lighting = control_lights(work, runtime.scenario, &runtime.player_work,
+                                 camera, definition, runtime.camera_flags);
+  runtime.scenario.lights = std::move(work);
+  runtime.scenario.drawing_light_work = runtime.scenario.lights;
+  runtime.scenario.lighting = lighting;
+  runtime.scenario.drawing_lighting = lighting;
+  runtime.light_cut = runtime.world.cut;
+  runtime.light_bound = true;
 }
 void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
                        const PlayerTranslationTables &translations,
@@ -338,8 +433,9 @@ void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
   tick_shadow_effects(scenario);
   tick_wall_damage_timers(scenario);
   tick_scenario_props(scenario);
-  control_scenario(scenario);
   control_room_fog(runtime);
+  control_room_lights(runtime);
+  control_scenario(scenario);
 }
 RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
                               size_t entry, ScenarioState persistent,
@@ -387,6 +483,13 @@ RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
       (persistent.player_work_flags & 0x20119) | 0x118;
   persistent.collision = result.collision;
   persistent.ambient = result.scene.ambient;
+  persistent.lights = decode_room_lights(data);
+  initialize_room_lights(*persistent.lights);
+  persistent.drawing_light_work.reset();
+  // Light work clocks start in bhMainSequence after camera control. Entry
+  // must not consume a dynamic light's first RNG/counter update early.
+  persistent.lighting = NativeLighting{};
+  persistent.drawing_lighting = persistent.lighting;
   persistent.dynamic_miscellaneous.clear();
   persistent.dynamic_walls.clear();
   persistent.dynamic_floors.clear();
@@ -420,6 +523,11 @@ RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
   synchronize_runtime_player(result, player);
   bind_room_effects(data, result.scenario);
   bind_entry_fog(result); // room.c::bhCheckCut precedes system.c::bhInitEvent.
+  if (result.world.cut)
+    select_light_cut(*result.scenario.lights,
+                     result.cuts.at(*result.world.cut).variants[0]);
+  result.light_cut = result.world.cut;
+  result.light_bound = true;
   initialize_scenario(result.scenario, &result.player_work);
   control_room_fog(result);
   if (sounds) {

@@ -185,6 +185,35 @@ int main() {
     persistent.ambient->colors[0] = {9, 8, 7};
     auto runtime =
         load_room_runtime(runtime_data, 0, 1, 1, persistent, entry_player);
+    auto light_data = runtime_data;
+    light_data.resize(5000);
+    put(light_data, 128, 2800);
+    put(light_data, 256, 1);
+    light_data[2800] = 1;
+    light_data[2803] = 1;
+    put(light_data, 2804, 3480);
+    flt(light_data, 2832 + 84, 0);
+    put(light_data, 2832 + 84, 16384);
+    put(light_data, 2832 + 196 + 84, 16384);
+    flt(light_data, 3480 + 16, -100);
+    flt(light_data, 3480 + 20, -100);
+    flt(light_data, 3480 + 24, 100);
+    flt(light_data, 3480 + 28, 100);
+    put(light_data, 132, 3600);
+    put(light_data, 260, 5);
+    const size_t light_record = 3600 + 4 * 224;
+    put(light_data, light_record, 3);
+    put(light_data, light_record + 4, 5);
+    put(light_data, light_record + 8, 4);
+    put(light_data, light_record + 24, 2);
+    flt(light_data, light_record + 60, -1);
+    flt(light_data, light_record + 76, 1);
+    auto light_persistent = persistent;
+    light_persistent.flags[11][0] = 0;
+    auto light_runtime =
+        load_room_runtime(light_data, 0, 1, 1, light_persistent, entry_player);
+    ck(light_runtime.scenario.lights->normal[4].counters[0] == 0 &&
+       light_runtime.scenario.random_seed == light_persistent.random_seed);
     ck((runtime.scenario.ambient && runtime.scene.ambient &&
        runtime.scenario.ambient->colors == runtime.scene.ambient->colors &&
        runtime.scenario.ambient->colors[0] == std::array<float, 3>{0, 0, 0}));

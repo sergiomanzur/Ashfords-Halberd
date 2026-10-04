@@ -20,9 +20,13 @@ struct RoomRuntime {
   FogParameters room_fog;
   std::optional<size_t> fog_cut;
   bool fog_bound = false, fog_eye = false;
+  std::optional<size_t> light_cut;
+  bool light_bound = false;
+  uint32_t camera_flags = 0;
 };
 // Select current authored cut values, then process original fixed-tick EOR fog.
 void control_room_fog(RoomRuntime &runtime);
+void control_room_lights(RoomRuntime &runtime);
 // Retained healthy unarmed work/caches consumed by native enemy callbacks.
 // Model/motion resources are bound once; normal-anchor timing is caller-owned.
 void synchronize_runtime_player(RoomRuntime &runtime,

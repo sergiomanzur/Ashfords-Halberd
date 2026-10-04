@@ -753,6 +753,22 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
           .1f * program[pc + 1], .1f * program[pc + 2], .1f * program[pc + 3]};
       pc += 6;
       break;
+    case 53: {
+      extent(4);
+      if (!state.lights)
+        throw std::runtime_error("Missing native scenario light work");
+      auto &table =
+          program[pc + 3] ? state.lights->events : state.lights->normal;
+      const size_t index = program[pc + 2];
+      if (index >= table.size())
+        throw std::runtime_error("Scenario light outside room table");
+      if (program[pc + 1] == 0)
+        table[index].flags |= 1u;
+      else
+        table[index].flags &= ~1u;
+      pc += 4;
+      break;
+    }
     case 14: {
       extent(6);
       auto count = word(pc + 2);

@@ -113,6 +113,7 @@ Mesh chunks(const Reader &r, size_t base, size_t model, const Matrix &world,
   uint16_t texture = 0;
   std::array<uint8_t, 4> color{255, 255, 255, 255};
   std::optional<AmbientMaterial> ambient_material;
+  LightMaterialUpdate light_material;
   for (size_t n = 0; n < 4096; ++n) {
     r.range(p, 2);
     auto type = r.b[p];
@@ -120,25 +121,39 @@ Mesh chunks(const Reader &r, size_t base, size_t model, const Matrix &world,
       ended = true;
       break;
     }
-    if (type < 8) {
+    if (type == 0) {
       p += 2;
       continue;
     }
-    if (type < 16) {
+    if (type <= 3) {
       r.range(p, 4);
-      if (type == 8)
-        texture = r.u16(p + 2) & 0xfff;
+      if (type == 1)
+        light_material.gs_alpha = light_blend_register(r.b[p + 1]);
+      if (type == 3)
+        light_material.exponent = r.b[p + 1];
+      p += 4;
+      continue;
+    }
+    if (type == 8) {
+      r.range(p, 4);
+      texture = r.u16(p + 2) & 0xfff;
       p += 4;
       continue;
     }
     r.range(p, 4);
     size_t end = p + 4 + size_t(r.u16(p + 2)) * 2;
     r.range(p, end - p);
-    if (type >= 16 && type <= 23) {
+    if (type < 17) {
+      p = end; // njCnkDefaultShort: header plus usSize 16-bit words.
+      continue;
+    }
+    if (type <= 23) {
+      light_material.gs_alpha = light_blend_register(r.b[p + 1]);
       if (type == 17 || type == 19 || type == 21 || type == 23) {
         if (end - p < 8)
           throw std::runtime_error("Truncated diffuse material");
         color = {r.b[p + 6], r.b[p + 5], r.b[p + 4], r.b[p + 7]};
+        light_material.diffuse = color;
       }
       if (type == 18 || type == 19 || type == 22 || type == 23) {
         const size_t ambient = type == 19 || type == 23 ? 8 : 4;
@@ -148,6 +163,15 @@ Mesh chunks(const Reader &r, size_t base, size_t model, const Matrix &world,
         ambient_material = AmbientMaterial{r.b[p + ambient + 2],
                                             r.b[p + ambient + 1],
                                             r.b[p + ambient]};
+        light_material.ambient = ambient_material;
+      }
+      if (type >= 20) {
+        const size_t specular = 4 + ((type & 1) ? 4 : 0) + ((type & 2) ? 4 : 0);
+        if (end - p < specular + 4)
+          throw std::runtime_error("Truncated specular material");
+        light_material.specular = std::array<uint8_t, 3>{
+            r.b[p + specular + 2], r.b[p + specular + 1], r.b[p + specular]};
+        light_material.exponent = r.b[p + specular + 3];
       }
       p = end;
       continue;
@@ -190,11 +214,15 @@ Mesh chunks(const Reader &r, size_t base, size_t model, const Matrix &world,
           for (int k = 0; k < extra; ++k)
             take();
       }
+      auto source_strip = std::make_shared<const std::vector<Corner>>(corners);
       for (int i = 2; i < count; ++i) {
         Triangle t;
         t.texture = type == 64 ? 0xffff : texture;
         t.color = color;
         t.ambient_material = ambient_material;
+        t.light_material = light_material;
+        t.strip_flags = r.b[p + 1];
+        t.source_strip = source_strip;
         t.corners = {corners[i - 2], corners[i - 1], corners[i]};
         if (((i & 1) != 0) ^ (signed_count < 0))
           std::swap(t.corners[0], t.corners[1]);
@@ -213,6 +241,7 @@ Mesh chunks(const Reader &r, size_t base, size_t model, const Matrix &world,
   if (!ended)
     throw std::runtime_error("Unterminated polygon list");
   mesh.ending_ambient_material = ambient_material;
+  mesh.ending_light_material = light_material;
   return mesh;
 }
 } // namespace
@@ -419,6 +448,7 @@ Scene decode_room_scene(const Bytes &data) {
     throw std::runtime_error("Missing room scene tables");
   Scene s;
   s.ambient = decode_room_ambient(data);
+  s.lighting.emplace();
   s.meshes = decode_model(data, r.u32(model_table),true);
   for (auto &mesh : s.meshes)
     mesh.model_clipping = true; // game.c::bhAllDrawModel, njControl3D(0x2500).

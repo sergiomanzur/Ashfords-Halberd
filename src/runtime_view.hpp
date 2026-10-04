@@ -26,6 +26,7 @@ private:
   PlayerTranslationTables translations_;
   RoomRuntime runtime_;
   AmbientMaterial ambient_material_{255, 255, 255};
+  LightMaterial light_material_;
   size_t ticks_ = 0;
   std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)> texture_{
       nullptr, SDL_DestroyTexture};

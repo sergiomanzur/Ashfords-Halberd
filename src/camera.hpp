@@ -17,6 +17,8 @@ struct CameraDefinition {
   std::array<float, 4> heights{};
   std::array<int16_t, 4> rolls{};
   FogParameters fog;
+  uint8_t light_clip = 0;
+  std::array<uint32_t, 8> light_hidden{};
 };
 struct CutArea {
   uint32_t attribute = 0;

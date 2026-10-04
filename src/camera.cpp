@@ -67,6 +67,7 @@ std::vector<RoomCut> decode_room_cuts(const Bytes &data) {
       auto start = c + 32 + v * 196;
       auto &d = cut.variants[v];
       d.flags = r.u16(start);
+      d.light_clip = data[start + 2];
       d.base.position = r.vec(start + 4);
       d.base.distance = r.f(start + 16);
       d.tracking = r.vec(start + 20);
@@ -79,6 +80,8 @@ std::vector<RoomCut> decode_room_cuts(const Bytes &data) {
       d.base.perspective = r.u32(start + 84);
       for (size_t j = 0; j < 16; ++j)
         d.base.hidden[j] = r.u32(start + 88 + j * 4);
+      for (size_t j = 0; j < 8; ++j)
+        d.light_hidden[j] = r.u32(start + 152 + j * 4);
       d.fog = {r.u32(start + 184), r.f(start + 188), r.f(start + 192)};
     }
     cuts.push_back(cut);

@@ -2,12 +2,11 @@
 #include "ambient.hpp"
 #include "assets.hpp"
 #include "fog.hpp"
+#include "light.hpp"
 #include <array>
+#include <memory>
 #include <optional>
 namespace ashford {
-struct Vec3 {
-  float x = 0, y = 0, z = 0;
-};
 struct Corner {
   Vec3 position;
   float u = 0, v = 0;
@@ -20,6 +19,11 @@ struct Triangle {
   uint16_t texture = 0;
   std::array<uint8_t, 4> color{255, 255, 255, 255};
   std::optional<AmbientMaterial> ambient_material;
+  LightMaterialUpdate light_material;
+  uint8_t strip_flags = 0;
+  // Ps2AddPrim3DEx averages depth over every submitted strip vertex, including
+  // vertices belonging to clipped triangles. Flattening must keep this group.
+  std::shared_ptr<const std::vector<Corner>> source_strip;
 };
 struct ModelBounds {
   Vec3 center;
@@ -35,6 +39,9 @@ struct Mesh {
   bool model_clipping = false;
   bool fog_enabled = true;
   std::optional<bool> fog_state;
+  uint8_t draw_mode = 1;
+  std::optional<NativeLighting> lighting;
+  LightMaterialUpdate ending_light_material;
 };
 struct Texture {
   uint32_t width = 0, height = 0;
@@ -57,6 +64,9 @@ struct Scene {
   std::optional<RoomAmbient> ambient;
   std::optional<NativeFog> fog;
   std::optional<bool> ending_fog_state;
+  std::optional<NativeLighting> lighting;
+  std::optional<RoomLights> ending_light_work;
+  std::optional<NativeLighting> ending_lighting;
 };
 Scene decode_room_scene(const Bytes &data);
 } // namespace ashford

@@ -206,6 +206,13 @@ struct ScenarioState {
   std::optional<RoomCollision> collision;
   std::optional<RoomAmbient> ambient;
   FogWork fog;
+  std::optional<RoomLights> lights;
+  // Current drawing uses the pre-event work. Event53 mutates next-tick enable
+  // bits in lights; successful drawing must not overwrite those mutations.
+  std::optional<RoomLights> drawing_light_work;
+  std::optional<NativeLighting> lighting;
+  std::optional<NativeLighting> drawing_lighting;
+  int32_t thunder = 0;
   std::vector<CollisionRecord> dynamic_miscellaneous; // sys->metcp.
   std::vector<CollisionRecord> dynamic_walls;         // sys->mwalp.
   std::vector<CollisionRecord> dynamic_floors;        // sys->mflrp.
