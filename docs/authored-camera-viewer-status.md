@@ -1,5 +1,13 @@
 # Windows room viewer — 2026-10-02
 
+> **Status clarification — 2026-10-04:** Step 1 is incomplete and New Game is
+> enabled as an experimental prototype. See [current Step 1 status](step1-slice-status.md)
+> and the [dated audit](project-audit-2026-10-04.md) for present defects and verification.
+> The component record below is historical: its test counts, menu gates, script
+> boundaries and then-pending features describe those checkpoints, not the current build.
+
+## Historical component checkpoints
+
 Development build 0.2 adds Room Viewer to the main menu after ISO import.
 It loads original room geometry/textures, displays a 640x480 native software
 render inside a 4:3 viewport, and presents the result through SDL. Rendering

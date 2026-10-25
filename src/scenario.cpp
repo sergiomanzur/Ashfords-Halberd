@@ -1,8 +1,8 @@
 #include "scenario.hpp"
 #include "effects.hpp"
 #include "room.hpp"
-#include "scenario_motion.hpp"
 #include "scenario_collision.hpp"
+#include "scenario_motion.hpp"
 #include "zombie.hpp"
 #include <limits>
 #include <stdexcept>
@@ -104,6 +104,7 @@ void bind_room_props(const Bytes &data, ScenarioState &state) {
     items[i] = bind(records.items[i], std::move(models.items.at(i)));
   state.objects = std::move(objects);
   state.items = std::move(items);
+  state.room_texture_cursor = models.texture_cursor;
 }
 void bind_room_enemies(const Bytes &data, const RoomCollision &collision,
                        ScenarioState &state) {
@@ -342,6 +343,13 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
         throw std::runtime_error("Invalid scenario word comparison");
       }
     }
+    case 16: {
+      // event.c::bhUseItemCheck distinguishes selection from possession.
+      extent(2);
+      const auto item = program[pc + 1];
+      pc += 2;
+      return (state.flags[10][0] & 0x400u) && state.selected_item_id == item;
+    }
     case 17: {
       extent(2);
       auto item = program[pc + 1];
@@ -449,6 +457,7 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
       break;
     case 4:
     case 7:
+    case 16:
     case 17:
     case 56:
     case 38: {
@@ -480,6 +489,38 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
         break;
       }
       pc += 6;
+      break;
+    }
+    case 15:
+      // event.c::bhUseItemClear consumes only the pending-use handshake.
+      extent(2);
+      state.flags[10][0] &= ~0x400u;
+      pc += 2;
+      break;
+    case 49: {
+      // event.c::bhPlItemLost: remove the first matching carried record and
+      // compact it. The selector is local to the player's bank, so compare
+      // local indices rather than mixing them with absolute storage offsets.
+      extent(2);
+      const auto item = program[pc + 1];
+      pc += 2;
+      if (state.player_id >= state.inventory.size() / 16)
+        throw std::runtime_error("Scenario player inventory outside storage");
+      const size_t base = size_t(state.player_id) * 16;
+      for (size_t local = 2; item && local < 12; ++local) {
+        if (uint8_t(state.inventory[base + local] >> 16) != item) continue;
+        auto &selector = state.inventory[base];
+        if (selector == local) {
+          selector = 0;
+          state.equipped_weapon = 0;
+        } else if (selector > local && selector < 12) {
+          --selector;
+        }
+        for (size_t next = local; next + 1 < 12; ++next)
+          state.inventory[base + next] = state.inventory[base + next + 1];
+        state.inventory[base + 11] = 0;
+        break;
+      }
       break;
     }
     case 20:
@@ -539,9 +580,9 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
         throw std::runtime_error("Unsupported scenario common controller " +
                                  std::to_string(operation));
       extent(operation == 7 || operation == 24 ? 8
-             : operation == 11               ? 6
-             : operation == 47               ? 2
-                                             : 4);
+             : operation == 11                 ? 6
+             : operation == 47                 ? 2
+                                               : 4);
       if (operation == 23 && program[pc + 2] > 3) {
         pc += 4;
         break;
@@ -581,8 +622,9 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
         pc += 4;
       } else if (operation == 24) {
         select_scenario_motion(state, task->work_group, *task->work_index,
-            {program[pc + 2], program[pc + 3], program[pc + 4],
-             program[pc + 5], program[pc + 6], program[pc + 7]});
+                               {program[pc + 2], program[pc + 3],
+                                program[pc + 4], program[pc + 5],
+                                program[pc + 6], program[pc + 7]});
         pc += 8;
       } else if (operation == 47) {
         if (!entity.model)
@@ -633,13 +675,14 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
       break;
     case 146:
       extent(2);
-      request_background_stop(state.background_audio,program[pc+1]);
-      pc+=2;
+      request_background_stop(state.background_audio, program[pc + 1]);
+      pc += 2;
       break;
     case 148:
       extent(4);
-      request_background_sound(state.background_audio,program[pc+1],word(pc+2));
-      pc+=4;
+      request_background_sound(state.background_audio, program[pc + 1],
+                               word(pc + 2));
+      pc += 4;
       break;
     case 188:
       extent(2);
@@ -920,16 +963,37 @@ void run_scenario_impl(const Program &program, ScenarioState &state,
       // event.c bhEneSetCk: ed_flg uses a 9-bit MSB-first index. The
       // authored enemy/work mapping is read only when that defeat bit is set.
       const auto count = word(pc + 2);
-      if (state.flags[3][(count & 0x1ff) >> 5] &
-          (0x80000000u >> (count & 31)))
+      if (state.flags[3][(count & 0x1ff) >> 5] & (0x80000000u >> (count & 31)))
         indexed(state.enemies, indexed(state.enemy_slots, program[pc + 1]))
             .state_flags |= 0x1000000u;
       pc += 4;
       break;
     }
+    case 134: {
+      // event.c::bhEasySESet (16 bytes)
+      extent(16);
+      uint8_t slot = program[pc + 2];
+      uint16_t se_no = word(pc + 14);
+      if (slot < 2) {
+        request_background_sound(state.background_audio, slot, se_no);
+      }
+      pc += 16;
+      break;
+    }
+    case 135:
+      // event.c::bhSoundFlagReSet (2 bytes)
+      extent(2);
+      pc += 2;
+      break;
     case 145:
       extent(4);
       set_room_effect_mode(state, program[pc + 1], program[pc + 2]);
+      pc += 4;
+      break;
+    case 173:
+      // event.c::bhEffTypeSet assigns O_WRK::type through sys->efid.
+      extent(4);
+      set_room_effect_type(state, program[pc + 1], program[pc + 2]);
       pc += 4;
       break;
     case 67:
@@ -1028,7 +1092,7 @@ void initialize_scenario(ScenarioState &state, ScenarioEntity *player) {
   if (!state.scenario)
     throw std::runtime_error("No bound room scenario");
   const auto &initialization = state.scenario->program(0);
-  background_sound_command(state.background_audio,3);
+  background_sound_command(state.background_audio, 3);
   for (auto &task : state.tasks)
     task.active = false;
   tick_scenario_actors(state, player);
@@ -1052,7 +1116,7 @@ void initialize_scenario(ScenarioState &state, ScenarioEntity *player) {
     throw;
   }
   state.flags[6][0] &= ~0x10u;
-  background_sound_command(state.background_audio,4);
+  background_sound_command(state.background_audio, 4);
   if (player) {
     player->flags = state.player_work_flags;
     player->state_flags = state.player_state_flags;
@@ -1073,7 +1137,8 @@ void tick_scenario_actors(ScenarioState &state, ScenarioEntity *player) {
     return;
   for (size_t work_index = 0; work_index < state.enemies.size(); ++work_index) {
     auto &entity = state.enemies[work_index];
-    if (!(entity.flags & 1) || (entity.state_flags & 0x41000000))
+    if (!(entity.flags & 1) || (entity.flags & 2) ||
+        (entity.state_flags & 0x41000000))
       continue;
     if (entity.flags & 0x80) {
       if (!entity.linked_parent ||
@@ -1123,7 +1188,8 @@ void tick_scenario_actors(ScenarioState &state, ScenarioEntity *player) {
       tick_scripted_enemy(state, work_index);
       calculate_scenario_models(state, 1, work_index, true, false);
       if (entity.pose_owner)
-        throw std::runtime_error("Unported generic scripted actor pose alias drawing");
+        throw std::runtime_error(
+            "Unported generic scripted actor pose alias drawing");
       entity.rendered_model = pose_actor_model_work(
           actor_model(entity), entity.joint_pose, *entity.model_work);
       finish_enemy_frame(entity, damage_joints);

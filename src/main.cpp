@@ -2,6 +2,7 @@
 #include "text.hpp"
 #include "viewer.hpp"
 #include "runtime_view.hpp"
+#include "inventory_ui.hpp"
 #include <array>
 #include <SDL.h>
 #include <SDL_syswm.h>
@@ -131,9 +132,11 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
     size_t runtime_movement=0;
     bool runtime_focused=true;
     size_t runtime_focus_blocked=0;
+    InventoryUI inventory_ui;
+    inventory_ui.set_assets_dir(root / "assets");
     auto open_native=[&]{
         native=std::make_unique<RuntimeView>(renderer.get(),archive_override.empty()?root/"assets/RDX_LNK.AFS":archive_override,system_override.empty()?root/"assets/SYSTEM.AFS":system_override,settings.effects_volume);
-        runtime_keys.fill(false);runtime_focused=true;runtime_clock=SDL_GetPerformanceCounter();runtime_accumulator=0;frames=0;runtime_movement=0;
+        runtime_keys.fill(false);runtime_focused=true;runtime_clock=SDL_GetPerformanceCounter();runtime_accumulator=0;frames=0;runtime_movement=0;inventory_ui.close();
     };
     if(runtime_smoke)open_native();
     std::unique_ptr<RoomViewer> viewer;
@@ -190,8 +193,8 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
         auto activate = [&] {
             if (job) return;
             if (page == 0) {
-                if (selected == 0) notice = "The playable room slice is the next development milestone.";
-                if (selected == 1) { if(!ready){notice="Import your ISO in Game data first.";return;}open_viewer();page=3;notice.clear(); }
+                if (selected == 0) { if(!ready){notice="Import your ISO in Game data first.";return;}open_native();page=4;notice.clear(); }
+                else if (selected == 1) { if(!ready){notice="Import your ISO in Game data first.";return;}open_viewer();page=3;notice.clear(); }
                 else if (selected == 2) { page = 1; selected = 0; notice.clear(); }
                 else if (selected == 3) { page = 2; selected = 0; notice.clear(); }
                 else if (selected == 4) {if(!ready){notice="Import your ISO in Game data first.";return;}open_native();page=4;notice.clear();}
@@ -233,9 +236,47 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
             }
             if (!job) {
                 if(page==4){
-                    if(back){native->set_audio_running(false);page=0;selected=4;runtime_keys.fill(false);notice.clear();continue;}
+                    if(inventory_ui.is_open()){
+                        if(event.type==SDL_KEYDOWN){
+                            inventory_ui.handle_key_down(event.key.keysym.sym, native->state().scenario);
+                        } else if(event.type==SDL_CONTROLLERBUTTONDOWN){
+                            inventory_ui.handle_pad_button(event.cbutton.button, native->state().scenario);
+                        }
+                        continue;
+                    }
+                    if(event.type==SDL_KEYDOWN && (event.key.keysym.sym==SDLK_TAB || event.key.keysym.sym==SDLK_i)){
+                        inventory_ui.open();
+                        runtime_keys.fill(false);
+                        continue;
+                    }
+                    if(event.type==SDL_CONTROLLERBUTTONDOWN && event.cbutton.button==SDL_CONTROLLER_BUTTON_Y){
+                        inventory_ui.open();
+                        runtime_keys.fill(false);
+                        continue;
+                    }
+                    if(back){native->set_audio_running(false);page=0;selected=runtime_smoke?4:0;runtime_keys.fill(false);notice.clear();inventory_ui.close();continue;}
                     if(event.type==SDL_WINDOWEVENT && (event.window.event==SDL_WINDOWEVENT_FOCUS_LOST || event.window.event==SDL_WINDOWEVENT_FOCUS_GAINED)){runtime_focused=event.window.event==SDL_WINDOWEVENT_FOCUS_GAINED;native->set_audio_running(runtime_focused);runtime_keys.fill(false);}
-                    if(runtime_focused && (event.type==SDL_KEYDOWN || event.type==SDL_KEYUP)){auto scancode=event.key.keysym.scancode;if(scancode>=0 && scancode<SDL_NUM_SCANCODES)runtime_keys[size_t(scancode)]=event.type==SDL_KEYDOWN;}
+                    if(runtime_focused && (event.type==SDL_KEYDOWN || event.type==SDL_KEYUP)){
+                        auto scancode=event.key.keysym.scancode;
+                        if(scancode>=0 && scancode<SDL_NUM_SCANCODES)runtime_keys[size_t(scancode)]=event.type==SDL_KEYDOWN;
+                        if(event.type==SDL_KEYDOWN){
+                            if(event.key.keysym.sym==SDLK_F5){
+                                try {
+                                    fs::create_directories(root/"saves");
+                                    native->save(root/"saves/slot0.dat");
+                                    notice="Game saved to slot 0.";
+                                } catch(const std::exception& err){ notice=std::string("Save failed: ")+err.what(); }
+                            }
+                            if(event.key.keysym.sym==SDLK_F9){
+                                try {
+                                    if(fs::exists(root/"saves/slot0.dat")){
+                                        native->load(root/"saves/slot0.dat");
+                                        notice="Game loaded from slot 0.";
+                                    } else notice="No save file found in slot 0.";
+                                } catch(const std::exception& err){ notice=std::string("Load failed: ")+err.what(); }
+                            }
+                        }
+                    }
                     continue;
                 }
                 if(page==3){
@@ -285,6 +326,8 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
             if(runtime_keys[SDL_SCANCODE_S]||runtime_keys[SDL_SCANCODE_DOWN])pad|=2;
             if(runtime_keys[SDL_SCANCODE_A]||runtime_keys[SDL_SCANCODE_LEFT])pad|=4;
             if(runtime_keys[SDL_SCANCODE_D]||runtime_keys[SDL_SCANCODE_RIGHT])pad|=8;
+            if(runtime_keys[SDL_SCANCODE_SPACE])pad|=0x10;
+            if(runtime_keys[SDL_SCANCODE_RETURN]||runtime_keys[SDL_SCANCODE_E]||runtime_keys[SDL_SCANCODE_F]||runtime_keys[SDL_SCANCODE_KP_ENTER])pad|=0x300;
             if(runtime_keys[SDL_SCANCODE_LSHIFT]||runtime_keys[SDL_SCANCODE_RSHIFT])pad|=0x400;
             for(auto* controller:controllers){
                 auto x=SDL_GameControllerGetAxis(controller,SDL_CONTROLLER_AXIS_LEFTX),y=SDL_GameControllerGetAxis(controller,SDL_CONTROLLER_AXIS_LEFTY);
@@ -292,20 +335,36 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
                 if(y>8000 || SDL_GameControllerGetButton(controller,SDL_CONTROLLER_BUTTON_DPAD_DOWN))pad|=2;
                 if(x< -8000 || SDL_GameControllerGetButton(controller,SDL_CONTROLLER_BUTTON_DPAD_LEFT))pad|=4;
                 if(x>8000 || SDL_GameControllerGetButton(controller,SDL_CONTROLLER_BUTTON_DPAD_RIGHT))pad|=8;
-                if(SDL_GameControllerGetButton(controller,SDL_CONTROLLER_BUTTON_X))pad|=0x400;
+                if(SDL_GameControllerGetButton(controller,SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)||SDL_GameControllerGetAxis(controller,SDL_CONTROLLER_AXIS_TRIGGERRIGHT)>8000)pad|=0x10;
+                if(SDL_GameControllerGetButton(controller,SDL_CONTROLLER_BUTTON_A))pad|=0x300;
+                if(SDL_GameControllerGetButton(controller,SDL_CONTROLLER_BUTTON_X))pad|=0x100;
+                if(SDL_GameControllerGetButton(controller,SDL_CONTROLLER_BUTTON_B))pad|=0x400;
             }
             if(!runtime_focused){pad=0;++runtime_focus_blocked;}
+            if(inventory_ui.is_open()){pad=0;}
             auto now=SDL_GetPerformanceCounter();
             runtime_accumulator+=std::min(.25,double(now-runtime_clock)/SDL_GetPerformanceFrequency());runtime_clock=now;
-            size_t steps=runtime_smoke?1:std::min(size_t(8),size_t(runtime_accumulator*60));
+            size_t steps=runtime_smoke?1:(inventory_ui.is_open()?0:std::min(size_t(8),size_t(runtime_accumulator*60)));
             try {
                 for(size_t step=0;step<steps;++step){auto before=native->state().world.player.position;native->tick(pad);if(runtime_smoke && !runtime_focused && (native->state().scenario.flags[6][0]&1) && native->state().world.player.previous_pad)throw std::runtime_error("Controller input continued after focus loss");auto after=native->state().world.player.position;if(before.x!=after.x || before.z!=after.z)++runtime_movement;}
-                if(!runtime_smoke)runtime_accumulator-=double(steps)/60;
+                if(!runtime_smoke && steps>0)runtime_accumulator-=double(steps)/60;
                 SDL_Rect image{160,55,800,600};native->draw(image);
-            }catch(const std::exception& error){native->set_audio_running(false);if(runtime_smoke)throw;page=0;selected=4;notice=error.what();continue;}
-            text.draw("CORRIDOR PREVIEW",68,18,16,gold);
-            text.draw("WASD/Arrows or left stick: Move   SHIFT/X: Run   ESC/B: Back",68,673,15,white);
-            text.draw("Movement preview / combat, interactions and saves are in development",170,631,13,gold);
+            }catch(const std::exception& error){native->set_audio_running(false);if(runtime_smoke)throw;page=0;selected=runtime_smoke?4:0;notice=error.what();continue;}
+            if(inventory_ui.is_open()){
+                inventory_ui.render(r, text, native->state().scenario);
+                SDL_RenderPresent(r);++frames;
+                SDL_Delay(8);continue;
+            }
+            text.draw("STEP 1 PLAYABLE SLICE",68,18,16,gold);
+            auto &scen = native->state().scenario;
+            uint16_t ammo = uint16_t(scen.inventory[0] & 0xffff);
+            std::string room_name = scen.room == 1 ? "Stage 0 Room 1 (Corridor)" : scen.room == 2 ? "Stage 0 Room 2 (Graveyard)" : ("Room " + std::to_string(scen.room));
+            std::string status = "HP: " + std::to_string(scen.player_health) + "   AMMO: " + std::to_string(ammo) + "   " + room_name;
+            text.draw(status, 560, 18, 15, white);
+            text.draw("WASD: Move   SHIFT: Run   SPACE: Aim   ENTER/E: Shoot   TAB/I: Inventory   F5: Save   F9: Load   ESC: Menu",68,673,14,white);
+            if(!notice.empty())text.draw(notice,170,631,14,gold);
+            else if(native->in_aim_mode())text.draw("AIMING - Press ENTER or E to shoot",170,631,13,gold);
+            else text.draw("Corridor & Graveyard / Combat, items, transitions, saves enabled",170,631,13,gold);
             SDL_RenderPresent(r);++frames;
             if(runtime_smoke && (frames==180 || frames==240)){
                 if(frames==180 && SDL_JoystickSetVirtualAxis(virtual_pad.joystick,SDL_CONTROLLER_AXIS_LEFTY,-32768)<0)throw std::runtime_error(SDL_GetError());
@@ -358,9 +417,7 @@ int run_app(const fs::path& root, bool smoke,bool scene_smoke=false,const fs::pa
         for (int i = 0; i < int(labels.size()); ++i) {
             int y = 285 + i * 55;
             if (i == selected && !job) { fill(r, 68, y, 512, 45, {36, 43, 46, 255}); fill(r, 68, y, 3, 45, gold); }
-            bool disabled = page == 0 && i == 0;
-            text.draw(labels[i], 88, y + 9, 21, disabled ? muted : i == selected ? gold : white);
-            if (disabled) text.draw("IN DEVELOPMENT", 370, y + 14, 12, muted);
+            text.draw(labels[i], 88, y + 9, 21, i == selected ? gold : white);
         }
         fill(r, 637, 116, 1, 450, {58, 64, 64, 255});
         text.draw(job ? "PREPARING YOUR GAME" : page == 1 ? "OPTIONS" : page == 2 ? "YOUR GAME DATA" : "WELCOME", 683, 125, 14, gold, false, true);

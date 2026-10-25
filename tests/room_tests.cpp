@@ -1,3 +1,4 @@
+#include "effect_assets_fixture.hpp"
 #include "effects.hpp"
 #include "room.hpp"
 #include "runtime.hpp"
@@ -215,8 +216,8 @@ int main() {
     ck(light_runtime.scenario.lights->normal[4].counters[0] == 0 &&
        light_runtime.scenario.random_seed == light_persistent.random_seed);
     ck((runtime.scenario.ambient && runtime.scene.ambient &&
-       runtime.scenario.ambient->colors == runtime.scene.ambient->colors &&
-       runtime.scenario.ambient->colors[0] == std::array<float, 3>{0, 0, 0}));
+        runtime.scenario.ambient->colors == runtime.scene.ambient->colors &&
+        runtime.scenario.ambient->colors[0] == std::array<float, 3>{0, 0, 0}));
     auto with_case = runtime_data;
     const Bytes sound_case{182, 1, 0};
     std::copy(sound_case.begin(), sound_case.end(), with_case.begin() + 2108);
@@ -301,14 +302,34 @@ int main() {
     effect_data[2108] = 145;
     effect_data[2110] = 7;
     effect_data[2112] = 67;
-    auto effect_runtime =
-        load_room_runtime(effect_data, 0, 1, 1, persistent, entry_player);
+    // Original family92 needs actual global resources and its room pack.
+    bad([&] {
+      load_room_runtime(effect_data, 0, 1, 1, persistent, entry_player);
+    });
+    auto effect_persistent = persistent;
+    effect_persistent.effect_assets =
+        decode_global_effect_assets(effect_assets_fixture::global());
+    const auto effect_pack = effect_assets_fixture::room_pack();
+    effect_data.resize(2500);
+    effect_data.insert(effect_data.end(), effect_pack.begin(),
+                       effect_pack.end());
+    put(effect_data, 1950, 2);
+    put(effect_data, 1958, 2500);
+    auto effect_runtime = load_room_runtime(effect_data, 0, 1, 1,
+                                            effect_persistent, entry_player);
     ck(effect_runtime.scenario.effect_pool &&
        (effect_runtime.scenario.effect_pool->works[0].state_flags &
         0x1000000) &&
        effect_runtime.scenario.effect_pool->works[0].id == 92 &&
        effect_runtime.scenario.effect_pool->works[0].modes[1] == 7 &&
        persistent.effect_pool == old_effects);
+    ck(effect_runtime.scenario.effect_assets &&
+       effect_runtime.scenario.effect_assets->texture_first[92] == 40 &&
+       effect_runtime.scenario.effect_assets->textures.textures.size() == 41 &&
+       resolve_effect_asset(*effect_runtime.scenario.effect_assets, 92)
+               .rgba[0] == 160 &&
+       effect_runtime.scenario.room_texture_cursor == 1 &&
+       effect_persistent.effect_assets->textures.textures.size() == 40);
     bad([&] {
       load_room_runtime(runtime_data, 0, 1, 2, persistent, entry_player);
     });
@@ -327,8 +348,11 @@ int main() {
     bad([&] { transition_room_runtime(transition, bad_routes, entry_player); });
     auto bad_ambient = runtime_data;
     bad_ambient[128 + 0x3b8] = 4;
-    bad([&] { transition_room_runtime(transition, bad_ambient, entry_player); });
-    ck((transition.scenario.ambient->colors[0] == std::array<float, 3>{9, 8, 7}));
+    bad([&] {
+      transition_room_runtime(transition, bad_ambient, entry_player);
+    });
+    ck((transition.scenario.ambient->colors[0] ==
+        std::array<float, 3>{9, 8, 7}));
     ck(transition.scenario.routes == current_routes);
     ck(transition.scenario.room == 1 && transition.scenario.door &&
        transition.world.player.position.x == -10 &&
@@ -339,8 +363,10 @@ int main() {
     flt(destination_ambient, 128 + 0x3cc, .7f);
     flt(destination_ambient, 128 + 0x3dc, .6f);
     transition_room_runtime(transition, destination_ambient, entry_player);
-    ck((transition.scenario.ambient->colors[0] == std::array<float, 3>{.8f, .7f, .6f} &&
-       transition.scene.ambient->colors[0] == transition.scenario.ambient->colors[0]));
+    ck((transition.scenario.ambient->colors[0] ==
+            std::array<float, 3>{.8f, .7f, .6f} &&
+        transition.scene.ambient->colors[0] ==
+            transition.scenario.ambient->colors[0]));
     ck(transition.scenario.routes &&
        transition.scenario.routes != current_routes &&
        transition.scenario.routes->regions.size() == 1);

@@ -12,7 +12,7 @@ struct SkinNode {
   std::vector<SkinWeight> vertices;
 };
 std::vector<SkinNode> decode_skin(const Bytes &data, size_t object_count,
-                                 SkinLayout layout = SkinLayout::Standard);
+                                  SkinLayout layout = SkinLayout::Standard);
 struct ActorModel {
   Bytes model;
   Bytes skin;
@@ -50,9 +50,9 @@ ActorModel prepare_actor_skin(const ActorModel &actor);
 // npCalcMorphing/npTransform on a private model, preserving retained assets.
 // Skinned inputs must already use source bind-converted coordinates.
 ActorModel morph_actor_model(const ActorModel &source, const ActorModel &target,
-                            const std::vector<JointPose> &pose, float amount,
-                            size_t first_joint = 0,
-                            std::optional<size_t> joint_count = {});
+                             const std::vector<JointPose> &pose, float amount,
+                             size_t first_joint = 0,
+                             std::optional<size_t> joint_count = {});
 // MdlPut.c bhCalcModel/bhCalcTree. Owns cached matrices in full model order;
 // updates only the selected linear range and restores O_WORK flag-1 matrices.
 ActorModelWork calculate_actor_model_work(const ActorModel &actor,
@@ -76,6 +76,7 @@ struct RoomActorModels {
   std::vector<ActorModelBank> enemies;
   // Object slots 0-3 belong to player attachments, not room asset pointers.
   std::vector<ActorModel> objects, items;
+  size_t texture_cursor = 1; // Actual next pack after geometry and cache reuse.
 };
 RoomActorModels decode_room_actor_models(const Bytes &data);
 ActorModelBank decode_actor_model_bank(const Bytes &data, size_t begin,

@@ -1,5 +1,13 @@
 # Authored and animated normals for original native lighting
 
+> **Status clarification — 2026-10-04:** Step 1 is incomplete and New Game is
+> enabled as an experimental prototype. See [current Step 1 status](step1-slice-status.md)
+> and the [dated audit](project-audit-2026-10-04.md) for present defects and verification.
+> The component record below is historical: its test counts, menu gates, script
+> boundaries and then-pending features describe those checkpoints, not the current build.
+
+## Historical component checkpoints
+
 Chunk51 now decodes both xyz records. Authored normals at record+16 reach each
 emitted corner using the current linear model matrix in float arithmetic.
 Translation, inverse-transpose correction and normalization are not applied:

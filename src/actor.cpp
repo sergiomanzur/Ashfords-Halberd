@@ -283,6 +283,7 @@ static RoomActorModels decode_room_actor_models_impl(const Bytes &data,
     assign(result.objects, records.objects, 4, 1300);
     assign(result.items, records.items, 0, 200);
   }
+  result.texture_cursor = texture_slot;
   return result;
 }
 RoomActorModels decode_room_actor_models(const Bytes &data) {
@@ -292,7 +293,7 @@ std::vector<ActorModelBank> decode_room_enemy_models(const Bytes &data) {
   return decode_room_actor_models_impl(data, false).enemies;
 }
 std::vector<SkinNode> decode_skin(const Bytes &data, size_t count,
-                                 SkinLayout layout) {
+                                  SkinLayout layout) {
   // npSkinConvPreparation/npSkinConvSub and npCalcSkin use a ten-step
   // blend between a joint's unrotated and rotated transforms.
   Reader r{data};

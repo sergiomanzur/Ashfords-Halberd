@@ -1,0 +1,7 @@
+Built-in image-generation tool; generated 2026-10-23.
+
+ICON
+Use case: logo-brand. Create an ORIGINAL square desktop game application icon for Ashford's Halberd, a gothic survival-horror fan port. One bold antique brass halberd blade and long spear point forming a readable heraldic silhouette, set within a deep oxblood circular seal over nearly black midnight ink square background. Elegant restrained engraving, aged metal, strong warm highlights, premium gothic atmosphere, subtle crimson inner glow. Centered large emblem, very clear silhouette at 32 pixels, generous margins for Windows icon cropping. No text, no letters, no skulls, no characters, no existing franchise logos, no watermarks. Final production icon illustration, 1024 square.
+
+LAUNCHER
+Use case: stylized-concept. Asset type: original widescreen PC game launcher background for Ashford's Halberd. A secluded gothic manor entrance at night in rain and pale mist, antique wrought-iron gates, weathered black stone, dim warm light through a distant tall window, a ceremonial brass halberd leaning in a stone recess on the RIGHT. Quiet eerie atmosphere, painterly cinematic realism, refined and desaturated charcoal, deep oxblood and antique brass palette. Composition: wide 16:9 landscape, entire LEFT half dark and subtly textured with very low detail to allow overlaid menu text and buttons; architecture and golden glints on right half. No people, no text, no interface, no logos, no watermarks, no references to existing game artwork. Production quality atmospheric illustration.

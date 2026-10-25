@@ -1,5 +1,13 @@
 # Native original room fog component
 
+> **Status clarification — 2026-10-04:** Step 1 is incomplete and New Game is
+> enabled as an experimental prototype. See [current Step 1 status](step1-slice-status.md)
+> and the [dated audit](project-audit-2026-10-04.md) for present defects and verification.
+> The component record below is historical: its test counts, menu gates, script
+> boundaries and then-pending features describe those checkpoints, not the current build.
+
+## Historical component checkpoints
+
 ROM_WORK fog color and signed near/far values now decode separately from both
 authored camera variants. Source command76 consumes six bytes: opcode, alpha,
 red, green, blue and mode. Mode0 stores ARGB and requests an override; any other

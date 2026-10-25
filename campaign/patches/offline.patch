@@ -1,0 +1,381 @@
+diff --git a/src/ps2/veronica/prog/adv.c b/src/ps2/veronica/prog/adv.c
+index 8836adda..8c2d858e 100644
+--- a/src/ps2/veronica/prog/adv.c
++++ b/src/ps2/veronica/prog/adv.c
+@@ -1699,10 +1699,6 @@ void DisplayGameModePlate(int Cursor, int CursorMax, float FadeRate, int Flag)
+     float PosYDef[2][4] = { { 288.0f, 320.0f, 352.0f, 384.0f }, { 272.0f, 304.0f, 336.0f, 368.0f } }; 
+     float VDef[2][4] = { { 64.0f, 96.0f, 128.0f, 224.0f }, { 64.0f, 96.0f, 224.0f, 128.0f } }; 
+ 
+-#ifdef TARGET_PC
+-    pc_title_plates(Cursor, CursorMax, FadeRate, Flag);   /* with the MULTIPLAYER row */
+-    return;
+-#endif
+     DivTbl[Cursor] = 1;
+ 
+     i = (ap->ExtraFlag == 0) ? 0 : 1;
+@@ -1954,10 +1950,10 @@ int CheckButton(int Level, int Flag, int MaxFlag)
+     int ConnectFlag; 
+ 
+     ConnectFlag = 1;
+-    
+ #ifdef TARGET_PC
+-    pc_title_mouse(Level, Flag);   /* hover moves the cursor, a click confirms */
++    pc_title_mouse(Level, Flag);
+ #endif
++    
+     CheckAdvScreenSaverStopKey(ap->PortId); 
+     
+     if ((Level == 0) && (ap->Cursor[Level] == 0) && (Flag == 0)) 
+@@ -2103,14 +2099,6 @@ int CheckButton(int Level, int Flag, int MaxFlag)
+                 
+                 TitleCall(ap->PortId, 6);
+                 break;
+-#ifdef TARGET_PC
+-            case 4:   /* MULTIPLAYER: the co-op lobby (mode 30) */
+-                ap->LastLevel = Level;
+-                ap->NextMode = 30;
+-                ap->Mode = 10;
+-                CallSystemSe(0, 3);
+-                break;
+-#endif
+             }
+             
+             break;
+@@ -2182,11 +2170,11 @@ int Adv_BioCvTitle()
+     
+     ap->PortId = AdvGetCurrentPort();
+     
+-    ExecuteAdvFade(); 
+-    ExecuteAdvScreenSaver(); 
+ #ifdef TARGET_PC
+-    pc_title_mouse_active(ap->Mode == 9 || ap->Mode == 12 || ap->Mode == 15 || ap->Mode == 30);
++    pc_title_mouse_active(ap->Mode == 9 || ap->Mode == 12 || ap->Mode == 15);
+ #endif
++    ExecuteAdvFade(); 
++    ExecuteAdvScreenSaver(); 
+     
+     AdvCheckSoftReset(0); 
+     
+@@ -2230,7 +2218,11 @@ int Adv_BioCvTitle()
+         sys->ss_flg &= ~0x100000; 
+         sys->ss_flg &= ~0x1000; 
+ 
++#ifdef TARGET_PC
++        if ((sys->ssd_flg & 0x1) || pc_battle_unlocked())
++#else
+         if ((sys->ssd_flg & 0x1)) 
++#endif 
+         { 
+             ap->ExtraFlag = 1; 
+         }
+@@ -2279,9 +2271,6 @@ int Adv_BioCvTitle()
+                 break;
+             }
+         }
+-#ifdef TARGET_PC
+-        pc_title_menu_init();   /* MULTIPLAYER as the last row */
+-#endif
+  
+         ap->Mode = 1; 
+         break; 
+@@ -2517,30 +2506,6 @@ int Adv_BioCvTitle()
+         
+         FadeOutPlate(); 
+         break; 
+-#ifdef TARGET_PC
+-    case 30:   /* the co-op lobby (pc/glue/lobby_glue.c) */
+-        switch (pc_lobby())
+-        {
+-        case 1:   /* back to the menu */
+-            ap->FlushCount = 0;
+-            ap->FlushSpeed = 32.0f;
+-            ap->Mode = 8;
+-            break;
+-        case 2:   /* new game (sys->gm_mode set) */
+-            ap->AppMode = 1;
+-            ap->FromTitle = 0;
+-            ap->LastLevel = 0;
+-            TitleCall(ap->PortId, 2);
+-            break;
+-        case 3:   /* the save chosen in the lobby */
+-            ap->AppMode = 1;
+-            ap->FromTitle = 1;
+-            ap->LastLevel = 0;
+-            TitleCall(ap->PortId, 8);
+-            break;
+-        }
+-        break;
+-#endif
+     case 17:
+         if (CheckAdvFade() == 0) 
+         { 
+@@ -2597,7 +2562,6 @@ int Adv_BioCvTitle()
+ #ifndef TARGET_PC
+         if ((ap->NextReturnCode == 3) || (ap->NextReturnCode == 2) || (ap->NextReturnCode == 6)) 
+ #else
+-        pc_lobby_close();
+         if ((ap->NextReturnCode == 3) || (ap->NextReturnCode == 2) || (ap->NextReturnCode == 6) || (ap->NextReturnCode == 8)) 
+ #endif
+         {
+diff --git a/src/ps2/veronica/prog/eneset.c b/src/ps2/veronica/prog/eneset.c
+index 1449f0dc..c90009e6 100644
+--- a/src/ps2/veronica/prog/eneset.c
++++ b/src/ps2/veronica/prog/eneset.c
+@@ -199,7 +199,6 @@ void pc_enemy_mark_added(void)
+     pc_enemy_added = 1;
+ }
+ 
+-void pc_enemy_watch(BH_PWORK* ep, int slot, int ran);   /* coop_glue.c */
+ void pc_enemy_unhold(BH_PWORK* ep);
+ void host_log(const char* fmt, ...);
+ 
+@@ -528,7 +527,6 @@ void bhControlEnemy()
+                         coop_enemy_end(ep);
+                     }
+ 
+-                    pc_enemy_watch(ep, i, ran);   /* coop_glue.c: the frozen-enemy watchdog */
+                 }
+ #else
+                 bhJumpEnemy[ep->id](ep);
+diff --git a/src/ps2/veronica/prog/game.c b/src/ps2/veronica/prog/game.c
+index f925b45a..e3d06d38 100644
+--- a/src/ps2/veronica/prog/game.c
++++ b/src/ps2/veronica/prog/game.c
+@@ -58,9 +58,9 @@ void bhMainSequence()
+ #endif
+         bhControlPlayer();
+ #ifdef TARGET_PC
+-        if (coop_on || appear_on)   /* appear_on: "You appear as" without co-op */
++        if (appear_on)   /* appear_on: "You appear as" without co-op */
+         {
+-            coop_control_remote();
++            appear_control();
+         }
+ #endif
+         bhControlEffect();
+@@ -139,7 +139,6 @@ void bhMainSequence()
+                 bhDrawScreenFade();
+             }
+ #ifdef TARGET_PC
+-            trade_draw();   /* co-op trade screen / request line (pc/glue/trade_glue.c) */
+ #endif
+         }
+         
+@@ -400,11 +399,17 @@ void bhAllDrawModel()
+     njControl3D(0);
+ #ifdef TARGET_PC
+     pose_trace_mark = 1;   /* test aid RECVX_POSE_TRACE: the player's draw */
++#endif
++#ifdef TARGET_PC
++    extern int tps_first_person_active(void);
+ #endif
+     if (((sys->pt_flg & 1) && !(plp->stflg & 0x01000000)) || ((plp->stflg & 0x01000000) && (pl_sleep_cnt != 0))) {
+         if (pl_sleep_cnt != 0) {
+             pl_sleep_cnt -= 1;
+         }
++#ifdef TARGET_PC
++        if (!tps_first_person_active())   /* rendering only; keep sleep bookkeeping above */
++#endif
+         if (!(plp->mdflg & 1)) {
+             if (!(plp->mdflg & 0x20)) {
+                 if (bhCheckClipModel(plp) == 0) {
+@@ -426,7 +431,6 @@ void bhAllDrawModel()
+ #endif
+ #ifdef TARGET_PC
+     if (coop_on) {
+-        coop_draw_remote();
+     }
+ #endif
+     if ((rom->mdl.texP != 0) && !(sys->error & 2)) {
+diff --git a/src/ps2/veronica/prog/main.c b/src/ps2/veronica/prog/main.c
+index 66f4beb9..4d1cac14 100644
+--- a/src/ps2/veronica/prog/main.c
++++ b/src/ps2/veronica/prog/main.c
+@@ -230,6 +230,9 @@ Sint32 njUserMain(void)
+     PS2_jikken(); 
+     
+     bhCheckSoftReset(); 
++#ifdef TARGET_PC
++    { extern void quicksave_frame(void); quicksave_frame(); } /* complete tick: no engine C stack is suspended */
++#endif
+     
+     return 0; 
+ } 
+diff --git a/src/ps2/veronica/prog/pad.c b/src/ps2/veronica/prog/pad.c
+index 43af36b6..a00e53ef 100644
+--- a/src/ps2/veronica/prog/pad.c
++++ b/src/ps2/veronica/prog/pad.c
+@@ -4,6 +4,10 @@
+ #include "../../../ps2/veronica/prog/sdfunc.h"
+ #include "../../../ps2/veronica/prog/system.h"
+ #include "../../../ps2/veronica/prog/main.h"
++#ifdef TARGET_PC
++void weapon_switch_pad(void);
++void quicksave_pad(void);
++#endif
+ 
+ unsigned int pad_tab_a[18] = { 0x1000, 0x4000, 0x8000, 0x2000, 0x8, 0x1000, 0x4000, 0x4, 0xC0, 0xC0, 0x20, 0xC0, 0x20, 0x10, 0xC00, 0x100, 0x100, 0x800 };
+ unsigned int pad_tab_b[18] = { 0x1000, 0x4000, 0x8000, 0x2000, 0x8, 0x1000, 0x4000, 0x4, 0x60, 0x60, 0x80, 0x60, 0x80, 0x10, 0xC00, 0x100, 0x100, 0x800 };
+@@ -281,7 +285,8 @@ void bhSetPad()
+     pad = modern_pad(pad);   /* modern controls for the fixed cameras (modern_glue.c) */
+     pad = knife_pad(pad);
+     pad = menu_pad(pad);
+-    pad = trade_pad(pad);   /* co-op trade screen: its input, the player stands still */
++    weapon_switch_pad();   /* sample/discard shortcuts even while player updates are paused */
++    quicksave_pad();
+ #endif
+     
+     sys->pad_ps = pad & ~sys->pad_oncpy; 
+diff --git a/src/ps2/veronica/prog/player.c b/src/ps2/veronica/prog/player.c
+index ec2c4bd9..70e5cdc8 100644
+--- a/src/ps2/veronica/prog/player.c
++++ b/src/ps2/veronica/prog/player.c
+@@ -1,4 +1,7 @@
+ #include "../../../ps2/veronica/prog/player.h"
++#ifdef TARGET_PC
++void weapon_switch_player(void);
++#endif
+ #include "../../../ps2/veronica/prog/MdlPut.h"
+ #include "../../../ps2/veronica/prog/Motion.h"
+ #include "../../../ps2/veronica/prog/cut.h"
+@@ -1434,6 +1437,7 @@ void bhControlPlayer()
+ 
+         modern_player();   /* modern controls: turn towards the direction held (modern_glue.c) */
+         reload_player();   /* the reload button: the game's reload of an empty magazine at any time (reload_glue.c) */
++        weapon_switch_player();   /* carried equipment only, after incompatible actions start */
+ #endif
+         
+         if ((plp->flg & 0x100000)) 
+diff --git a/src/ps2/veronica/prog/ps2_NaSystem.c b/src/ps2/veronica/prog/ps2_NaSystem.c
+index 76f3e1ef..ccaa97b4 100644
+--- a/src/ps2/veronica/prog/ps2_NaSystem.c
++++ b/src/ps2/veronica/prog/ps2_NaSystem.c
+@@ -1,5 +1,6 @@
+ #ifdef TARGET_PC
+ #include "ee_asm.h"
++int pc_cheat_freeze_time(void);
+ #endif
+ #include "../../../ps2/veronica/prog/ps2_NaSystem.h"
+ #include "../../../ps2/veronica/prog/ps2_dummy.h"
+@@ -142,6 +143,9 @@ int vsync_func(int)
+     
+     if ((((sys->tk_flg & 0x80)) && ((sys->gm_flg & 0x80000000))) && (sys->time < 216000000)) 
+     {
++#ifdef TARGET_PC
++        if (!pc_cheat_freeze_time())
++#endif
+         sys->time++;
+     }
+     
+diff --git a/src/ps2/veronica/prog/ps2_NaTextureFunction.c b/src/ps2/veronica/prog/ps2_NaTextureFunction.c
+index 3b6f2116..4b3d0619 100644
+--- a/src/ps2/veronica/prog/ps2_NaTextureFunction.c
++++ b/src/ps2/veronica/prog/ps2_NaTextureFunction.c
+@@ -399,13 +399,11 @@ int njSetTextureNumSys(unsigned int n)
+ void	njReleaseTextureAll(void)
+ {
+ #ifdef TARGET_PC
+-    if (coop_on || appear_on)
++    if (appear_on)
+     {
+-        coop_textures_released();   /* player 2's textures go with everything else */
++        appear_textures_released();   /* player 2's textures go with everything else */
+     }
+-    pc_lobby_textures_released();   /* the lobby's previews (and the actor slots when co-op is off) */
+     spawn_textures_released();
+-    trade_textures_released();      /* the trade screen's item icons */
+ #endif
+     njInitTexture(Ps2_tex_info, Ps2_texmemlist_num);
+ }
+diff --git a/src/ps2/veronica/prog/sdfunc.c b/src/ps2/veronica/prog/sdfunc.c
+index 22cb48fc..bfece70d 100644
+--- a/src/ps2/veronica/prog/sdfunc.c
++++ b/src/ps2/veronica/prog/sdfunc.c
+@@ -3272,14 +3272,16 @@ void ExecFileManager()
+    movie began skips it with the intro's fade (picture and sound down over 30 frames); the game's own
+    cancel button counts only as such a press, so a held or carried-over one does not skip */
+ static int PcAnyKeyMovie;   /* such a movie's pictures, 0 for the others */
++int pc_movie_skip_pressed(int start);
+ 
+ /* the play time counts on through these movies (vsync_func: the game task stays on): a skip adds the
+    vblanks the movie had left, so the results (time, rank) are those of the movie watched to its end */
++int pc_cheat_freeze_time(void);
+ static void PcMovieSkipTime()
+ {
+     int left;
+ 
+-    if (((sys->tk_flg & 0x80)) && ((sys->gm_flg & 0x80000000)) && (sys->time < 216000000))
++    if (!pc_cheat_freeze_time() && ((sys->tk_flg & 0x80)) && ((sys->gm_flg & 0x80000000)) && (sys->time < 216000000))
+     {
+         left = pc_movie_vblanks_left(PcAnyKeyMovie);
+ 
+@@ -3289,6 +3291,11 @@ static void PcMovieSkipTime()
+ 
+ static int PcMovieCancelPressed()
+ {
++    if (pc_movie_skip_pressed(0))
++    {
++        printf("movie: FMV skip key accepted\n");
++        return 1;
++    }
+     if (PcAnyKeyMovie == 0)
+     {
+         return (rmi.MVCancelButton & Pad[CurrentPortId].press) != 0;
+@@ -3356,6 +3363,7 @@ int PlayStartMovieEx(int MovieNo, int MovieType, int PauseFlag)
+ 
+ #ifdef TARGET_PC
+     PcAnyKeyMovie = (MovieNo == 15) ? 9897 : (MovieNo == 21) ? 2257 : 0;   /* ponytail: the disc's picture counts; a replaced movie keeps them */
++    pc_movie_skip_pressed(1);   /* a key pressed before this FMV must not skip it */
+ 
+     if (PcAnyKeyMovie != 0)
+     {
+@@ -3372,6 +3380,10 @@ int PlayStartMovieEx(int MovieNo, int MovieType, int PauseFlag)
+     }
+     
+     MovieInfo.MovieFadeFlag = ((MovieTypeDef[MovieNo] & 0x40) == 0) ? 0 : 1;
++#ifdef TARGET_PC
++    MovieInfo.MovieCancelFlag = 1;   /* dedicated PC skip binding works for every FMV */
++    MovieInfo.MovieFadeFlag = 1;     /* leave through the game's picture/audio fade */
++#endif
+     
+     if ((MovieType & 0x2))
+     {
+diff --git a/src/ps2/veronica/prog/sub1.c b/src/ps2/veronica/prog/sub1.c
+index 53f4752a..57ee63a0 100644
+--- a/src/ps2/veronica/prog/sub1.c
++++ b/src/ps2/veronica/prog/sub1.c
+@@ -8931,7 +8931,9 @@ int bhSearchBullet()
+ 
+     st = &swork; 
+ 
+-    if (!(sys->st_flg & 0x8000000)) 
++    /* Inventory expansion belongs to gm_flg (ItemSet, ItemCombination and
++       the side-pack acquisition path), not the unrelated status flags. */
++    if (!(sys->gm_flg & 0x8000000)) 
+     {
+         max = 8;
+     }
+diff --git a/src/ps2/veronica/prog/system.c b/src/ps2/veronica/prog/system.c
+index 6eea82ab..37660eb5 100644
+--- a/src/ps2/veronica/prog/system.c
++++ b/src/ps2/veronica/prog/system.c
+@@ -411,7 +411,6 @@ void bhSysCallFirstmovie()
+         break;
+ #ifdef TARGET_PC
+     case 8:   /* co-op lobby: the chosen save, as LOAD GAME leaves it (TypewriterExit) */
+-        pc_lobby_load_save();
+         sys->ss_flg |= 0x200;
+         sys->tk_flg = 0x300010;
+         break;
+@@ -1851,9 +1850,9 @@ void bhSysCallMonitor()
+                         sys->ply_stflg[sys->ply_id] = plp->stflg;
+ 
+ #ifdef TARGET_PC
+-                        if ((coop_on != 0) || (appear_on != 0))
++                        if (appear_on != 0)
+                         {
+-                            coop_player_unload();   /* "You appear as": the character's own model back, so its textures are the ones released */
++                            appear_player_unload();   /* "You appear as": the character's own model back, so its textures are the ones released */
+                         }
+ #endif
+                         for (i = 0; i < plp->mdl_n; i++)

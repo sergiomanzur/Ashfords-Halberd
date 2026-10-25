@@ -1,5 +1,7 @@
+#include "item_use_area.hpp"
 #include "runtime.hpp"
 #include "audio_runtime.hpp"
+#include "effect_assets.hpp"
 #include "effects.hpp"
 #include "ninja_matrix.hpp"
 #include "zombie.hpp"
@@ -11,7 +13,7 @@ void synchronize_runtime_player(RoomRuntime &runtime,
                                 const PlayerPackage &package) {
   auto &p = runtime.player_work;
   const auto &s = runtime.scenario;
-  if (s.player_id >= 4 || s.equipped_weapon != 0)
+  if (s.player_id >= 4 || s.equipped_weapon < 0 || s.equipped_weapon > 21)
     throw std::runtime_error("Unsupported runtime player work binding");
   const bool initial = !p.model;
   if (initial) {
@@ -182,13 +184,16 @@ Scene compose_room_runtime(const RoomRuntime &runtime, uint32_t draw_flags,
         set_light(true);
     }
     for (const auto &entity : runtime.scenario.objects) {
-      const int group = entity.id >= 1000 ? 1
-                        : entity.type == 5 && entity.angular_speed != 0 ? 2 : 0;
+      const int group = entity.id >= 1000                               ? 1
+                        : entity.type == 5 && entity.angular_speed != 0 ? 2
+                                                                        : 0;
       uint32_t gate = entity.id >= 1000 ? (entity.id < 1210 ? 2 : 1) : 4;
       if (group == pass && draw_flags & 4 && draw_flags & gate &&
           entity.flags & 1 && !(entity.model_flags & 1) &&
-          (!(entity.state_flags & 0x1000000) || runtime.scenario.player_sleep_ticks) &&
-          !((runtime.scenario.flags[11][0] & 0x4000) && (entity.model_flags & 0x40)) &&
+          (!(entity.state_flags & 0x1000000) ||
+           runtime.scenario.player_sleep_ticks) &&
+          !((runtime.scenario.flags[11][0] & 0x4000) &&
+            (entity.model_flags & 0x40)) &&
           cut_visible(entity)) {
         posed(entity,
               pass == 0 ? AmbientTarget::Object : AmbientTarget::Character,
@@ -375,8 +380,6 @@ void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
   runtime.world.player.position = work.position;
   runtime.world.player.yaw = uint16_t(work.angles[1]);
   if (scenario.flags[6][0] & 1) {
-    if (scenario.equipped_weapon != 0)
-      throw std::runtime_error("Armed runtime requires its player controller");
     if (work.modes[0] != 1)
       throw std::runtime_error("Unimplemented runtime player control mode " +
                                std::to_string(work.modes[0]));
@@ -425,7 +428,8 @@ void tick_room_runtime(RoomRuntime &runtime, const PlayerPackage &player,
         pose_actor(player.models.at(0), runtime.player_pose,
                    runtime.world.player.position, runtime.world.player.yaw);
     synchronize_runtime_player(runtime, player);
-    if ((pressed & 0x200) && !(scenario.flags[10][0] & 0x4017) &&
+    update_inventory_use_area(runtime);
+    if ((pressed & 0x200) && !(scenario.flags[10][0] & 0x4015) &&
         !(scenario.player_state_flags & 0x10080))
       examine_room_interaction(runtime);
   }
@@ -452,10 +456,8 @@ RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
   result.cuts = decode_room_cuts(data);
   result.room_fog = decode_room_fog(data);
   result.world = enter_room(records, entry, result.collision, result.cuts);
-  // Healthy unarmed entry: bhInitRoomChangePlayer samples the initial pose
+  // bhInitRoomChangePlayer samples the initial pose
   // before advancing the motion counter visible to initialization scripts.
-  if (persistent.equipped_weapon != 0)
-    throw std::runtime_error("Armed room entry requires its player controller");
   result.player_pose = sample_player_locomotion_pose(
       player, result.world.player, {}, &persistent.motion_angle_scratch);
   result.player_scene =
@@ -506,6 +508,7 @@ RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
   persistent.interactions = result.collision.miscellaneous;
   bind_room_enemies(data, result.collision, persistent);
   bind_room_props(data, persistent);
+  bind_room_effect_assets(data, persistent);
   persistent.room_motions =
       std::make_shared<const MotionBank>(decode_room_motion_bank(data));
   persistent.scenario =
@@ -521,6 +524,7 @@ RoomRuntime load_room_runtime(const Bytes &data, uint8_t stage, uint8_t room,
     result.player_work.geometry = previous_player->geometry;
   }
   synchronize_runtime_player(result, player);
+  update_inventory_use_area(result);
   bind_room_effects(data, result.scenario);
   bind_entry_fog(result); // room.c::bhCheckCut precedes system.c::bhInitEvent.
   if (result.world.cut)

@@ -1,9 +1,11 @@
 # Native shared-palette effect texture prerequisite
 
 Step1 remains incomplete. The real cemetery effect texture resources now load,
-including their palette-only updates and shared banks. This does not enable
-opcode173, simulate the emitter or draw its particles. New Game remains gated
-until the full two-room slice passes.
+including their palette-only updates and shared banks. Opcode 173 is now enabled
+and assigns the authored effect type, but the actual emitter/scheduler/draw
+consumer remains unfinished. New Game is enabled as an experimental prototype;
+the full two-room acceptance gate has not passed. See
+[current Step 1 status](step1-slice-status.md).
 
 ## Implemented source behavior
 
@@ -54,8 +56,9 @@ and its identity, including an ordinary RGBA backing, even when an earlier
 descriptor was palette-only; an alias without a preceding image rejects.
 Resolving samples the current palette, so overlapping uploads/wrapped banks
 recolor already loaded images. decode_texture_pack keeps its public API and
-resolves a local library after completing the pack. The persistent interface
-must still be bound to room effect work and original draw queues.
+resolves a local library after completing the pack. The persistent interface is
+now owned by the room runtime. Original controller work and draw queues still
+require their actual integration.
 
 ## Initial palette decoder evidence (commit2cd5d84)
 
@@ -137,13 +140,57 @@ local/global-effect-resource-audit.log and global-effect-native-resource-audit.l
 Source capture SHA256 for ps2_texture.c is
 5995b32e032ee903d24379e407d00c95489ed0c1bc7d868496f8c11c039defad.
 
+## Runtime resource ownership
+
+effect_assets.hpp/.cpp now decode SYSTEM.AFS entry1 before initial room loading.
+The original four size-prefixed model chunks populate IDs0/1/7/13; native object
+hierarchy/work validation precedes publication. The following aligned pack emits
+exactly40 base textures. Source ef_info offsets, animation counts and palette
+banks populate IDs0..29, including zero-animation aliases and ordinary bank255.
+Lookup uses source family-first+animation addressing bounded by the entire
+library; family counts are retained metadata, not an invented animation limit.
+
+RoomActorModels exposes its actual consumed texture cursor, including cached
+enemy/prop/item reuse. bind_room_props publishes it; load_room_runtime binds
+effect resources after props and before initialization events. Unique families
+30..99/400..449 consume the next original pack regardless of their work flags.
+Checks reject missing global ownership, selected malformed headers/pointer
+tables/packs, unknown texture families and out-of-library frames. Validation is
+incomplete: the 2026-10-04 audit reproduced acceptance of an out-of-chunk MDL
+object model pointer and a missing pack terminator that shifts family indices.
+
+Each room replacement retains immutable base images and all CPU palette words,
+releases previous room bindings/pixel charges, and resets automatic bank32.
+This follows bhInitRoomChangeSystem without clearing palbuf. Complete staging
+and resolution of all current bindings precede publication; failed loads retain
+the incoming owner. Production RuntimeView supplies the actual global archive
+entry instead of accepting a resource-less context.
+
+Focused evidence:15/15 resource/palette/texture/room/actor checks pass, including
+zero-animation aliases, inactive/duplicate source order, actor cache cursor,
+palette retention, released image lifetime and malformed-load rollback. The
+existing load_room_runtime missing-global assertion genuinely failed against
+BASE3037798 and passes with native ownership. An incorrect synthetic pointer
+offset in the first implementation check was corrected before GREEN; it was
+not counted as the original behavioral RED.
+
+The earlier private real-resource proof locates4 models/40 base textures and2662912
+pixels. RDX1/2/3 actor cursors are5/10/9, resource totals41/58/52, room families
+1/14/11. Cemetery family54 begins44 and emits4;408 begins48 and emits2. Every
+binding resolves after all uploads. At that checkpoint, corridor runs120 ticks; cemetery
+retains its15-tick/opcode173at4 boundary and revisit139at276/computer0. Resource
+ownership does not execute a controller. Those script boundaries are historical:
+opcode 173 now advances, without its required complete effect consumer.
+Evidence:local/effect-resource-binding-retail-audit.log and focused-green.log.
+
 ## Remaining acceptance
 
-Bind the real room texture families to runtime effect work, then port179/180
+Connect original controllers/draw work to their bound families, then port179/180
 control, first-free births and ascending pool scheduling, their10-frame UV
 animations, original draw queues, billboarding, source colors/blending/fog and
-depth policy. Enable173 only after its actual native consumer works. Global
-effect resources, other required controllers, complete sound/gameplay/inventory,
+depth policy. Restore opcode 173's complete native consumer; its current
+assignment alone does not establish working effects. Global
+effect model drawing, other required controllers, complete sound/gameplay/inventory,
 two-room traversal, versioned saves and independent original-game comparison
 remain required for the full Step1 gate. Exact original texture filtering and
 GS alpha/color quantization also require the drawing implementation and reference

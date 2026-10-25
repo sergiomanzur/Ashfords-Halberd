@@ -4,3 +4,6 @@
 [submodule "external/SDL"]
 	path = external/SDL
 	url = https://github.com/libsdl-org/SDL.git
+[submodule "recvx-campaign-decomp"]
+	path = upstream/recvx-campaign-decomp
+	url = https://github.com/aikatore/recvx-decomp.git

@@ -8,3 +8,6 @@
 *.BIN
 __pycache__/
 .pytest_cache/
+/.codex-remote-attachments/
+/scratch/
+/report.tsv

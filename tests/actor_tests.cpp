@@ -180,6 +180,7 @@ int main() {
     put(room, 2850, 0xffffffff);
     put(room, 2900, 0xffffffff);
     auto enemies = decode_room_enemy_models(room);
+    ck(decode_room_actor_models(room).texture_cursor == 2);
     ck(enemies.size() == 3 && enemies[1].models.empty());
     ck(enemies[0].models[0].textures == Bytes({255, 255, 255, 255}) &&
        enemies[2].models[0].textures == enemies[0].models[0].textures);
@@ -219,6 +220,7 @@ int main() {
     }
     put(multi_room, 1136 + 2 * 36, 68);
     auto distinct = decode_room_enemy_models(multi_room);
+    ck(decode_room_actor_models(multi_room).texture_cursor == 5);
     ck(distinct[0].models.size() == 3 && distinct[2].models.size() == 3);
     ck(distinct[0].models[0].textures[8] == 10 &&
        distinct[0].models[1].textures == distinct[0].models[0].textures &&
@@ -241,6 +243,7 @@ int main() {
     put(aliased_room, 1136 + 2 * 36, 3);
     put(aliased_room, 5000, 3); // Room + two packs; alias must consume none.
     auto aliased_banks = decode_room_enemy_models(aliased_room);
+    ck(decode_room_actor_models(aliased_room).texture_cursor == 3);
     ck(aliased_banks[2].models[0].textures ==
            aliased_banks[0].models[0].textures &&
        aliased_banks[2].models[2].textures ==
@@ -276,6 +279,7 @@ int main() {
     std::copy(item_model.begin(), item_model.end(), populated.begin() + 7200);
     std::copy(item_model.begin(), item_model.end(), populated.begin() + 8000);
     auto complete = decode_room_actor_models(populated);
+    ck(complete.texture_cursor == 5);
     ck(complete.objects.size() == 6 && complete.objects[0].model.empty() &&
        complete.objects[4].skin == a.skin &&
        complete.objects[4].textures[8] == 30 &&
@@ -352,7 +356,8 @@ int main() {
     auto siblings = multiple_groups();
     ActorPlacement ninja_placement;
     ninja_placement.angles[1] = 8192;
-    auto ninja_work = calculate_actor_model_work(siblings, {}, {}, ninja_placement);
+    auto ninja_work =
+        calculate_actor_model_work(siblings, {}, {}, ninja_placement);
     ck(std::abs(ninja_work.base_matrix[0] - .7070387) < .000001 &&
        std::abs(ninja_work.base_matrix[2] - .7071065) < .000001);
     auto sibling_joints = actor_joint_matrices(siblings, {});

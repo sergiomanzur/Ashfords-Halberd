@@ -137,4 +137,15 @@ void set_room_effect_mode(ScenarioState &state, size_t authored, uint8_t mode) {
   pool->works[slot].modes[1] = mode;
   state.effect_pool = std::move(pool);
 }
+void set_room_effect_type(ScenarioState &state, size_t authored, uint8_t type) {
+  if (!state.effect_pool || authored >= state.effect_slots.size() ||
+      state.effect_slots[authored] >= state.effect_pool->works.size())
+    throw std::runtime_error("Room effect type outside authored map");
+  const auto slot = state.effect_slots[authored];
+  if (state.effect_pool->works[slot].type == type)
+    return;
+  auto pool = std::make_shared<NativeEffectPool>(*state.effect_pool);
+  pool->works[slot].type = type;
+  state.effect_pool = std::move(pool);
+}
 } // namespace ashford

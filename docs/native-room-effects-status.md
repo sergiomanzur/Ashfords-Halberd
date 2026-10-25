@@ -1,5 +1,13 @@
 # Native room effects and shadows
 
+> **Status clarification — 2026-10-04:** Step 1 is incomplete and New Game is
+> enabled as an experimental prototype. See [current Step 1 status](step1-slice-status.md)
+> and the [dated audit](project-audit-2026-10-04.md) for present defects and verification.
+> The component record below is historical: its test counts, menu gates, script
+> boundaries and then-pending features describe those checkpoints, not the current build.
+
+## Historical component checkpoints
+
 The Windows port now decodes the original68-byte EF_WRK room table and binds its
 authored effects to the same512-entry native pool used by enemy effects. Native
 records preserve signed fields and source narrowing, validate finite values and

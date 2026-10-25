@@ -1,7 +1,14 @@
 # Step 1 original room pair and integration priorities
 
 Status: original room pair selected from the user's imported USA assets.
-The native playable slice is still incomplete. New Game remains disabled.
+The native playable slice is still incomplete. As audited on 2026-10-04,
+New Game is enabled and opens an experimental prototype. Original gameplay and
+the full two-room acceptance gate remain unfinished. See
+[current Step 1 status](step1-slice-status.md).
+
+The source selection and earlier integration findings below are checkpoint
+records. Current defects are listed in the
+[dated project audit](project-audit-2026-10-04.md).
 
 ## Selected rooms
 

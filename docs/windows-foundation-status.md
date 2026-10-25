@@ -1,7 +1,19 @@
 # Windows foundation — 2026-10-02
 
-The first Step 1 increment is implemented. The full Step 1 playable slice
-remains incomplete. A native room viewer is now available, with no adapted gameplay yet.
+Current status, audited 2026-10-04: the full Step 1 slice remains incomplete.
+New Game now opens an experimental native prototype with partial gameplay,
+inventory and save code. The scoped inventory mechanics rewrite passes 8/8
+checks. The development build succeeds; 166/167 headless tests pass, with the
+playable-slice original-zombie encounter check failing. See the
+[inventory milestone report](inventory-milestone-2026-10-04.md),
+[current Step 1 status](step1-slice-status.md) and the
+[dated audit](project-audit-2026-10-04.md).
+
+## Historical foundation record
+
+The remaining sections record earlier foundation implementation and verification.
+Their suite counts, packaging results and then-pending features refer to those
+checkpoints. They do not certify the current gameplay changes or current ZIP.
 
 ## Delivered behavior
 

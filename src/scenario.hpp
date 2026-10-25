@@ -1,6 +1,6 @@
 #pragma once
-#include "ambient.hpp"
 #include "actor.hpp"
+#include "ambient.hpp"
 #include "assets.hpp"
 #include "audio_background.hpp"
 #include "collision.hpp"
@@ -13,6 +13,7 @@ class RoomScenario;
 struct RoomEntity;
 struct RoomRoutes;
 struct NativeEffectPool;
+struct NativeEffectAssets;
 class ScenarioProgram {
 public:
   size_t size() const { return block_->size() - offset_; }
@@ -218,6 +219,8 @@ struct ScenarioState {
   std::vector<CollisionRecord> dynamic_floors;        // sys->mflrp.
   // Immutable native effect state: active events replace only this pool value.
   std::shared_ptr<const NativeEffectPool> effect_pool;
+  std::shared_ptr<const NativeEffectAssets> effect_assets;
+  size_t room_texture_cursor = 1;
   std::vector<size_t> effect_slots; // sys->efid: authored effect -> work slot.
   uint32_t shadow_flags = 0xffffffff; // system.c sys->pt_flg initial value.
   std::vector<EnemySoundRequest> pending_enemy_sounds;
@@ -242,6 +245,7 @@ struct ScenarioState {
           status_timer = 0;
   int32_t player_frame = 0;
   uint16_t selected_item_id = 0;
+  uint32_t spray_use_count = 0; // Original sys->spray_ct, used by recovery/ranking.
   uint32_t player_state_flags = 0;
   uint32_t player_work_flags = 0;
   uint32_t player_secondary_flags = 0;
