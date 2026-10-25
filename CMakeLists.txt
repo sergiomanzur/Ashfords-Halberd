@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 option(ASHFORD_CAMPAIGN "Build the original campaign backend (requires a separate x86 GCC build directory)" OFF)
 if(ASHFORD_CAMPAIGN)
-    project(AshfordsHalberdCampaign VERSION 0.3.0 LANGUAGES C CXX)
+    project(AshfordsHalberdCampaign VERSION 0.9.0 LANGUAGES C CXX)
     enable_testing()
     add_subdirectory(campaign)
     return()

@@ -1,0 +1,27 @@
+1 ICON "@ASHFORD_ICON_PATH@"
+1 VERSIONINFO
+ FILEVERSION @ASHFORD_VERSION_NUMERIC@
+ PRODUCTVERSION @ASHFORD_VERSION_NUMERIC@
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x2L
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+ BLOCK "StringFileInfo"
+ BEGIN
+  BLOCK "040904b0"
+  BEGIN
+   VALUE "FileDescription", "Ashford's Halberd @ASHFORD_VERSION@ Beta\0"
+   VALUE "FileVersion", "@ASHFORD_VERSION@ Beta\0"
+   VALUE "InternalName", "AshfordsHalberd\0"
+   VALUE "OriginalFilename", "AshfordsHalberd.exe\0"
+   VALUE "ProductName", "Ashford's Halberd\0"
+   VALUE "ProductVersion", "@ASHFORD_VERSION@ Beta\0"
+  END
+ END
+ BLOCK "VarFileInfo"
+ BEGIN
+  VALUE "Translation", 0x409, 1200
+ END
+END

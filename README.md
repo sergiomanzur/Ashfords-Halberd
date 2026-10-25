@@ -1,5 +1,7 @@
 # Ashford's Halberd
 
+**0.9.0b Beta** — see the [changelog](campaign/CHANGELOG.md) and [GitHub release](https://github.com/sergiomanzur/Ashfords-Halberd/releases/tag/v0.9.0b).
+
 An offline Windows fan port of **Resident Evil Code: Veronica X**, running the original campaign natively from your own USA PS2 disc image. Built on the MIT-licensed recvx-enhanced-port and AshfordFamily decompilation, with original Ashford presentation.
 
 ![Original launcher artwork](assets/branding/launcher.png)

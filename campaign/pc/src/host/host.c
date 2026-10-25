@@ -190,7 +190,7 @@ static void watchdog(int sig)
 static void usage(void)
 {
     fprintf(stderr,
-        "Ashford's Halberd / campaign engine " RECVX_VERSION "\n"
+        "Ashford's Halberd " ASHFORD_VERSION " Beta / campaign engine " RECVX_VERSION "\n"
         "usage: AshfordsHalberd [options] <game disc image (.iso)>\n"
         "  --skip-launcher    start the campaign directly without the Ashford launcher\n"
         "  --save-dir <dir>   settings and saves directory (default: per-user AshfordsHalberd/Campaign)\n"
@@ -290,7 +290,7 @@ static void parse_args(int argc, char** argv)
         else if (!strncmp(argv[i], "--profile", 9) && (argv[i][9] == 0 || argv[i][9] == '='))
             SDL_strlcpy(profile_path, argv[i][9] ? argv[i] + 10 : "recvx_profile.csv", sizeof(profile_path));
         else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) { usage(); exit(0); }
-        else if (!strcmp(argv[i], "--version")) { printf("Ashford's Halberd / campaign engine " RECVX_VERSION " (recvx-enhanced-port)\n"); exit(0); }
+        else if (!strcmp(argv[i], "--version")) { printf("Ashford's Halberd " ASHFORD_VERSION " Beta / campaign engine " RECVX_VERSION " (recvx-enhanced-port)\n"); exit(0); }
         else if (argv[i][0] != '-') iso_from(argv[i]);
         else { usage(); exit(1); }
     }
@@ -339,7 +339,7 @@ int main(int argc, char** argv)
     parse_args(argc, argv);
     home_dir();
     if (log_path[0]) { extern void log_start(const char*); log_start(log_path); }
-    host_log("Ashford's Halberd / campaign backend " RECVX_VERSION "\n");
+    host_log("Ashford's Halberd " ASHFORD_VERSION " Beta / campaign backend " RECVX_VERSION "\n");
     host_log("Adapted from recvx-enhanced-port; Copyright (c) 2026 aikatore and contributors, MIT\n");
     if (profile_path[0]) { extern void prof_open_csv(const char*); prof_open_csv(profile_path); }
 #ifndef _WIN32

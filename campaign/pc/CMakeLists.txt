@@ -135,6 +135,7 @@ FetchContent_Declare(bcdec GIT_REPOSITORY https://github.com/iOrange/bcdec.git G
 FetchContent_MakeAvailable(xxhash bcdec)
 target_include_directories(recvx_platform PRIVATE ${xxhash_SOURCE_DIR} ${bcdec_SOURCE_DIR})
 set_property(SOURCE src/host/host.c src/host/overlay.cpp APPEND PROPERTY COMPILE_DEFINITIONS "RECVX_VERSION=\"${RECVX_VERSION}\"")
+set_property(SOURCE src/host/host.c APPEND PROPERTY COMPILE_DEFINITIONS "ASHFORD_VERSION=\"${ASHFORD_VERSION}\"")
 target_include_directories(recvx_platform PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../src
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -166,7 +167,7 @@ set(ASHFORD_BRANDING ${CMAKE_CURRENT_SOURCE_DIR}/../../assets/branding)
 if(WIN32)
     enable_language(RC)
     file(TO_CMAKE_PATH "${ASHFORD_BRANDING}/ashford.ico" ASHFORD_ICON_PATH)
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ashford.rc" "1 ICON \"${ASHFORD_ICON_PATH}\"\n")
+    configure_file(src/host/ashford.rc.in "${CMAKE_CURRENT_BINARY_DIR}/ashford.rc" @ONLY)
     # Keep RC isolated from SDL/ImGui's include paths. windres reconstructs its
     # preprocessor command incorrectly for inherited paths with apostrophes.
     add_library(ashford_icon OBJECT "${CMAKE_CURRENT_BINARY_DIR}/ashford.rc")
@@ -205,6 +206,7 @@ install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE DESTINATION licenses RENAME
 install(FILES ${DECOMP}/LICENSE DESTINATION licenses RENAME recvx-decomp-LICENSE.txt)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../PROVENANCE.md DESTINATION licenses)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../../docs/campaign-package-readme.md DESTINATION . RENAME README.md)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../CHANGELOG.md DESTINATION .)
 install(FILES ${sdl3_SOURCE_DIR}/LICENSE.txt DESTINATION licenses RENAME SDL3-LICENSE.txt)
 install(FILES ${imgui_SOURCE_DIR}/LICENSE.txt DESTINATION licenses RENAME ImGui-LICENSE.txt)
 install(FILES ${xxhash_SOURCE_DIR}/LICENSE DESTINATION licenses RENAME xxHash-LICENSE.txt)

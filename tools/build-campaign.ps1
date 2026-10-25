@@ -71,6 +71,7 @@ try {
         Compress-Archive -LiteralPath @(
             (Join-Path $campaignDist 'AshfordsHalberd.exe'),
             (Join-Path $campaignDist 'README.md'),
+            (Join-Path $campaignDist 'CHANGELOG.md'),
             (Join-Path $campaignDist 'assets'),
             (Join-Path $campaignDist 'licenses')
         ) -DestinationPath (Join-Path $campaignBuild 'AshfordsHalberd-Campaign-Windows-x86.zip') -Force

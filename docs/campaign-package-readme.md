@@ -1,5 +1,7 @@
 # Ashford's Halberd
 
+**0.9.0b Beta**. See the included CHANGELOG.md for this release's changes and limitations.
+
 Run `AshfordsHalberd.exe`, choose your unmodified USA PS2 Code: Veronica X ISO (SLUS-20184), then select Play Campaign. Keep the included assets and licenses folders beside the executable. Windows 10+ and OpenGL 3.3 are required. No game data is supplied.
 
 This is an offline single-player build. Online sessions, co-op, chat, trading and server functionality have been removed.
