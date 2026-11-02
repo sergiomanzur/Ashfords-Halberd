@@ -1,5 +1,15 @@
 # Ashford's Halberd changes
 
+## 0.9.1b Beta — 2026-11-02
+
+- Fixed a persistent black screen after skipping the first-zombie graveyard FMV.
+  Gameplay continued behind a black fade forced by the PC skip override. Movie
+  skipping now respects the original per-movie and caller-requested fade policy.
+- Kept F8 skipping available for every movie and preserved native fades for
+  scenes and endings that require them. The fix applies to every camera mode.
+- Added production-code movie lifecycle regressions and a real graveyard FMV
+  return check with first person and modern controls.
+
 ## 0.9.0b Beta — 2026-10-25
 
 ### Campaign and identity

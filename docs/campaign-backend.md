@@ -133,7 +133,7 @@ tests/campaign_warning_tool_tests.py and tests/offline_identity_tests.py.
 ## Latest test build — 2026-10-23
 
 F8 is the default rebindable FMV skip key in both control editors. A fresh press
-skips through the game's normal movie fade/cleanup; presses from before the
+skips through the movie's native return/fade policy; presses from before the
 movie are discarded. Real-time scripted scenes are outside this action.
 
 The latest executable passed 14 component checks (all except the full-disc

@@ -310,6 +310,15 @@ target_link_libraries(test_rumble PRIVATE SDL3::SDL3)
 add_test(NAME rumble COMMAND test_rumble)
 
 if(NOT ASHFORD_PLATFORM_TESTS_ONLY)
+set(MOVIE_RETURN_TEST ${CMAKE_CURRENT_BINARY_DIR}/movie_return_test.inc)
+add_custom_command(OUTPUT "${MOVIE_RETURN_TEST}"
+    COMMAND Python3::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/tests/movie_source.py
+        ${PROG}/sdfunc.c "${MOVIE_RETURN_TEST}"
+    DEPENDS tests/movie_source.py tests/reload_source.py ${PROG}/sdfunc.c VERBATIM)
+add_executable(test_movie_return tests/test_movie_return.c "${MOVIE_RETURN_TEST}")
+target_include_directories(test_movie_return PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+target_compile_options(test_movie_return PRIVATE -std=gnu11)
+add_test(NAME movie_return COMMAND test_movie_return)
 set(RELOAD_GAME_TEST ${CMAKE_CURRENT_BINARY_DIR}/reload_game_test.c)
 add_custom_command(OUTPUT "${RELOAD_GAME_TEST}"
     COMMAND Python3::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/tests/reload_source.py

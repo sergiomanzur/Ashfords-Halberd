@@ -1,6 +1,6 @@
 # Ashford's Halberd
 
-**0.9.0b Beta**. See the included CHANGELOG.md for this release's changes and limitations.
+**0.9.1b Beta**. See the included CHANGELOG.md for this release's changes and limitations.
 
 Run `AshfordsHalberd.exe`, choose your unmodified USA PS2 Code: Veronica X ISO (SLUS-20184), then select Play Campaign. Keep the included assets and licenses folders beside the executable. Windows 10+ and OpenGL 3.3 are required. No game data is supplied.
 
@@ -34,7 +34,7 @@ The Alfred stairway script explicitly hides both actors before its sound sequenc
 
 Engine adapted from aikatore/recvx-enhanced-port 0.6.8, Copyright (c) 2026 aikatore and contributors, MIT. Decompilation by AshfordFamily and contributors. Original source attribution and dependency licenses are in licenses/. Artwork/music provenance is in assets/branding/. This unofficial project is not affiliated with Capcom, Sony, Sega or CRI Middleware.
 
-F8 skips the current FMV cutscene using the normal fade/cleanup. Rebind Skip FMV cutscene in either enhancement menu's control bindings. Real-time scripted scenes are separate.
+F8 skips the current FMV cutscene using its native return and fade policy. This build fixes the persistent black image after skipping the graveyard's first-zombie movie. Rebind Skip FMV cutscene in either enhancement menu's control bindings. Real-time scripted scenes are separate.
 
 Weapon quick switching: [ and ] cycle backward/forward; F3/F4/F6/F7 select the first four carried weapons in inventory-grid order. Controller defaults: hold left-stick click (L3/LS) and use D-pad Up/Right/Down/Left for carried weapons 1/2/3/4; hold L3/LS and press LB/RB (PlayStation L1/R1) for previous/next weapon. L3 alone does not switch. The combination consumes its other button until released, preventing an extra quick knife, reload or quick turn. Existing default-only controller settings upgrade automatically; custom assignments remain editable. All six actions are rebindable in F1 and OPTION > ENHANCED OPTIONS. Inventory changes update the order. Two-slot weapons count once; empty magazines are selectable. Release aim first. Scripts, menus, attacks, reloads, quick knife and incompatible movement/interaction animations block switching; blocked presses are discarded. No stored or unowned weapons are equipped, and ammo is preserved.
 

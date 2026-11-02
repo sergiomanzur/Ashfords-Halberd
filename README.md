@@ -1,6 +1,6 @@
 # Ashford's Halberd
 
-**0.9.0b Beta** — see the [changelog](campaign/CHANGELOG.md) and [GitHub release](https://github.com/sergiomanzur/Ashfords-Halberd/releases/tag/v0.9.0b).
+**0.9.1b Beta** — see the [changelog](campaign/CHANGELOG.md) and [GitHub release](https://github.com/sergiomanzur/Ashfords-Halberd/releases/tag/v0.9.1b).
 
 An offline Windows fan port of **Resident Evil Code: Veronica X**, running the original campaign natively from your own USA PS2 disc image. Built on the MIT-licensed recvx-enhanced-port and AshfordFamily decompilation, with original Ashford presentation.
 
@@ -69,7 +69,7 @@ Windows 10 or later and OpenGL 3.3 are required. Extract the complete package, i
 | F11 | Toggle fullscreen |
 | F12 | Toggle campaign first person |
 
-Fixed-camera defaults: arrows move, W aims, Z interacts/confirms or fires while aiming, X runs/cancels, Enter opens inventory. Third-person defaults: WASD moves, mouse looks, right mouse aims, left mouse fires, Shift runs, E interacts, Q cancels, R reloads and Tab opens inventory. Both enhancement menus expose bindings, including the rebindable F8 FMV-skip action. FMV skipping uses the game's normal fade and cleanup; it does not skip real-time scripted scenes.
+Fixed-camera defaults: arrows move, W aims, Z interacts/confirms or fires while aiming, X runs/cancels, Enter opens inventory. Third-person defaults: WASD moves, mouse looks, right mouse aims, left mouse fires, Shift runs, E interacts, Q cancels, R reloads and Tab opens inventory. Both enhancement menus expose bindings, including the rebindable F8 FMV-skip action. FMV skipping follows each movie's native return and fade policy; it does not skip real-time scripted scenes. The post-release fix restores visible gameplay after skipping the graveyard's first-zombie movie.
 
 Settings and original-format saves live in `%APPDATA%\AshfordsHalberd\Campaign`. Back up this folder. `--save-dir <folder>` overrides it; `--skip-launcher` starts directly. Supply an ISO argument or `RECVX_ISO` for direct/automated startup. Older prototype saves are separate and incompatible.
 

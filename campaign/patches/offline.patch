@@ -288,7 +288,7 @@ index 3b6f2116..4b3d0619 100644
      njInitTexture(Ps2_tex_info, Ps2_texmemlist_num);
  }
 diff --git a/src/ps2/veronica/prog/sdfunc.c b/src/ps2/veronica/prog/sdfunc.c
-index 22cb48fc..bfece70d 100644
+index 22cb48fc..a4c3a19e 100644
 --- a/src/ps2/veronica/prog/sdfunc.c
 +++ b/src/ps2/veronica/prog/sdfunc.c
 @@ -3272,14 +3272,16 @@ void ExecFileManager()
@@ -329,13 +329,15 @@ index 22cb48fc..bfece70d 100644
  
      if (PcAnyKeyMovie != 0)
      {
-@@ -3372,6 +3380,10 @@ int PlayStartMovieEx(int MovieNo, int MovieType, int PauseFlag)
+@@ -3372,6 +3380,12 @@ int PlayStartMovieEx(int MovieNo, int MovieType, int PauseFlag)
      }
      
      MovieInfo.MovieFadeFlag = ((MovieTypeDef[MovieNo] & 0x40) == 0) ? 0 : 1;
 +#ifdef TARGET_PC
 +    MovieInfo.MovieCancelFlag = 1;   /* dedicated PC skip binding works for every FMV */
-+    MovieInfo.MovieFadeFlag = 1;     /* leave through the game's picture/audio fade */
++    /* Preserve the native per-movie/caller fade contract. Some events (the
++       graveyard's first zombie) resume without a fade-in; forcing a black skip
++       fade there leaves an opaque overlay over otherwise live gameplay. */
 +#endif
      
      if ((MovieType & 0x2))
