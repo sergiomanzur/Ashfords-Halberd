@@ -27,3 +27,17 @@ The historical web lists include conflicting rumors, including a Hunk Battle
 character. Unsupported characters and arbitrary console memory patches are
 not offered. This is a researched set of native equivalents, not a claim
 that every regional cheat-device code has been implemented or validated.
+
+## Anywhere tools
+
+- **Save Now** opens the typewriter's save screen where you stand and does not
+  require an ink ribbon.
+- **Load Game** opens the save list where you stand; Back returns to the game
+  as it was.
+- **Open Item Box** opens the same item box as a physical box.
+- **Remove Item** empties the chosen inventory slot. Lower the weapon in hand
+  before removing it.
+
+These tools use the game's own screens and state transitions. They are
+unavailable during scripted actions, doors, menus, the Battle Game and other
+states where the typewriter or item box cannot normally open.

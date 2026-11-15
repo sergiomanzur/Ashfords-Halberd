@@ -6,7 +6,8 @@
 extern "C" {
 #endif
 
-enum { CHEAT_GIVE = 1, CHEAT_TELEPORT = 2, CHEAT_HEAL = 4, CHEAT_SPAWN = 8, CHEAT_RESET_TIME = 16, CHEAT_RESET_RETRIES = 32, CHEAT_RESET_SAVES = 64 };
+enum { CHEAT_GIVE = 1, CHEAT_TELEPORT = 2, CHEAT_HEAL = 4, CHEAT_SPAWN = 8, CHEAT_RESET_TIME = 16, CHEAT_RESET_RETRIES = 32, CHEAT_RESET_SAVES = 64,
+       CHEAT_SAVE = 128, CHEAT_LOAD = 256, CHEAT_BOX = 512, CHEAT_DROP = 1024 };
 #define CHEAT_ITEMS 156
 
 typedef struct CheatState {
@@ -16,6 +17,7 @@ typedef struct CheatState {
     volatile int unlock;            /* locks open as if their key were carried (pc/glue/cheat_glue.c) */
     int give_id, give_count, tp_stg, tp_rom, tp_pos;
     int spawn_idx;                  /* enemy spawner list entry (spawn_name) */
+    int drop_slot;                  /* inventory slot the Remove Item action empties (1..10) */
     volatile int request;           /* CHEAT_* bits, cleared by the game thread */
     /* published by the game thread */
     int hp, stg, rom, pos, player, slots;

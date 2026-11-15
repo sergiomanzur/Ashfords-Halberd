@@ -263,7 +263,7 @@ void overlay_render(void)
     else ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
     bool crosshair = g_tps.on && g_tps.crosshair && g_tps.cam_active && g_tps.aiming;
     const char* quick_notice = quicksave_notice();
-    if (!visible && !g_config.show_fps && !crosshair && !quick_notice) return;
+    if (!visible && !g_config.show_fps && !crosshair && !quick_notice && !g_hud.on) return;
     {   /* readable on large displays: scale text with the window height (1080p = 1x) */
         int ww, wh;
         SDL_GetWindowSizeInPixels(win, &ww, &wh);
@@ -295,6 +295,32 @@ void overlay_render(void)
             dl->AddLine(ImVec2(c.x + o, c.y + g + o), ImVec2(c.x + o, c.y + g + s + o), k, t);
             dl->AddCircleFilled(ImVec2(c.x + o, c.y + o), t, k);
         }
+    }
+    if (g_hud.on && !visible) {   /* Ashford HUD: brass frame, oxblood health, ivory text */
+        ImGuiIO& io = ImGui::GetIO();
+        float pad = io.DisplaySize.y / 45.0f, w = io.DisplaySize.y / 5.2f;
+        ImVec2 pos(g_hud.left ? pad : io.DisplaySize.x - w - pad, io.DisplaySize.y - pad);
+        ImGui::SetNextWindowPos(pos, ImGuiCond_Always, ImVec2(0, 1));
+        ImGui::SetNextWindowBgAlpha(0.62f);
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.055f, 0.045f, 0.035f, 1));
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.72f, 0.58f, 0.32f, 0.9f));
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.62f, 0.13f, 0.10f, 1));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.5f);
+        ImGui::Begin("##ashford_hud", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs);
+        float frac = g_hud.hp_max > 0 ? (float)g_hud.hp / g_hud.hp_max : 0;
+        if (frac < 0) frac = 0;
+        if (frac > 1) frac = 1;
+        ImGui::TextColored(ImVec4(0.86f, 0.78f, 0.60f, 1), "HP  %d / %d", g_hud.hp, g_hud.hp_max);
+        ImGui::ProgressBar(frac, ImVec2(w, io.DisplaySize.y / 90.0f), "");
+        if (g_hud.cond == HUD_POISON) ImGui::TextColored(ImVec4(0.52f, 0.72f, 0.42f, 1), "POISON");
+        else if (g_hud.cond >= HUD_DANGER) ImGui::TextColored(ImVec4(0.82f, 0.28f, 0.20f, 1), "DANGER");
+        else if (g_hud.cond >= HUD_CAUTION2) ImGui::TextColored(ImVec4(0.86f, 0.55f, 0.24f, 1), "CAUTION");
+        if (g_hud.rounds == HUD_INF) ImGui::TextColored(ImVec4(0.86f, 0.78f, 0.60f, 1), "AMMO  unlimited");
+        else if (g_hud.rounds != HUD_NONE) ImGui::TextColored(ImVec4(0.86f, 0.78f, 0.60f, 1), "AMMO  %d", g_hud.rounds);
+        ImGui::End();
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor(3);
     }
     if (g_config.show_fps) {
         ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 10, 10), ImGuiCond_Always, ImVec2(1, 0));

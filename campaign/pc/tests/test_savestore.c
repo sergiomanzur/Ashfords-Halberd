@@ -103,7 +103,7 @@ int main(void)
     CHECK(savestore_write(dir, 999, e, NULL) == 999);
     CHECK(savestore_write(dir, 0, e, NULL) == 1000);
     CHECK(savestore_write(dir, 0, d, NULL) == 1001);
-    CHECK(savestore_highest(dir) == 1001);
+    CHECK(savestore_next(dir) == 1002);
     n = savestore_list(dir, &l);
     CHECK(n == 4 && l[0].number == 1 && l[1].number == 999 && l[2].number == 1000 && l[3].number == 1001);
     CHECK(n == 4 && !strcmp(l[2].file, "1000_Chris_Airport-Elev.sav"));

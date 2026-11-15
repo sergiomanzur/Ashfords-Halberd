@@ -243,6 +243,12 @@ static void reset_retries(void) { __atomic_or_fetch(&g_cheat.request, CHEAT_RESE
 static void reset_saves(void) { __atomic_or_fetch(&g_cheat.request, CHEAT_RESET_SAVES, __ATOMIC_ACQ_REL); }
 static void heal(void) { __atomic_or_fetch(&g_cheat.request, CHEAT_HEAL, __ATOMIC_ACQ_REL); }
 static void give(void) { if (g_cheat.give_id > 0 && g_cheat.give_id < CHEAT_ITEMS) __atomic_or_fetch(&g_cheat.request, CHEAT_GIVE, __ATOMIC_ACQ_REL); }
+static void save_now(void) { __atomic_or_fetch(&g_cheat.request, CHEAT_SAVE, __ATOMIC_ACQ_REL); }
+static void load_now(void) { __atomic_or_fetch(&g_cheat.request, CHEAT_LOAD, __ATOMIC_ACQ_REL); }
+static void open_box(void) { __atomic_or_fetch(&g_cheat.request, CHEAT_BOX, __ATOMIC_ACQ_REL); }
+static void remove_item(void) { __atomic_or_fetch(&g_cheat.request, CHEAT_DROP, __ATOMIC_ACQ_REL); }
+void pc_rifle_stack(int on);   /* item.c */
+static void rifle_stack_apply(void) { pc_rifle_stack(g_config.rifle_stack); }
 static void spawn(void) { __atomic_or_fetch(&g_cheat.request, CHEAT_SPAWN, __ATOMIC_ACQ_REL); }
 static void teleport(void) { __atomic_or_fetch(&g_cheat.request, CHEAT_TELEPORT, __ATOMIC_ACQ_REL); }
 static void here(void) { g_cheat.tp_stg = g_cheat.stg; g_cheat.tp_rom = g_cheat.rom; g_cheat.tp_pos = g_cheat.pos; }
@@ -339,8 +345,10 @@ const Setting g_settings[] = {
     { SP_DISPLAY, "Show frame rate", V(g_config.show_fps), 0, 1, 1 },
     { SP_DISPLAY, "Aspect ratio", V(g_config.aspect), 0, 2, 1, aspects, .help = "Widescreen: 3D fills the window, 2D and menus stay 4:3 in the middle.", .group = "PICTURE" },
     { SP_DISPLAY, "Internal resolution", V(g_config.scale), 0, 8, 1, .name = scale_name, .help = "The resolution the game is drawn at; Auto follows the window." },
-    { SP_DISPLAY, "Anti-aliasing", V(g_config.antialias), 0, 1, 1, (const char* const[]){ "Off", "FXAA" },
-      .help = "Optional final-image edge smoothing, separate from internal resolution. Can soften game text and fine detail; Off preserves sharpness. The F1 overlay is drawn afterwards." },
+    { SP_DISPLAY, "Anti-aliasing", V(g_config.antialias), 0, 2, 1, (const char* const[]){ "Off", "FXAA", "SMAA" },
+      .help = "Optional final-image edge smoothing, separate from internal resolution. SMAA keeps more detail than FXAA; Off preserves sharpness. The F1 overlay is drawn afterwards." },
+    { SP_DISPLAY, "Dithering", V(g_config.dithering), 0, 2, 1, (const char* const[]){ "Off", "On", "Deband" },
+      .help = "Smoothes the visible colour steps in dark fog and light gradients. Deband also smooths steps in textures; Off preserves the original banding." },
     { SP_DISPLAY, "Display-rate frames", V(g_config.interpolate), 0, 1, 1, .help = "In-between frames blended from the last two game frames. The game still runs at 30 FPS; half a frame of latency." },
     { SP_DISPLAY, "Smooth menus", V(g_config.menu_smooth), 0, 1, 1, .locked = interp_off,
       .help = "Menus at the display rate too (windows slide, the cursor glides), a frame quicker to react, quick taps never missed. Off: 30 FPS menus." },
@@ -389,6 +397,8 @@ const Setting g_settings[] = {
       .help = "Copies the memory card's saves into the saves folder as new files (ones already there are skipped). The card keeps them." },
     { SP_GAMEPLAY, "No ink ribbons needed", V(g_config.no_ink_ribbon), 0, 1, 1,
       .help = "Typewriters save without an ink ribbon and use none up." },
+    { SP_GAMEPLAY, "Rifle ammo stacks", V(g_config.rifle_stack), 0, 1, 1, .apply = rifle_stack_apply,
+      .help = "Rifle and assault-rifle bullets share one inventory slot like other ammunition. Off: each pickup takes its own slot, as in the original." },
     { SP_GAMEPLAY, "Extra enemies", V(g_enemy_opts.extra), 0, 3, 1, extras, .help = "More enemies of the types a room already has. Next room.", .group = "ENEMIES" },
     { SP_GAMEPLAY, "Rearranged enemies", V(g_enemy_opts.place), 0, 1, 1, .help = "Free-roaming enemies start elsewhere in their room (from the seed). Story, cutscene and boss enemies stay. Next room." },
     { SP_GAMEPLAY, "Enemy randomizer", V(g_enemy_opts.rand), 0, 1, 1, .help = "Enemies become other types (from the seed), from anywhere in the game, within each room's limits. Bosses stay. Next room." },
@@ -437,6 +447,12 @@ const Setting g_settings[] = {
       .help = "Rifle headshots deal extra damage, a killing headshot from a powerful gun bursts a zombie's head, and sniper rifle shots go through enemies." },
     { SP_TPS, "Move while aiming", V(g_tps.aim_walk), 0, 1, 1,
       .help = "Walk slowly while aiming, attacking or reloading instead of standing still." },
+    { SP_TPS, "HUD", V(g_tps.hud), 0, 2, 1, (const char* const[]){ "Auto", "On", "Off" }, .group = "HUD",
+      .help = "Show health and loaded ammunition in a corner. Auto shows them only with the over-the-shoulder or first-person camera." },
+    { SP_TPS, "HUD position", V(g_tps.hud_side), 0, 2, 1, (const char* const[]){ "Follow shoulder", "Left", "Right" },
+      .help = "Follow shoulder places the HUD on the camera's shoulder side, or on the right with fixed cameras." },
+    { SP_TPS, "HUD style", V(g_tps.hud_style), 0, 1, 1, (const char* const[]){ "Weapon circle", "Minimal" },
+      .help = "Weapon circle and Minimal use the same brass frame; Minimal keeps the text and the bar compact." },
     { SP_TPS, "Gamepad controls", V(g_tps.pad_modern), 0, 1, 1, tps_pad_names, .group = "GAMEPAD",
       .help = "Modern: the left stick walks where it points seen from the camera, the right stick turns the camera and aims; "
               "own bindings (CONTROLS, gamepad, Third person). Classic: tank controls through the game's buttons, the camera behind." },
@@ -477,6 +493,15 @@ const Setting g_settings[] = {
     { SP_CHEATS, "Item", NULL, 1, CHEAT_ITEMS - 1, 1, .get = item_get, .set = item_set, .name = item_name, .locked = items_loading, .group = "ITEMS", .help = "Choose an item for Add to inventory. Rocket Launcher: normally a campaign A-rank reward; Linear Launcher: all Battle characters A rank. Story items and weapons can affect progression; keep a separate save." },
     { SP_CHEATS, "Count", V(g_cheat.give_count), 1, 999, 1, .fmt = "%d" },
     { SP_CHEATS, "Add to inventory", NULL, .flags = SET_ACTION | SET_GAME_ONLY, .apply = give, .locked = items_loading },
+    { SP_CHEATS, "Save now", NULL, .flags = SET_ACTION | SET_GAME_ONLY, .apply = save_now, .group = "ANYWHERE",
+      .help = "Open the typewriter's save screen where you stand. No ink ribbon is needed." },
+    { SP_CHEATS, "Load game", NULL, .flags = SET_ACTION | SET_GAME_ONLY, .apply = load_now,
+      .help = "Open the load screen where you stand. Backing out returns to the game as it was." },
+    { SP_CHEATS, "Open item box", NULL, .flags = SET_ACTION | SET_GAME_ONLY, .apply = open_box,
+      .help = "Open the item box here: the same box as at any item box." },
+    { SP_CHEATS, "Inventory slot to remove", V(g_cheat.drop_slot), 1, 10, 1, .fmt = "%d", .group = "ITEM REMOVAL" },
+    { SP_CHEATS, "Remove item", NULL, .flags = SET_ACTION | SET_GAME_ONLY, .apply = remove_item,
+      .help = "Empty the chosen inventory slot, as the item box leaves it. Lower the weapon in hand first." },
     { SP_CHEATS, "Enemy", NULL, 0, 0, 1, .get = spawn_get, .set = spawn_set, .name = spawn_nm, .count = spawn_count,
       .help = "Bosses and scripted enemies may not work outside their room; spawned enemies are gone after leaving it.", .group = "SPAWN" },
     { SP_CHEATS, "Spawn in front of me", NULL, .flags = SET_ACTION | SET_GAME_ONLY, .apply = spawn },

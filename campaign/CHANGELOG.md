@@ -1,6 +1,40 @@
 # Ashford's Halberd changes
 
-## 0.9.1b Beta — 2026-11-02
+## 0.9.2b Beta – 2026-11-15
+
+### Upstream sync (single-player subset of recvx-enhanced-port 0.6.9–0.8.0)
+
+- Added always-on `AshfordsHalberd-crash.log` reports with the last messages and a Windows
+  frame-chain backtrace, independently of `--log`.
+- Added checked PRS/AFS/DDS/PNG parsing and bounded HD-pack loading; damaged mod files and
+  oversized replacements are skipped instead of crashing.
+- Added startup memory diagnostics that name the program holding the PS2 scratchpad address.
+- Enabled `-O3` for the GS/render hot paths.
+- Ported the SMG reload, lighter/lockpick item-box, albinoid/Monster Steve hold, scripted-stair,
+  model-less enemy, weapon 0/1 damage, mod-room leave, Battle Game exit and texture-scratch fixes.
+- Added third-person locational hit reactions, headshots/piercing, move-while-aiming and
+  room-model camera collision.
+
+### Gameplay and quality of life
+
+- Added rifle/assault-rifle ammunition stacking (Gameplay > Rifle ammo stacks).
+- Added memory-card slot 2 (`card1`) and 30-slot memory-card import.
+- Added an Ashford-styled HUD (Auto/On/Off, shoulder side, Weapon Circle/Minimal).
+- Added Save Now, Load Game, Open Item Box and Remove Item to the shared Cheats page.
+- Added SMAA and Dithering (Off/On/Deband) to Display.
+- Kept the existing launcher, Field Dossier, first-person camera, quicksave and weapon shortcuts
+  and their look and feel.
+
+### Compatibility and limits
+
+- Native saves remain compatible. Quicksave snapshots are tied to the exact executable build;
+  use a native save when upgrading.
+- BioRand, disc imports, languages, the new upstream menus and co-op remain outside this
+  offline build.
+- The world-placed "Extra Item Boxes and Herbs" objects are not included in this release.
+- Full campaign playthrough coverage remains outstanding.
+
+## 0.9.1b Beta – 2026-11-02
 
 - Fixed a persistent black screen after skipping the first-zombie graveyard FMV.
   Gameplay continued behind a black fade forced by the PC skip override. Movie

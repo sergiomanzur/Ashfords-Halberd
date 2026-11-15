@@ -1,6 +1,6 @@
 # Ashford's Halberd
 
-**0.9.1b Beta** — see the [changelog](campaign/CHANGELOG.md) and [GitHub release](https://github.com/sergiomanzur/Ashfords-Halberd/releases/tag/v0.9.1b).
+**0.9.2b Beta** — see the [changelog](campaign/CHANGELOG.md) and [GitHub release](https://github.com/sergiomanzur/Ashfords-Halberd/releases/tag/v0.9.2b).
 
 An offline Windows fan port of **Resident Evil Code: Veronica X**, running the original campaign natively from your own USA PS2 disc image. Built on the MIT-licensed recvx-enhanced-port and AshfordFamily decompilation, with original Ashford presentation.
 
@@ -16,12 +16,13 @@ This is a working development build. Component tests and opening smoke runs do n
 
 ## Changes in this version
 
+- **0.9.2b upstream sync.** Brought in the single-player parts of recvx-enhanced-port 0.6.9–0.8.0: crash reports, checked file parsing, bounded HD-pack loading, startup memory diagnostics, renderer `-O3`, reload and item-box fixes, Battle Game exit fix, locational hit reactions, headshots/piercing, move while aiming, room-model camera collision, rifle-ammo stacking, memory-card slot 2, HUD, SMAA/dithering, and Save Now / Load Game / Open Item Box / Remove Item tools.
 - Single-player throughout.
 - Original gothic launcher with disc picker, display selection, volume controls and the original ambient composition **The Quiet Threshold**.
 - Newly generated brass/oxblood halberd icon and manor artwork.
 - Original **Field Dossier** F1 overlay with category navigation, search, contextual help and an ink/brass palette.
 - Shared video, audio, camera, gameplay, appearance and binding preferences in F1 and **OPTION > ENHANCED OPTIONS**.
-- Shared **Cheats** page in both menus; F2 is a shortcut. Native tools cover health/ammo, healing, item grants, locks, noclip, spawning, teleportation, unlocks and rank tools. See [research and limitations](docs/cheats.md).
+- Shared **Cheats** page in both menus; F2 is a shortcut. Native tools cover health/ammo, healing, item grants, locks, noclip, spawning, teleportation, unlocks, rank tools, Save Now, Load Game, Open Item Box and item removal. See [research and limitations](docs/cheats.md).
 
 ## Enhancements
 

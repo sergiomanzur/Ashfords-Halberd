@@ -43,13 +43,15 @@ typedef struct {
     int  contrast;           /* 50..150 %, 100 neutral */
     int  gamma;              /* tenths, 5..20, 10 neutral */
     int  saturation;         /* 0..200 %, 100 neutral, final game image only */
-    int  antialias;          /* 0 off, 1 optional spatial post-process */
+    int  antialias;          /* 0 off, 1 FXAA, 2 SMAA */
+    int  dithering;          /* 0 off, 1 on (light deband), 2 deband */
     int  settings_preset;    /* 0 Original, 1 Enhanced, 2 Custom; controlled values validated */
     int  skip_doors;         /* door/stairs/ladder animations: 0 played, 1 instant (load screen), 2 played, a press skips */
     int  fast_loading;       /* room loads: sound packs and texture lists at once instead of spread over frames (pc_fast_loading) */
     int  quick_knife;        /* holding the quick-knife key draws the knife (pc/glue/knife_glue.c) */
     int  auto_stairs;        /* walking into stairs climbs them without the action button (pc/glue/stairs_glue.c) */
     int  head_blowoff;       /* a zombie whose head the game destroyed is drawn without it (pc/glue/variant_glue.c pc_zombie_head) */
+    int  rifle_stack;        /* rifle / assault rifle ammo stacks in one inventory slot (item.c pc_rifle_stack) */
     int  model_cull;         /* skip actors/objects whose test points are off-screen (as the PS2) */
     int  skip_intro;         /* boot straight into the title menu */
     int  battle_unlocked;    /* the title menu offers BATTLE GAME without a cleared game (pc/glue/lobby_glue.c) */
@@ -66,6 +68,9 @@ typedef struct {
 extern HostConfig g_config;
 void config_load(void);
 void config_save(void);
+/* host/log.c: the always-on crash report, and the per-thread alternate signal stack (Linux) */
+void crash_init(const char* version);
+void crash_thread_init(void);
 
 /* overlay (host/overlay.cpp) */
 void overlay_init(void* window, void* gl_context);

@@ -2315,4 +2315,6 @@ void tps_frame(void)
     g_menu_mouse.play = pc_in_game() && plp && !pc_trade_screen() &&
                         (pc_in_play(plp, 1) ||   /* (the scope too: its mouse aim) */
                          (sys && (sys->st_flg & 0x200) && !((sys->st_flg & 0x8000) && sys->mes_seln > 0) && !(sys->ts_flg & 0x80)));
+    { extern void hud_frame(void); hud_frame(); }
+    { extern void crash_test(unsigned); static unsigned hand; crash_test(++hand); }   /* RECVX_TEST_CRASH (log.c) */
 }

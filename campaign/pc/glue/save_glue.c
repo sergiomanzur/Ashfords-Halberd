@@ -58,7 +58,7 @@ void pc_save_list(SELECTFILEWINDOW* win, MEMORYCARDSTATE* mc, int saving)
         rows[i].saveroom = RoomNameSwitch(e->rom_no + e->stg_no * 100);   /* as mcGetPortSelectDirInfo */
         if (e->written >= saves[cur].written) cur = i;
     }
-    if (n > saves_n) rows[saves_n].FileNumber = savestore_highest(dir) + 1;
+    if (n > saves_n) rows[saves_n].FileNumber = savestore_next(dir);
     if (saving) cur = n - 1;
     win->pRecordTop = rows;
     win->lRecordMax = n;

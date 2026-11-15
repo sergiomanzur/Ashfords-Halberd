@@ -1,6 +1,6 @@
 # Ashford's Halberd
 
-**0.9.1b Beta**. See the included CHANGELOG.md for this release's changes and limitations.
+**0.9.2b Beta**. See the included CHANGELOG.md for this release's changes and limitations.
 
 Run `AshfordsHalberd.exe`, choose your unmodified USA PS2 Code: Veronica X ISO (SLUS-20184), then select Play Campaign. Keep the included assets and licenses folders beside the executable. Windows 10+ and OpenGL 3.3 are required. No game data is supplied.
 
@@ -14,7 +14,9 @@ Fixed camera: arrows move, W aims, Z interacts/confirms/fires while aiming, X ru
 
 Experience preset is at the top of Display and Gameplay in both enhancement menus. Original chooses 4:3, native internal resolution, original frame blending and classic movement; Enhanced chooses widescreen, automatic internal resolution, smooth frames, modern movement, skippable doors, faster loading, quick knife and automatic stairs. Custom keeps current values. Individual options stay available. Presets preserve bindings, saves, audio, camera tuning, renderer choices and cheats. Existing preferences are kept as Custom.
 
-Saturation: 0% grayscale, 100% neutral, 200% stronger colour. Reset picture calibration also restores saturation. Optional FXAA edge smoothing is off by default and separate from internal resolution. It may soften game text/detail; the F1 overlay is drawn after filtering.
+Saturation: 0% grayscale, 100% neutral, 200% stronger colour. Reset picture calibration also restores saturation. Optional FXAA or SMAA edge smoothing is off by default and separate from internal resolution; SMAA keeps more detail but costs more. Dithering can smooth colour banding in dark fog and gradients. The F1 overlay is drawn after filtering.
+
+An optional HUD shows health and loaded ammunition in an Ashford brass frame (Auto with the over-the-shoulder/first-person camera, On also with fixed cameras, or Off). Save Now, Load Game and Open Item Box open the game's own screens where you stand; Remove Item empties the chosen inventory slot.
 
 Cheats include health/ammo, healing, item grants, key locks, noclip, teleportation, spawning, title unlocks and rank tools. Story item grants and teleportation can disrupt event progression; keep a separate save. Runtime cheat toggles last for the session. Effects recorded into a save remain there.
 

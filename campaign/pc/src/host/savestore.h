@@ -1,7 +1,7 @@
 /* Native saves (docs/ARCHITECTURE.md "Save system"): one file per save in a folder,
    NNN_<label>.sav = a 64-byte header + the game's save exactly as the memory card holds it
    (SAVEDATA-nn, the SAVEFILE struct: sys->version..save_end and its byte-sum checksum).
-   NNN is the save's number (3 digits, more when needed, no limit); the label (character and
+   NNN is the save's number (3 digits, more when needed, up to SAVESTORE_NUMBER_MAX); the label (character and
    room) is for people only and never parsed. Any thread; writes go through pc_save_file and
    are serialized by a lock. */
 #ifndef RECVX_SAVESTORE_H
@@ -14,6 +14,13 @@ extern "C" {
 #define SAVE_DATA_BYTES 0x838     /* sizeof(SAVEFILE), a card save file */
 #define SAVE_HEADER_BYTES 64
 #define SAVE_CONFIG_BYTES 0x34    /* sizeof(CONFIGFILE), the card's system file BASLUS-20184 (system.dat here) */
+#define SAVESTORE_MAX 10000           /* saves listed at most (more are logged and left out) */
+#define SAVESTORE_NUMBER_MAX 999999999 /* the highest save number (9 digits) */
+/* a placed typewriter's location text ("Extra Item Boxes and Herbs", docs/DEV_PLACEMENTS.md): save-region words no game
+   code uses, sys->itm[292..301]: "LOC=" then the UTF-8 text with its NUL; anything else is no text */
+#define SAVE_TEXT_ITM 292
+#define SAVE_TEXT_OFS (0x1F4 + 4 * SAVE_TEXT_ITM)
+#define SAVE_TEXT_BYTES 40
 
 typedef struct SaveEntry {
     int number;
@@ -21,9 +28,11 @@ typedef struct SaveEntry {
     int64_t written;      /* seconds since 1970 */
     int play_time;        /* SAVEFILE.time */
     int save_ct, gm_mode, ply_id, stg_no, rom_no;
+    char text[SAVE_TEXT_BYTES];   /* its location text (savestore_text), "" the room's name */
 } SaveEntry;
 
-/* the valid saves in dir, sorted by number (malloc'd array in *out, free() it); invalid files are skipped */
+/* the valid saves in dir, sorted by number (malloc'd array in *out, free() it, NULL if none); invalid
+   files are skipped; at most SAVESTORE_MAX */
 int  savestore_list(const char* dir, SaveEntry** out);
 /* 1: path is a valid save; its card bytes in data (SAVE_DATA_BYTES) */
 int  savestore_read(const char* path, unsigned char* data);
@@ -31,20 +40,22 @@ int  savestore_read(const char* path, unsigned char* data);
    name of the save this one overwrites, removed once the new file is in place if its name
    differs. Returns the number written, 0 on error (nothing changed). */
 int  savestore_write(const char* dir, int number, const unsigned char* data, const char* replaces);
-/* the highest save number of the files in dir (names only, 0: none) */
-int  savestore_highest(const char* dir);
+/* the number a new save gets (names only): the highest + 1, past SAVESTORE_NUMBER_MAX the lowest free one (0: none) */
+int  savestore_next(const char* dir);
 /* 1 if a file of save `number` exists (any label); its name in file (n bytes) if not NULL */
 int  savestore_find(const char* dir, int number, char* file, int n);
 /* "NNN_label.sav" with the label made safe for any file system (UTF-8 kept, at most 64 bytes) */
 void savestore_filename(char* out, int n, int number, const char* label);
-/* "Claire_Prison" (character_room, as the save menu names them) of card bytes */
+/* "Claire_Prison" (character_room, as the save menu names them; the location text if it has one) of card bytes */
 void savestore_label(char* out, int n, const unsigned char* data);
+/* the location text of card save bytes (SAVE_TEXT_OFS) into out (SAVE_TEXT_BYTES), "" none; 1 if there is one */
+int  savestore_text(char* out, const unsigned char* data);
 /* card save bytes are valid and not an empty slot */
 int  savestore_card_valid(const unsigned char* data);
-/* copies the memory card's saves (<save_dir>/card0/BASLUS-20184/SAVEDATA-nn) into dir as native
-   saves (number nn + 1 if free, else the next free one; saves already there with the same bytes are
-   skipped), and the system file
-   as dir/system.dat if dir has none. The card files are kept. Returns the saves copied. */
+/* copies the memory cards' saves (<save_dir>/card0/BASLUS-20184/SAVEDATA-nn, card 2's card1/...
+   as slot nn + 15) into dir as native saves (number slot + 1 if free, else the next free one; saves
+   already there with the same bytes are skipped), and card 1's system file as dir/system.dat if dir
+   has none. The card files are kept. Returns the saves copied. */
 int  savestore_import_card(const char* save_dir, const char* dir);
 
 #ifdef __cplusplus

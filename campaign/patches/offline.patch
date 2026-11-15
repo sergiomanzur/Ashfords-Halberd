@@ -1,3 +1,19 @@
+diff --git a/include/ps2/veronica/prog/item.h b/include/ps2/veronica/prog/item.h
+index 57ef94a1..4159bc7b 100644
+--- a/include/ps2/veronica/prog/item.h
++++ b/include/ps2/veronica/prog/item.h
+@@ -30,7 +30,11 @@ extern const unsigned short mestbl[14];
+ extern const short c_a[14][6];
+ extern const unsigned char curedata[10];
+ extern const DSP_WORK dsptbl[160];
++#ifdef TARGET_PC
++extern ITEM_WORK itemdata[156];   /* writable: the port's rifle ammo stacking (item.c) */
++#else
+ extern const ITEM_WORK itemdata[156];
++#endif
+ extern const short combidata[410];
+ 
+ #endif
 diff --git a/src/ps2/veronica/prog/adv.c b/src/ps2/veronica/prog/adv.c
 index 8836adda..8c2d858e 100644
 --- a/src/ps2/veronica/prog/adv.c
@@ -117,6 +133,48 @@ index 8836adda..8c2d858e 100644
          if ((ap->NextReturnCode == 3) || (ap->NextReturnCode == 2) || (ap->NextReturnCode == 6) || (ap->NextReturnCode == 8)) 
  #endif
          {
+diff --git a/src/ps2/veronica/prog/bup_00.c b/src/ps2/veronica/prog/bup_00.c
+index 922ba8b1..265bafe4 100644
+--- a/src/ps2/veronica/prog/bup_00.c
++++ b/src/ps2/veronica/prog/bup_00.c
+@@ -353,7 +353,11 @@ void TypewriterInit()
+     
+     if (InitFlag == 0) 
+     {
++#ifdef TARGET_PC
++        if ((!(sys->ss_flg & 0x200)) && (pc_cheat_load() == 0))   /* the F2 Load Game: the load screen in the game (pc/glue/cheat_glue.c) */
++#else
+         if (!(sys->ss_flg & 0x200)) 
++#endif
+         {
+             pSave = CreateSaveScreen(&Save, vwbmemp);
+             
+@@ -387,7 +391,11 @@ void TypewriterInit()
+ // 100% matching!
+ void TypewriterMain()
+ {
++#ifdef TARGET_PC
++     if ((!(sys->ss_flg & 0x200)) && (pc_cheat_load() == 0))
++#else
+      if (!(sys->ss_flg & 0x200))
++#endif
+      {
+         ExecuteSaveScreen(pSave);
+          
+@@ -407,6 +415,13 @@ void TypewriterMain()
+          
+         if (pLoad->usExitFlag == 1) 
+         {
++#ifdef TARGET_PC
++            if (pc_cheat_load_exit() != 0)   /* the F2 Load Game: the save's game starts, or back to the game as the save screen leaves */
++            {
++                InitFlag = 0;
++                return;
++            }
++#endif
+             sys->typ_md0 = 2;
+             sys->typ_md1 = 0;
+             
 diff --git a/src/ps2/veronica/prog/dread.c b/src/ps2/veronica/prog/dread.c
 index 2ba1053e..8d75b59f 100644
 --- a/src/ps2/veronica/prog/dread.c
@@ -464,6 +522,37 @@ index 1449f0dc..b09cb2f0 100644
          }
      }
  }
+diff --git a/src/ps2/veronica/prog/event.c b/src/ps2/veronica/prog/event.c
+index ad87e6c3..81a693e9 100644
+--- a/src/ps2/veronica/prog/event.c
++++ b/src/ps2/veronica/prog/event.c
+@@ -390,6 +390,8 @@ void bhControlEvent()
+ #ifdef TARGET_PC
+     pc_unlock_scd1(0);   /* F2 cheat "Unlock all": a key's use spot sees the key used, as from the item screen (pc/glue/cheat_glue.c) */
+     
++    pc_extras_scd1();    /* "Extra Item Boxes and Herbs": the lids, the planters' use (pc/glue/extras_glue.c) */
++    
+     if (coop_on)
+     {
+         pc_detector_scd1(); /* co-op rule "Metal detector: Skipped": the empty security boxes of 0/9 rest (pc/glue/detector_glue.c) */
+@@ -8782,6 +8784,17 @@ unsigned int bhPlItemChangeM()
+     
+     v1 = *bhScePtr;
+     
++#ifdef TARGET_PC
++    /* 0xFF is the PC sentinel for the special inventory slot. The third
++       operand is the item count, so no separate PlItemTamaSet is needed. */
++    if (v0 == 0xFF)
++    {
++        int count = bhScePtr[1];
++        sys->itm[(sys->ply_id * 16) + 1] = ((unsigned int)v1 << 16) | (count & 0xFF);
++        bhScePtr += 2;
++        return 1;
++    }
++#endif
+     bhScePtr += 2;
+ 
+     for (cnt = (sys->ply_id * 16) + 2; cnt < ((sys->ply_id * 16) + 12); cnt++) 
 diff --git a/src/ps2/veronica/prog/game.c b/src/ps2/veronica/prog/game.c
 index f925b45a..e3d06d38 100644
 --- a/src/ps2/veronica/prog/game.c
@@ -514,6 +603,107 @@ index f925b45a..e3d06d38 100644
      }
  #endif
      if ((rom->mdl.texP != 0) && !(sys->error & 2)) {
+diff --git a/src/ps2/veronica/prog/hitchk.c b/src/ps2/veronica/prog/hitchk.c
+index 1481ccfd..ef36b3c9 100644
+--- a/src/ps2/veronica/prog/hitchk.c
++++ b/src/ps2/veronica/prog/hitchk.c
+@@ -4637,6 +4637,12 @@ int bhCheckInnerP4(NJS_POINT2* pos, NJS_POINT2* p0, NJS_POINT2* p1, NJS_POINT2*
+     return 1;
+ }
+ 
++#ifdef TARGET_PC
++/* The count of the floor pickup being taken (a generated room's item record: wrk_no), 0 the retail amount.
++   Set here, read by GetItem (sub1.c), which clears it once the pickup is over. */
++unsigned char override_pickup_quantity;
++#endif
++
+ // 100% matching!
+ void bhCheckExmAtari(BH_PWORK* pp)
+ {
+@@ -4837,6 +4843,13 @@ void bhCheckExmAtari(BH_PWORK* pp)
+                         break;
+                     }
+                     
++#ifdef TARGET_PC   /* co-op: the partner is using this trigger (a puzzle, a terminal): not twice at once (pc/glue/coop_glue.c) */
++                    if ((coop_on != 0) && (coop_examine(i) != 0))
++                    {
++                        sys->cb_flg &= ~0x100;
++                        return;
++                    }
++#endif
+                     if (!(sys->st_flg & 0x80))
+                     {
+                         if ((exp->attr & 0x9))
+@@ -4917,7 +4930,20 @@ void bhCheckExmAtari(BH_PWORK* pp)
+                         
+                         if ((op->flg & 0x1)) 
+                         {
++#ifdef TARGET_PC
++                            /* Retail leaves the type field at zero; generated
++                               room data may store the retail id or a
++                               replacement pickup id there. A non-zero type
++                               below the item table size is the pickup id. */
++                            unsigned short pickup_type = op->type;
++                            sys->sb_id = (pickup_type && pickup_type < 156) ? pickup_type : op->id;
++                            /* for the standing pickup (the status screen opens now) and the crouching one (it
++                               opens after the motion, player.c bhCPM2_act_cro) alike */
++                            override_pickup_quantity = (pickup_type && pickup_type < 156 && exp->prm0 < rom->itm_n)
++                                                           ? rom->itmp[exp->prm0].wrk_no : 0;
++#else
+                             sys->sb_id = op->id;
++#endif
+                             
+                             if ((exp->attr & 0x1))
+                             {
+@@ -5852,7 +5878,11 @@ void bhCheckEnemies(BH_PWORK* pp)
+     int r;            
+     int i;           
+     int hct;            
++#ifdef TARGET_PC
++    NJS_POINT3 ps[PC_ENE_SLOTS];   /* one per enemy slot touching pp */
++#else
+     NJS_POINT3 ps[128];
++#endif
+     BH_PWORK* enep; // not from DWARF
+     float car;      // not from DWARF
+ 
+diff --git a/src/ps2/veronica/prog/item.c b/src/ps2/veronica/prog/item.c
+index 034d1fc6..65cc39f9 100644
+--- a/src/ps2/veronica/prog/item.c
++++ b/src/ps2/veronica/prog/item.c
+@@ -106,7 +106,17 @@ const short combidata[410] =
+       142,     1,     1,    12,
+       131,     0
+ };
++/* 0x200 is the standard stackable item-type flag (handgun bullets, ink
++   ribbons and the other ammo already use it). Retail leaves it off the rifle
++   and assault-rifle bullet entries (40, 42), which makes every pickup take a
++   slot. On the PC the table is writable: the port sets the flag on those two
++   while its "Rifle ammo stacks" setting is on (or BioRand is), so those pickups
++   merge into one stack. */
++#ifdef TARGET_PC
++ITEM_WORK itemdata[156] =
++#else
+ const ITEM_WORK itemdata[156] = 
++#endif
+ {
+     {   0,   -1,     0 },
+     {   1,   -1,  3329 },
+@@ -695,3 +705,14 @@ const unsigned int getbulletmax[156][4] =
+     {   6,   0,   0,         0 },
+     {  12,   0,   0,         0 }
+ };
++
++#ifdef TARGET_PC
++/* "Rifle ammo stacks": the two rifle/assault-rifle bullet entries (40, 42) get the standard
++   stackable bit (0x200) while the setting is on; the table is writable on the PC (item.h). */
++void pc_rifle_stack(int on)
++{
++    unsigned short bit = on ? 0x200 : 0;
++    itemdata[40].type = (unsigned short)((itemdata[40].type & ~0x200) | bit);
++    itemdata[42].type = (unsigned short)((itemdata[42].type & ~0x200) | bit);
++}
++#endif
 diff --git a/src/ps2/veronica/prog/main.c b/src/ps2/veronica/prog/main.c
 index 66f4beb9..331a670d 100644
 --- a/src/ps2/veronica/prog/main.c
@@ -620,6 +810,22 @@ index ec2c4bd9..801778af 100644
          plp->flg |= 0xC0000;
          
          plp->mtn_no = 116;
+diff --git a/src/ps2/veronica/prog/ps2_McSaveFile.c b/src/ps2/veronica/prog/ps2_McSaveFile.c
+index ad46867d..e4c5aa6e 100644
+--- a/src/ps2/veronica/prog/ps2_McSaveFile.c
++++ b/src/ps2/veronica/prog/ps2_McSaveFile.c
+@@ -152,9 +152,9 @@ int mcWriteStartSaveFile(SAVEFILE* pSaveFile, MEMORYCARDSTATE* pCard, char** cpp
+         wp = ItemSearch(itemid);
+         
+ #ifdef TARGET_PC
+-        if (pc_no_ink_ribbon() != 0)
++        if ((pc_no_ink_ribbon() != 0) || (pc_cheat_save() != 0))
+         {
+-            wp = NULL; /* PC option: saving uses no ink ribbon (pc/glue/coop_glue.c) */
++            wp = NULL; /* PC option: saving uses no ink ribbon (pc/glue/coop_glue.c); nor the F2 cheat's save screen (pc/glue/cheat_glue.c) */
+         }
+         
+ #endif
 diff --git a/src/ps2/veronica/prog/ps2_NaSystem.c b/src/ps2/veronica/prog/ps2_NaSystem.c
 index 76f3e1ef..ccaa97b4 100644
 --- a/src/ps2/veronica/prog/ps2_NaSystem.c
@@ -729,61 +935,142 @@ index 22cb48fc..a4c3a19e 100644
      if ((MovieType & 0x2))
      {
 diff --git a/src/ps2/veronica/prog/sub1.c b/src/ps2/veronica/prog/sub1.c
-index 53f4752a..7275811b 100644
+index 53f4752a..a23f8fda 100644
 --- a/src/ps2/veronica/prog/sub1.c
 +++ b/src/ps2/veronica/prog/sub1.c
-@@ -24,6 +24,7 @@
- #include "../../../ps2/veronica/prog/itemview.h"
- #include "../../../ps2/veronica/prog/player.h"
- #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
-+#include "pc_rules.h"
- #endif
+@@ -3734,9 +3734,21 @@ void StatusMain()
+     }
+ }
  
- #pragma optimization_level 4
-@@ -4090,7 +4091,11 @@ void GetItem(S_WORK* st)
-                     {
-                         st->pip[amari + 1] = (sys->sb_id << 16) | (unsigned char)sys->itm[224]; 
-                     } 
-+#ifdef TARGET_PC   /* the lighter into its slot only while that is empty (Claire's lockpick may be there: pc_rules.h), else into this cell */
-+                    else if (pc_to_special(st->pip, sys->sb_id, 55, 55))
-+#else
-                     else if (sys->sb_id == 55) 
++#ifdef TARGET_PC
++/* Set by bhCheckExmAtari for a floor pickup (hitchk.c). GetItem runs every frame of the status screen
++   ("Will you take it?" answered frames later): it is cleared once the item is added, on No, when the
++   screen ends (full inventory too) and for an event's item. */
++extern unsigned char override_pickup_quantity;
 +#endif
++
+ // 100% matching!
+ void GetItem(S_WORK* st)
+ {
++#ifdef TARGET_PC
++    if (st->testmode == 0 && (sys->cb_flg & (0x4000 | 0x1000000)))
++        override_pickup_quantity = 0;   /* an event's item: the retail amount */
++    unsigned char override_quantity = override_pickup_quantity;
++#endif
+     unsigned short num1, num2;     
+     unsigned short bullet1; 
+     unsigned int bullettype;
+@@ -3794,7 +3806,14 @@ void GetItem(S_WORK* st)
                      {
                          st->gb = (unsigned int*)&getbulletmax[sys->sb_id][sys->gm_mode];
                          
-@@ -7930,7 +7935,11 @@ void ItemBoxChange(S_WORK* st, unsigned short ibcsr)
- 		{
- 			chk2 = 1;
-             
-+#ifdef TARGET_PC   /* into the special slot only while it is empty, else into the cell as any item (pc_rules.h): the game wrote it over the lighter or lockpick there */
-+			if (pc_to_special(st->pip, id2, standard[sys->ply_id][0], standard[sys->ply_id][1]))
-+#else
- 			if ((id2 == standard[sys->ply_id][0]) || (id2 == standard[sys->ply_id][1]))
+-                        bullet1 += *st->gb;
++#ifdef TARGET_PC
++                        /* A non-zero room override replaces the amount that
++                           getbulletmax would add for this pickup. */
++                        if (override_quantity)
++                            bullet1 += override_quantity;
++                        else
 +#endif
- 			{
- 				lt_c3 = lt_c;
- 				lt_c2 = 1;
-@@ -7998,7 +8007,11 @@ void ItemBoxChange(S_WORK* st, unsigned short ibcsr)
-         
- 		if ((*st->pip > 1) && (lt_c != 1))
- 		{
-+#ifdef TARGET_PC   /* the cell was emptied: nothing came in, or the item went to the special slot (lt_c3, above) */
-+			if ((!id2) || (lt_c3 == lt_c))
-+#else
- 			if ((!id2) || ((id2 == standard[sys->ply_id][0]) || (id2 == standard[sys->ply_id][1])))
++                            bullet1 += *st->gb;
+                     }
+                     
+                     if (bullet1 > 999) 
+@@ -3905,6 +3924,9 @@ void GetItem(S_WORK* st)
+                 break; 
+             case 101:                              
+                 st->testmode = 3;
++#ifdef TARGET_PC
++                override_pickup_quantity = 0;
 +#endif
- 			{
- 				if (lt_c < *st->pip)
- 				{
-@@ -8931,7 +8944,9 @@ int bhSearchBullet()
+                 break;
+             }
+         }
+@@ -3922,6 +3944,9 @@ void GetItem(S_WORK* st)
+     case 3:                                         
+         if ((!(swork.statusflg & 0x40)) && (!(sys->st_flg & 0x200)))
+         {
++#ifdef TARGET_PC
++            override_pickup_quantity = 0;   /* the screen ends: taken, declined or no room */
++#endif
+             if ((swork.statusflg & 0x100))
+             {
+                 StatusCancel(st);
+@@ -4009,6 +4034,15 @@ void GetItem(S_WORK* st)
+                         {
+                             st->gb = (unsigned int*)&getbulletmax[sys->sb_id][sys->gm_mode];
+                             
++#ifdef TARGET_PC
++                            /* A non-zero room override replaces the amount
++                               that getbulletmax would add. */
++                            if (override_quantity)
++                            {
++                                bullet1 += override_quantity;
++                            }
++                            else
++#endif
+                             if (sys->sb_id == 31) 
+                             {
+                                 if (roomno == 1) 
+@@ -4037,6 +4071,10 @@ void GetItem(S_WORK* st)
+                         }
+                         
+                         st->pip[amari + 1] = (itemid1 << 16) | bullet1;
++#ifdef TARGET_PC
++                        /* The override applies to this pickup only. */
++                        override_quantity = 0;
++#endif
  
-     st = &swork; 
+                         if (!num1)
+                         {
+@@ -4086,6 +4124,16 @@ void GetItem(S_WORK* st)
+                 } 
+                 else 
+                 {
++#ifdef TARGET_PC
++                    /* A non-zero room override is the count for this item;
++                       otherwise the room's retail special cases apply. */
++                    if (override_quantity)
++                    {
++                        st->pip[amari + 1] = (sys->sb_id << 16) | override_quantity;
++                        override_quantity = 0;
++                    }
++                    else
++#endif
+                     if ((sys->sb_id == 4) && ((roomno == 926) || (roomno == 706))) 
+                     {
+                         st->pip[amari + 1] = (sys->sb_id << 16) | (unsigned char)sys->itm[224]; 
+@@ -4159,6 +4207,7 @@ void GetItem(S_WORK* st)
+         
+         st->gb = (unsigned int*)&getbulletmax[sys->sb_id][sys->gm_mode];
+         
++        /* Event grants are not floor pickups: use the retail table. */
+         st->pip[1] = (sys->sb_id << 16) | *st->gb;
+         
+         if (*st->pip == 1)
+@@ -4175,6 +4224,8 @@ void GetItem(S_WORK* st)
+         sys->cb_flg &= ~0x1000000;
+     }
+ #ifdef TARGET_PC
++    if (swork.statusflg & 0x100)
++        override_pickup_quantity = 0;   /* added */
+     if (pc_given && (swork.statusflg & 0x100))
+     {
+         coop_item_granted(sys->sb_id);
+@@ -8929,9 +8980,14 @@ int bhSearchBullet()
+     unsigned int z;  
+     unsigned short bullettype; 
+ 
+-    st = &swork; 
++    st = &swork;
  
 -    if (!(sys->st_flg & 0x8000000)) 
-+    /* Inventory expansion belongs to gm_flg (ItemSet, ItemCombination and
-+       the side-pack acquisition path), not the unrelated status flags. */
-+    if (!(sys->gm_flg & 0x8000000)) 
++#ifdef TARGET_PC   /* the retail ELF tests gm_flg (sys+0x5C: the side pack, 10 slots, as ItemBox and the bag); st_flg's bit
++                      is the typewriter's, so the last two slots were never searched and ammo there did not reload */
++    if (!(sys->gm_flg & 0x8000000))
++#else
++    if (!(sys->st_flg & 0x8000000))
++#endif
      {
          max = 8;
      }

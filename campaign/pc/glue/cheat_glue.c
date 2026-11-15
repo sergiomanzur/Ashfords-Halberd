@@ -9,16 +9,20 @@
 #include <ps2/veronica/prog/pwksub.h>
 #include <ps2/veronica/prog/item.h>
 #include <ps2/veronica/prog/hitchk.h>
+#include <ps2/veronica/prog/sdfunc.h>
+#include <ps2/veronica/prog/system.h>
 #include "../src/host/cheat.h"
 #include "../src/host/actors.h"
 #include "../src/host/cheat_room_snapshot.h"
 #include "../src/host/script_rules.h"
 #include "pc_rules.h"
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 CheatState g_cheat = { .give_id = 1, .give_count = 1 };
+int pc_in_play(const BH_PWORK* p, int scope);   /* reload_glue.c */
 
 /* infinite ammo: every shot goes through bhCheckBullet/bhCountBullet (weapon.c), which then take
    the path of the game's own unlimited weapons (no count check, no decrement) */
@@ -677,6 +681,61 @@ static void item_trace(const unsigned int* inv)
     printf("\n");
 }
 
+/* Save Now / Load Game / Open Item Box: the typewriter's save screen and a box trigger opened from
+   anywhere, under the conditions they open at a real typewriter or box. The save screen itself is
+   the game's, so no ink ribbon is asked for or used. */
+extern unsigned char PauseBtn;   /* system.c */
+extern short standard[3][2];     /* sub1.c: the special slot's items per player */
+static int cheat_saving;         /* the open save screen is ours: ps2_McSaveFile.c mcWriteStartSaveFile uses no ink ribbon */
+int pc_cheat_save(void) { return cheat_saving; }
+enum { ANY_BOX, ANY_SAVE, ANY_LOAD };
+static const char* anywhere_refused(int kind)
+{
+    static const char* const busy[] = { "Cannot open the item box now. Finish the current action first.",
+                                        "Cannot save now. Finish the current action first.",
+                                        "Cannot load now. Finish the current action first." };
+    if (sys->gm_mode == 3) return "Not in the Battle Game.";
+    if (!pc_in_play(plp, 0) || plp->mnwP != plp->mnwPb || (plp->flg & 0x6) || plp->hp < 0 || !(sys->ts_flg & 0x1000) ||
+        (sys->ss_flg & 0x80000000) || (sys->st_flg & 0x1C04200C) || (sys->cb_flg & 0x27F4037) || PauseBtn)
+        return busy[kind];
+    return NULL;
+}
+
+/* Load Game: the typewriter's screen with the load screen in place of the save screen
+   (bup_00.c TypewriterInit/Main). A save picked: this game ends as LOAD GAME ends it and the
+   save's starts. Back: out as the save screen leaves, the save region as it was. */
+static int cheat_loading;
+static unsigned char load_keep[0x834];   /* the save region, as coop_glue.c EV_BLOB carries it */
+#define SAVE_REGION ((int)((char*)&sys->save_end - (char*)&sys->version))
+_Static_assert(offsetof(SYS_WORK, save_end) - offsetof(SYS_WORK, version) == sizeof(load_keep), "the save region");
+int pc_cheat_load(void) { return cheat_loading; }
+int pc_cheat_load_exit(void)
+{
+    if (!cheat_loading) return 0;
+    cheat_loading = 0;
+    if (!(sys->typ_flg & 0x10)) {   /* back: TypewriterExit as after the save screen (typ_flg 0x8) */
+        memcpy(&sys->version, load_keep, SAVE_REGION);
+        sys->typ_md0 = 2;
+        sys->typ_md1 = 0;
+        sys->typ_flg |= 0x8;
+        host_log("cheat: load anywhere: back to the game in %d/%d\n", sys->stg_no, sys->rom_no);
+        return 1;
+    }
+    memcpy(load_keep, &sys->version, SAVE_REGION);   /* the loaded save (bhInitSystem clears it) */
+    RequestAllStopSoundEx(1, 1, 0);
+    sys->ss_flg |= 0x20000;
+    bhExitGame();
+    memcpy(&sys->version, load_keep, SAVE_REGION);
+    sys->ss_flg |= 0x200;
+    sys->tk_flg = 0x300010;
+    sys->ts_flg = 0;
+    sys->ss_flg &= ~0x20000;
+    host_log("cheat: load anywhere: the save's game starts in %d/%d\n", sys->stg_no, sys->rom_no);
+    return 1;
+}
+
+void pc_extras_scd1(void) {}   /* "Extra Item Boxes and Herbs": filled in by extras_glue.c when enabled */
+
 void cheat_frame(void)
 {
     unsigned int* inv;
@@ -690,6 +749,7 @@ void cheat_frame(void)
     item_trace(inv);
     if (sys->tk_flg && (sys->sp_flg & 0x2)) scripted(inv);   /* in game */
     unlock_switch();
+    if (!(sys->cb_flg & 0x200000)) cheat_saving = cheat_loading = 0;   /* the save/load screen closed */
 
     g_cheat.hp = plp->hp;
     g_cheat.stg = sys->stg_no; g_cheat.rom = sys->rom_no; g_cheat.pos = sys->pos_no;
@@ -708,7 +768,35 @@ void cheat_frame(void)
     if (req & CHEAT_HEAL) { plp->hp = max_hp; g_cheat.result = "healed"; }
     if ((req & CHEAT_GIVE) && g_cheat.give_id > 0 && g_cheat.give_id < CHEAT_ITEMS) {
         unsigned int entry = (unsigned int)g_cheat.give_id << 16 | (g_cheat.give_count & 0xFFFF);
-        g_cheat.result = pc_inv_add(inv, slots, entry, itemdata) ? "item added" : "not enough inventory space";
+        if (pc_to_special(inv, g_cheat.give_id, standard[sys->ply_id][0], standard[sys->ply_id][1])) {
+            inv[1] = entry;
+            g_cheat.result = "item added";
+        } else
+            g_cheat.result = pc_inv_add(inv, slots, entry, itemdata) ? "item added" : "not enough inventory space";
+    }
+    if (req & CHEAT_DROP) {   /* the inventory's X: the slot emptied, as the item box leaves it */
+        int s = g_cheat.drop_slot;
+        if (s < 1 || s >= 2 + slots || !(inv[s] >> 16)) g_cheat.result = "Item removed.";
+        else if ((int)inv[0] == s && !(sys->mn_mode0 == 0 && pc_in_play(plp, 0) && plp->mnwP == plp->mnwPb && plp->mode1 == 0))
+            g_cheat.result = "Cannot remove the weapon in hand now. Lower it first.";
+        else {
+            if ((int)inv[0] == s) { swork.pip = inv; WeaponSet(s, s); }
+            inv[s] = 0;
+            g_cheat.result = "Item removed.";
+        }
+    }
+    if (req & (CHEAT_SAVE | CHEAT_LOAD | CHEAT_BOX)) {
+        static const char* const what[] = { "item box anywhere", "save anywhere", "load anywhere" };
+        int kind = (req & CHEAT_LOAD) ? ANY_LOAD : (req & CHEAT_SAVE) ? ANY_SAVE : ANY_BOX;
+        const char* why = anywhere_refused(kind);
+        if (why) g_cheat.result = why;
+        else if (kind == ANY_BOX) { sys->cb_flg |= 0x40000; g_cheat.result = "Opening the item box."; }
+        else {
+            sys->cb_flg |= 0x200000;
+            if (kind == ANY_SAVE) { cheat_saving = 1; g_cheat.result = "Opening the save screen."; }
+            else { cheat_loading = 1; memcpy(load_keep, &sys->version, SAVE_REGION); g_cheat.result = "Opening the load screen."; }
+        }
+        host_log("cheat: %s in %d/%d: %s\n", what[kind], sys->stg_no, sys->rom_no, g_cheat.result);
     }
     if (req & CHEAT_SPAWN) g_cheat.result = spawn_enemy(g_cheat.spawn_idx);
     if (req & CHEAT_TELEPORT) {

@@ -1,7 +1,8 @@
 # Campaign backend integration
 
 The original campaign backend is adapted from recvx-enhanced-port 0.6.8,
-pinned at `38d457e3ec11a3120447e3544031af9a40eccbdb`. Its campaign code and
+pinned at `38d457e3ec11a3120447e3544031af9a40eccbdb`, and now includes the
+single-player portions of 0.6.9–0.8.0 (`8a1b6f0`). Its campaign code and
 quality-of-life systems are retained together; see
 [source provenance](../campaign/PROVENANCE.md). The x64 prototype is still built
 with `tools/build.ps1`. This backend is built separately as Windows x86.

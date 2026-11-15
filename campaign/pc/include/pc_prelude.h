@@ -100,6 +100,11 @@ extern int pc_plp_frm, pc_plp_hokan;
 extern unsigned int pc_plp_mtn;
 extern void* pc_plp_set;
 int   pc_inf_ammo(void);      /* F2 cheat (pc/glue/cheat_glue.c): bhCheckBullet/bhCountBullet as for an unlimited weapon */
+int   pc_cheat_save(void);    /* F2 Save Now: the open typewriter screen is ours (no ink ribbon) */
+int   pc_cheat_load(void);    /* F2 Load Game: the open screen shows the load screen */
+int   pc_cheat_load_exit(void);   /* the load screen closes: back, or start the save's game */
+void  pc_extras_scd1(void);   /* "Extra Item Boxes and Herbs": extra lids and planters around the room's entry script */
+static inline int coop_examine(int i) { (void)i; return 0; }   /* offline: no partner owns an examined trigger */
 int   pc_auto_stairs(void);   /* option (pc/glue/stairs_glue.c): bhControlPlayer without an action press: 1 = examine as for one (walked into stairs) */
 /* third-person option "Precise hits" (pc/glue/tps_glue.c): weapon.c bhCheckGunAtari tests the player's hitscan shot (on: 1)
    against the enemies' bodies (shot c1 -> c2: the joint hit or -1, hp the point), each gun hit tells the enemy's damage

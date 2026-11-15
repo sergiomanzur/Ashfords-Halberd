@@ -221,6 +221,7 @@ float gs_picture(float c)
     return c < 0 ? 0 : c > 1 ? 1 : c;
 }
 
+unsigned int gs_gl_compile(const char* vs, const char* fs);   /* aa.c: SMAA's shaders */
 static GLuint compile(const char* vs, const char* fs)
 {
     GLuint p = glCreateProgram(), s[2];
@@ -243,6 +244,7 @@ static GLuint compile(const char* vs, const char* fs)
     glDeleteShader(s[0]); glDeleteShader(s[1]);
     return p;
 }
+unsigned int gs_gl_compile(const char* vs, const char* fs) { return compile(vs, fs); }
 
 static void* gl_getproc(const char* name) { return (void*)SDL_GL_GetProcAddress(name); }
 
@@ -1527,6 +1529,35 @@ void gs_window_to_screen(float px, float py, float* x, float* y)
     *y = vh > 0 ? (py - vy) * 480.0f / vh : 0;
 }
 
+/* SMAA / deband: aa.c renders the scene texture into an intermediate target before the present
+   shader (SMAA mode 2; deband mode 3, used by Dithering's On and Deband). */
+void aa_apply(int mode, unsigned int src, unsigned int dst_fbo, int w, int h, float scale);
+static GLuint aa_tex, aa_fbo;
+static int aa_w, aa_h;
+static GLuint aa_pass(GLuint tex, int w, int h, int mode)
+{
+    if (w <= 0 || h <= 0) return tex;
+    if (!aa_fbo || aa_w != w || aa_h != h) {
+        if (aa_fbo) { glDeleteFramebuffers(1, &aa_fbo); glDeleteTextures(1, &aa_tex); }
+        aa_w = w; aa_h = h;
+        glGenTextures(1, &aa_tex);
+        glBindTexture(GL_TEXTURE_2D, aa_tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glGenFramebuffers(1, &aa_fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, aa_fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, aa_tex, 0);
+    }
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    aa_apply(mode, tex, aa_fbo, w, h, 1.0f);
+    return aa_tex;
+}
+
 /* the 640x480 display area of a render-target texture to the window */
 static void draw_display(GLuint tex, int rt_vw, int rt_vh)
 {
@@ -1544,6 +1575,9 @@ static void draw_display(GLuint tex, int rt_vw, int rt_vh)
     if (tex) {
         float dw, dh = 480.0f;
         int vx, vy, vw, vh;
+        if (g_config.antialias == 2) tex = aa_pass(tex, rt_vw, rt_vh, 2);
+        else if (g_config.dithering) tex = aa_pass(tex, rt_vw, rt_vh, 3);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);   /* aa_pass rendered into its own target */
         display_rect(ww, wh, &vx, &vy, &vw, &vh, &dw);
         glViewport(vx, vy, vw, vh);
         glUseProgram(present_prog);

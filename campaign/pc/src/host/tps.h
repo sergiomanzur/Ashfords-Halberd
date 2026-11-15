@@ -33,6 +33,9 @@ typedef struct TpsConfig {
     int pad_aim_sens;             /* right stick while aiming, percent of the above */
     int pad_invert_y;
     int pad_dead_move, pad_dead_look;   /* dead zones of the left / right stick, percent */
+    int hud;                  /* "HUD": 0 Auto (with this camera only), 1 On (fixed cameras too), 2 Off */
+    int hud_side;             /* 0 the shoulder's side (fixed cameras: right), 1 left, 2 right */
+    int hud_style;            /* 0 Weapon Circle, 1 Minimal */
     /* published by the game thread */
     volatile int cam_active;  /* the third-person camera drew the last frame */
     volatile int aiming;      /* weapon raised (crosshair) */
@@ -49,6 +52,20 @@ extern TpsConfig g_tps;
    its frame (16.16), the hips' turn off the facing (game units), the weight blended in (0: none) */
 typedef struct TpsLegs { int mtn, frm, yaw; float w; int on; } TpsLegs;   /* (on: walking this tick, w eases towards it) */
 extern TpsLegs tps_legs_me;
+
+/* The HUD (pc/glue/hud_glue.c): what it shows, published by the game thread each frame and drawn by
+   the overlay. A frame's fields may mix with the next one's: harmless. */
+enum { HUD_FINE, HUD_CAUTION, HUD_CAUTION2, HUD_DANGER, HUD_POISON };
+enum { HUD_NONE = -1, HUD_INF = -2 };
+typedef struct TpsHud {
+    volatile int on;          /* in play, shown by the setting */
+    volatile int left;        /* on the left */
+    volatile int hp, hp_max, cond;
+    volatile int rounds, spare;   /* loaded rounds (HUD_NONE / HUD_INF), spare ammo in the bag */
+    volatile int weapon;      /* equipped item id, 0 none */
+} TpsHud;
+extern TpsHud g_hud;
+void hud_frame(void);         /* game thread, frame hand-off */
 
 /* input (pc/src/input/tps_input.c), called on the game thread */
 enum { TPS_K_FWD = 1, TPS_K_BACK = 2, TPS_K_LEFT = 4, TPS_K_RIGHT = 8, TPS_K_RUN = 16, TPS_K_ACTION = 32,

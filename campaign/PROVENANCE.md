@@ -1,13 +1,16 @@
 # Campaign source provenance
 
 Adapted from [aikatore/recvx-enhanced-port](https://github.com/aikatore/recvx-enhanced-port)
-at commit `38d457e3ec11a3120447e3544031af9a40eccbdb` (release 0.6.8),
-Copyright (c) 2026 aikatore and contributors, MIT; see the
-[upstream license](https://github.com/aikatore/recvx-enhanced-port/blob/38d457e3ec11a3120447e3544031af9a40eccbdb/LICENSE).
+at commit `38d457e3ec11a3120447e3544031af9a40eccbdb` (release 0.6.8), with the
+single-player portions of releases 0.6.9–0.8.0 (`8a1b6f066f9aab03618a428c575e034c2769da55`)
+adapted locally, Copyright (c) 2026 aikatore and contributors, MIT; see the
+[upstream license](https://github.com/aikatore/recvx-enhanced-port/blob/8a1b6f066f9aab03618a428c575e034c2769da55/LICENSE).
 
 The associated decomp fork is pinned at
 `4aac5133901da3821fe443b79d6cdd1e3b29e6da` in
-`upstream/recvx-campaign-decomp`. Its license and upstream AshfordFamily
+`upstream/recvx-campaign-decomp`; `campaign/patches/offline.patch` carries the
+offline adaptation and the selected single-player fixes from the fork through
+`f30668f6fccddaa53ba3540b222a28fa09935165`. Its license and upstream AshfordFamily
 attribution remain there. The old `upstream/recvx-decomp` pin is untouched.
 
 Imported: platform and gameplay glue, renderer, movie/audio/input
