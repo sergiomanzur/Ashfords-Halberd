@@ -20,6 +20,18 @@ static void njCalcPoint(float (*m)[16],const NJS_POINT3* a,NJS_POINT3* b)
 {b->x=(*m)[12]+a->x;b->y=(*m)[13]+a->y;b->z=(*m)[14]+a->z;}
 static void clear_of_walls(const NJS_POINT3* a,NJS_POINT3* b)
 {wall_calls++;if(wall)*b=*a;}
+/* third-person camera-collision fixtures (the first-person path returns before them) */
+static float eye_up, eye_side, cur_fov=60, col_aim, col_drop, col_pull;
+#define DEG(a) ((a)*(32768.0f/3.14159265f))
+#define EYE_UP eye_up
+#define EYE_SIDE eye_side
+static void mesh_room(void) {}
+static void clear_of_mesh(const NJS_POINT3* a,NJS_POINT3* b,float m) {(void)a;(void)b;(void)m;}
+static float obstruct(float* st,float raw) {(void)st;return raw;}
+static float arm(const NJS_POINT3* o,const NJS_POINT3* e,float rx,float rz) {(void)o;(void)e;(void)rx;(void)rz;return 1;}
+static int aiming(void) {return 0;}
+static int lock_aim(void) {return 0;}
+static float pc_hor_scale(void) {return 1;}
 #include "first_person_test.inc"
 #define CHECK(x) do {if(!(x)){fprintf(stderr,"FAIL %d %s\n",__LINE__,#x);return 1;}}while(0)
 #define CLOSE(a,b) (fabsf((a)-(b))<0.001f)
@@ -32,12 +44,12 @@ int main(void)
     CHECK(camera_allowed() && tps_first_person_active());
     model.obj_num=5;CHECK(!camera_allowed());model.obj_num=10;
     model.owP=0;CHECK(!camera_allowed());model.owP=nodes;
-    view(&eye,&dir,&aim);
+    view(&eye,&dir,&aim,0);
     CHECK(CLOSE(eye.x,10) && CLOSE(eye.y,18.5f) && eye.z<20);
     CHECK(CLOSE(eye.x,aim.x) && CLOSE(eye.y,aim.y) && CLOSE(eye.z,aim.z));
     CHECK(CLOSE(dir.x,0) && CLOSE(dir.y,0) && CLOSE(dir.z,-1));
-    yaw=16384;view(&eye,&dir,&aim);CHECK(eye.x<10 && CLOSE(eye.z,20));
-    wall=1;view(&eye,&dir,&aim);CHECK(CLOSE(eye.x,10) && CLOSE(eye.z,20) && wall_calls>0);wall=0;
+    yaw=16384;view(&eye,&dir,&aim,0);CHECK(eye.x<10 && CLOSE(eye.z,20));
+    wall=1;view(&eye,&dir,&aim,0);CHECK(CLOSE(eye.x,10) && CLOSE(eye.z,20) && wall_calls>0);wall=0;
     plp->mode2=14;CHECK(!camera_allowed());plp->mode2=0;
     plp->mode0=2;CHECK(!camera_allowed());plp->mode0=1;
     plp->flg=0x4000000;CHECK(!camera_allowed());plp->flg=0;
@@ -48,6 +60,6 @@ int main(void)
     plp->mode1=1;plp->mode2=65;CHECK(camera_allowed());
     tps_cam_active=0;CHECK(!tps_first_person_active());tps_cam_active=1;
     tps_on=1;plp->mode1=0;plp->mode2=14;CHECK(camera_allowed() && !tps_first_person_active());
-    yaw=0;view(&eye,&dir,&aim);CHECK(CLOSE(eye.x,13.5f) && CLOSE(eye.z,34));
+    yaw=0;view(&eye,&dir,&aim,0);CHECK(CLOSE(eye.x,13.5f) && CLOSE(eye.z,34));
     puts("first-person eye, aim origin, collision, body gate and scripted fallbacks passed");return 0;
 }

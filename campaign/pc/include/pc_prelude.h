@@ -109,6 +109,15 @@ int   pc_precise_hits(void);
 int   pc_precise_hit(struct BH_PWORK* pp, int wpn, const float* c1, const float* c2, float* hp);
 void  pc_precise_dam(struct BH_PWORK* pp, int jnt, int d0, int precise, int wpn);
 int   pc_precise_head(struct BH_PWORK* pp);
+/* "Headshots & Piercing": bhCheckGunAtari: 1 = the player's shot with weapon wpn goes through the enemies as
+   the magnum's; en01.c bhEne01_DmgCheck: 1 = the zombie's killing head hit bursts its head. A precise hit's
+   blood (zonzon.c bhEne_SetBlood, en01.c bhEne01_SetBlood): the joint it hit and, in ofs, the hit point in
+   that joint's frame; -1 = the game's place */
+int   pc_pierce(int wpn);
+int   pc_head_burst(struct BH_PWORK* pp);
+int   pc_blood_at_hit(struct BH_PWORK* pp, float* ofs);
+int   pc_hit_react_fx(int on);   /* effect.c: "Locational Hit Reactions", the linked effects follow the flinch */
+int   pc_hit_react(struct BH_PWORK* ep, int on);   /* eneset.c bhDrawEnemy: the flinch for the draw only */
 /* F2 cheat "Unlock all" (pc/glue/cheat_glue.c): bhPlItemCheck passes for a key at its lock; bhControlPlayer's examine
    press in a key's use spot (1: taken) and bhControlEvent around scd1 (0 before, 1 after) use the key there;
    bhUseItemCheck / bhCmpB found the key used tested; bhInitEvent: a room's entry script is about to run */
@@ -191,6 +200,9 @@ void  actor_hands_back(void);                 /* game.c, before bhControlPlayer:
    bottom keep their offsets, so vanilla rooms are laid out as before and only the packed room
    file is read higher up. Costs address space only (bss, pages never touched stay free), but
    inside the PS2 address window: the whole image must end below 0x40000000 (ps2/memory.c). */
+/* The Ashford campaign keeps the PS2's 128 enemy slots; the upstream 0.8.0 enemy expansion
+   (255 slots) is outside this update's scope. */
+#define PC_ENE_SLOTS 128
 #define PC_ARENA_EXTRA (64 << 20)
 /* The vertex work buffer above it (vwbmemp, njInit3D: 64-byte entries, one per vertex of the node
    being drawn): 5120 entries fit on the PS2 although njInit3D is told 8192; the PC adds the rest. */
@@ -214,6 +226,7 @@ void  spawn_release(void);
 void  spawn_textures_released(void);
 void  spawn_room_setup(void);      /* room.c bhSetRoom: the spawned types' data go with the room */
 extern int pc_enemy_added;         /* eneset.c: the room got enemies its file does not have (helper code per type) */
+extern int pc_enemy_refused;       /* eneset.c: the enemy's code runs on a player another enemy holds (its changes are undone) */
 void  pc_enemy_mark_added(void);   /* eneset.c: sets it, the shared helper functions as they are then kept for the room's earlier children */
 void  enemy_room_finished(void);   /* room.c bhFinishRoom: enemy options (pc/glue/enemyopt_glue.c) */
 

@@ -111,9 +111,14 @@ HostConfig g_config = { .window_w = 1280, .window_h = 960, .borderless_extra = 1
 SDL_Window* g_window;
 SDL_GLContext g_gl;
 
+void log_keep(const char* fmt, va_list ap);   /* log.c: the last messages for the crash report */
+
 void host_log(const char* fmt, ...)
 {
     va_list ap;
+    va_start(ap, fmt);
+    log_keep(fmt, ap);   /* also with --quiet: the crash report keeps the last messages */
+    va_end(ap);
     if (g_config.log_level <= 0) return;
     va_start(ap, fmt);
     vfprintf(stderr, fmt, ap);
@@ -325,6 +330,7 @@ static int SDLCALL game_thread(void* ud)
 {
     char* game_argv[] = { "cdrom0:\\SLUS_201.84;1", NULL };
     (void)ud;
+    { extern void crash_thread_init(void); crash_thread_init(); }
     prof_thread(PROF_LOGIC);
     { extern void profile_thread(char); profile_thread('g'); }   /* RECVX_PROFILE */
     exit(recvx_game_main(1, game_argv));
@@ -338,6 +344,7 @@ int main(int argc, char** argv)
     { char* cwd = SDL_GetCurrentDirectory(); if (cwd) { SDL_strlcpy(start_dir, cwd, sizeof(start_dir)); SDL_free(cwd); } }
     parse_args(argc, argv);
     home_dir();
+    { extern void crash_init(const char*); crash_init(ASHFORD_VERSION); }   /* AshfordsHalberd-crash.log, with or without --log */
     if (log_path[0]) { extern void log_start(const char*); log_start(log_path); }
     host_log("Ashford's Halberd " ASHFORD_VERSION " Beta / campaign backend " RECVX_VERSION "\n");
     host_log("Adapted from recvx-enhanced-port; Copyright (c) 2026 aikatore and contributors, MIT\n");

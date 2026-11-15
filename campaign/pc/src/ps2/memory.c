@@ -51,11 +51,36 @@ static int unprotect_cb(struct dl_phdr_info* info, size_t sz, void* data)
 }
 #endif
 
+/* The scratchpad's address is taken: name what holds it (on Windows usually a DLL another program
+   injects, an overlay or an antivirus), so the player knows what to close. */
+static void spr_taken(void)
+{
+    char who[512] = "";
+#ifdef _WIN32
+    MEMORY_BASIC_INFORMATION mbi;
+    if (VirtualQuery((void*)(uintptr_t)PS2_SPR_BASE, &mbi, sizeof(mbi)) && mbi.Type == MEM_IMAGE)
+        GetModuleFileNameA((HMODULE)mbi.AllocationBase, who, sizeof(who));
+#else
+    FILE* f = fopen("/proc/self/maps", "r");
+    char line[600];
+    unsigned long a, e;
+    while (f && fgets(line, sizeof(line), f))
+        if (sscanf(line, "%lx-%lx", &a, &e) == 2 && a < PS2_SPR_BASE + PS2_SPR_SIZE && e > PS2_SPR_BASE) {
+            char* p = strchr(line, '/');
+            if (p) { p[strcspn(p, "\n")] = 0; snprintf(who, sizeof(who), "%s", p); }
+            break;
+        }
+    if (f) fclose(f);
+#endif
+    if (who[0]) host_fatal("Cannot reserve game memory at 0x%08X: it is used by\n%s\n\nClose the program that adds it (an overlay or antivirus), or restart the computer.", PS2_SPR_BASE, who);
+    host_fatal("Cannot reserve game memory at 0x%08X. Restart the computer and try again.", PS2_SPR_BASE);
+}
+
 void ps2_memory_init(void)
 {
 #ifdef _WIN32
     void* spr = VirtualAlloc((void*)(uintptr_t)PS2_SPR_BASE, PS2_SPR_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    if (spr != (void*)(uintptr_t)PS2_SPR_BASE) host_fatal("cannot map the EE scratchpad at 0x%08X", PS2_SPR_BASE);
+    if (spr != (void*)(uintptr_t)PS2_SPR_BASE) spr_taken();
     {   /* the decomp writes into string literals: make the image's read-only data sections writable */
         uint8_t* base = (uint8_t*)GetModuleHandleA(NULL);
         IMAGE_NT_HEADERS* nt = (IMAGE_NT_HEADERS*)(base + ((IMAGE_DOS_HEADER*)base)->e_lfanew);
@@ -64,13 +89,13 @@ void ps2_memory_init(void)
             DWORD old, ch = sh->Characteristics;
             if (!(ch & IMAGE_SCN_MEM_READ) || (ch & (IMAGE_SCN_MEM_WRITE | IMAGE_SCN_MEM_EXECUTE))) continue;
             if (!VirtualProtect(base + sh->VirtualAddress, sh->Misc.VirtualSize, PAGE_READWRITE, &old))
-                host_fatal("cannot make section %.8s writable", (const char*)sh->Name);
+                host_fatal("Cannot access game memory (%.8s).", (const char*)sh->Name);
         }
     }
 #else
     void* spr = mmap((void*)(uintptr_t)PS2_SPR_BASE, PS2_SPR_SIZE, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-    if (spr != (void*)(uintptr_t)PS2_SPR_BASE) host_fatal("cannot map the EE scratchpad at 0x%08X", PS2_SPR_BASE);
+    if (spr != (void*)(uintptr_t)PS2_SPR_BASE) spr_taken();
     dl_iterate_phdr(unprotect_cb, NULL);
 #endif
     {
@@ -80,19 +105,19 @@ void ps2_memory_init(void)
         uint8_t* base = (uint8_t*)GetModuleHandleA(NULL);
         IMAGE_NT_HEADERS* nt = (IMAGE_NT_HEADERS*)(base + ((IMAGE_DOS_HEADER*)base)->e_lfanew);
         IMAGE_SECTION_HEADER* sh = IMAGE_FIRST_SECTION(nt);
-        for (unsigned i = 0; i < nt->FileHeader.NumberOfSections; i++, sh++)   /* not .reloc, .debug_* */
-            if (!(sh->Characteristics & IMAGE_SCN_MEM_DISCARDABLE) && (uintptr_t)base + sh->VirtualAddress + sh->Misc.VirtualSize > end)
+        for (unsigned i = 0; i < nt->FileHeader.NumberOfSections; i++, sh++)   /* not .reloc, .debug_*, nor the resources */
+            if (!(sh->Characteristics & IMAGE_SCN_MEM_DISCARDABLE) && memcmp(sh->Name, ".rsrc", 6) && (uintptr_t)base + sh->VirtualAddress + sh->Misc.VirtualSize > end)
                 end = (uintptr_t)base + sh->VirtualAddress + sh->Misc.VirtualSize;
 #else
         extern char _end;
         end = (uintptr_t)&_end;
 #endif
         if (((uintptr_t)&ps2_window_probe & 0x30000000u) != 0x30000000u)
-            host_fatal("executable is not linked inside the PS2 address window (0x30000000)");
+            host_fatal("This game build has an invalid memory layout.");
         /* all static game memory (room arena, texture heap, ...) must lie in the window: the budgets
            in pc_prelude.h share the 256 MB up to 0x40000000 (docs/modding/ROOM_FORMAT.md "Limits and budgets") */
         if (end > 0x40000000u)
-            host_fatal("the executable's data end at 0x%08X, past the PS2 address window (0x40000000)", (unsigned)end);
+            host_fatal("This game build exceeds its memory limit (0x%08X).", (unsigned)end);
     }
 }
 char ps2_window_probe;

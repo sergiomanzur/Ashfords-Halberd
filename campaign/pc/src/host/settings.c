@@ -431,6 +431,12 @@ const Setting g_settings[] = {
     { SP_TPS, "Game auto-aim", V(g_tps.auto_aim), 0, 1, 1, .help = "Off: free aim, the shot goes where the crosshair points. On: the game's lock-on; with the gamepad (Modern) a gentle aim assist instead." },
     { SP_TPS, "Precise hits", V(g_tps.precise), 0, 1, 1,
       .help = "On: a free-aim shot hits an enemy only where it meets its body, a head hit does more damage, and a zombie's head bursts only from a hit on the head. Off: the game's wide hit test, which also hits beside an enemy." },
+    { SP_TPS, "Locational hit reactions", V(g_tps.hit_react), 0, 1, 1,
+      .help = "Zombies flinch where a shot lands: the head snaps back, an arm jerks or a leg buckles. Damage and timing stay the same." },
+    { SP_TPS, "Headshots and piercing", V(g_tps.headshots), 0, 1, 1,
+      .help = "Rifle headshots deal extra damage, a killing headshot from a powerful gun bursts a zombie's head, and sniper rifle shots go through enemies." },
+    { SP_TPS, "Move while aiming", V(g_tps.aim_walk), 0, 1, 1,
+      .help = "Walk slowly while aiming, attacking or reloading instead of standing still." },
     { SP_TPS, "Gamepad controls", V(g_tps.pad_modern), 0, 1, 1, tps_pad_names, .group = "GAMEPAD",
       .help = "Modern: the left stick walks where it points seen from the camera, the right stick turns the camera and aims; "
               "own bindings (CONTROLS, gamepad, Third person). Classic: tank controls through the game's buttons, the camera behind." },

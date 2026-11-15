@@ -18,6 +18,10 @@ typedef struct TpsConfig {
     int invert_y, crosshair;
     int auto_aim;             /* 1 = keep the game's lock-on when raising the weapon */
     int precise;              /* "Precise hits": free-aim shots hit only the enemies' bodies (tps_glue.c pc_precise_hits) */
+    int aim_walk;             /* "Move While Aiming": walk slowly while aiming or reloading, the legs walking under the aim (tps_glue.c) */
+    int hit_react;            /* "Locational Hit Reactions": a zombie hit on the head, an arm or a leg flinches there (tps_glue.c, drawn only) */
+    int headshots;            /* "Headshots & Piercing": more head damage from the rifles, killing head hits burst a zombie's head,
+                                 the sniper rifle pierces (tps_glue.c) */
     int atmos;                /* light and fog: 1 = smooth (fades between the cuts' settings), 0 = per cut */
     int free_cam;             /* mouse/keyboard camera: 0 = B (behind the character, the mouse turns it),
                                  1 = A (free: the mouse orbits the camera, WASD walk relative to it) */
@@ -40,6 +44,11 @@ typedef struct TpsConfig {
 } TpsConfig;
 
 extern TpsConfig g_tps;
+
+/* "Move While Aiming": legs walking under the weapon motion (tps_glue.c tps_legs): the walk motion of the base set,
+   its frame (16.16), the hips' turn off the facing (game units), the weight blended in (0: none) */
+typedef struct TpsLegs { int mtn, frm, yaw; float w; int on; } TpsLegs;   /* (on: walking this tick, w eases towards it) */
+extern TpsLegs tps_legs_me;
 
 /* input (pc/src/input/tps_input.c), called on the game thread */
 enum { TPS_K_FWD = 1, TPS_K_BACK = 2, TPS_K_LEFT = 4, TPS_K_RIGHT = 8, TPS_K_RUN = 16, TPS_K_ACTION = 32,

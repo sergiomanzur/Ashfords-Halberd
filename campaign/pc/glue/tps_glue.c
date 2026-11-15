@@ -12,6 +12,9 @@
 #include <ps2/veronica/prog/ps2_NinjaCnk.h>
 #include <ps2/veronica/prog/ps2_NaFog.h>
 #include <ps2/veronica/prog/playpch.h>
+#include <ps2/veronica/prog/Motion.h>
+#include <ps2/veronica/prog/hitchk.h>
+#include <ps2/veronica/prog/sdfunc.h>
 #include "../src/host/tps.h"
 #include "../src/host/modern.h"
 #include "../src/host/bindings.h"
@@ -19,7 +22,7 @@
 #include "pc_rules.h"
 
 TpsConfig g_tps = { .fov = 75, .aim_fov = 65, .dist = 140, .aim_dist = 100, .height = 165, .shoulder = 35,
-                    .sens_x = 100, .sens_y = 100, .aim_sens = 70, .crosshair = 1, .precise = 1, .atmos = 1, .key = 62 /* F5 */,
+                    .sens_x = 100, .sens_y = 100, .aim_sens = 70, .crosshair = 1, .precise = 1, .hit_react = 1, .headshots = 1, .atmos = 1, .key = 62 /* F5 */,
                     .pad_modern = 1, .pad_sens_x = 100, .pad_sens_y = 100, .pad_aim_sens = 50, .pad_dead_move = 20, .pad_dead_look = 15 };
 int tps_on;            /* hooks active (changes only at the frame hand-off) */
 int tps_cam_active;    /* our camera is the view of the current frame */
@@ -34,6 +37,7 @@ int reload_at_rest(void);      /* reload_glue.c */
 int pc_in_play(const BH_PWORK* p, int scope);
 int pc_in_game(void);           /* options_glue.c */
 int pc_options_up(void);        /* options_glue.c */
+static int pc_trade_screen(void) { return 0; }   /* offline: no co-op trade screen */
 
 static float yaw, pitch;          /* camera, game angle units (65536 = 360 deg); pitch > 0 looks up */
 static float mouse_dx, mouse_dy;  /* this frame's mouse motion, pixels */
@@ -55,6 +59,8 @@ static int stick_moved;           /* the right stick moved this frame (pc_input_
 static int pad_move;              /* the left stick walks this frame: tps_player turns towards pad_target */
 static float pad_target;
 static int recenter;              /* game frames left of the camera easing behind the character */
+static float aw_f, aw_r;          /* "Move While Aiming": this frame's walk under the aim, forward / right seen from the camera (-1..1) */
+static int aim_walk_ok(void);
 
 /* a camera in `cam`: position, angles, view vector, eye */
 typedef struct { float px, py, pz, vx, vy, vz, wpx, wpy, wpz; int ax, ay, az; float ln; int pers; } View;
@@ -131,10 +137,14 @@ void tps_player_mode(void)
 
 static int dual_e;   /* (dual weapons, below) */
 extern int enemy_room_gen;   /* enemyopt_glue.c: room loads so far */
+static void mesh_free(void);
+static float col_drop, col_pull, col_aim;
 static void deactivate(void)
 {
     dual_e = -1;
     atmos_off();
+    mesh_free();
+    col_drop = col_pull = col_aim = 0;
     tps_player_mode();
     if (!tps_cam_active) return;
     if (trace && tps_on == 2) printf("fps: suspended frame %u\n", (unsigned)gs_frame_count());
@@ -154,6 +164,8 @@ void tps_game_exit(void)
     aim_h = 0;
     recenter = 0;
     tps_cam_active = g_tps.cam_active = g_tps.aiming = g_tps.pad_play = cut_cam_ok = 0;
+    mesh_free();
+    col_drop = col_pull = col_aim = 0;
 }
 
 /* the weapon raised; not the reload of a lowered weapon (reload_glue.c), which keeps the walking camera */
@@ -215,11 +227,207 @@ static void clear_of_walls(const NJS_POINT3* a, NJS_POINT3* b)
     sys->apos = apos; sys->ahtp = ahtp;
 }
 
+/* ---- The room model as the camera's obstacle (docs/THIRDPERSON.md "Camera collision") ----
+   The collision walls say where actors walk, not what is drawn: the vault under the palace dock's
+   stairs (1/13) has odd walls for sides, which the camera's wall test skips (bullets pass them),
+   and no wall for its ceiling, so the camera turned out through its sides and rose over its top.
+   The room model's triangles are read once per room (world space, by room part with a bounding
+   sphere; not the alpha strips: railings, grates, glass) and the camera's rays test them from
+   both sides. Heap only, freed when third person stops (address window). */
+typedef struct { float c[3], r; int t0, n; } MeshPart;
+static float* mesh_t;        /* 9 floats per triangle */
+static MeshPart* mesh_p;
+static int mesh_nt, mesh_np, mesh_tcap, mesh_pcap, mesh_gen = -1;
+static const void* mesh_obj;
+
+static void mesh_free(void)
+{
+    free(mesh_t); free(mesh_p);
+    mesh_t = NULL; mesh_p = NULL;
+    mesh_nt = mesh_np = mesh_tcap = mesh_pcap = 0;
+    mesh_gen = -1;
+}
+
+/* one room part: its vertex chunks (51 njCnkCvVnPs2, 41 CV_VN) into world space, its strips
+   (64..69; docs/modding/ROOM_FORMAT.md "MLB models and the room model") into triangles */
+static void mesh_model(const NJS_CNK_MODEL* md, NJS_MATRIX* m)
+{
+    const unsigned char* p;
+    float* w;
+    int nv = 0, t0 = mesh_nt;
+    if (!md->vlist || !md->plist) return;
+    for (p = (const unsigned char*)md->vlist; *p != 255; p += 4 + 4 * *(const unsigned short*)(p + 2)) {
+        int end = *(const unsigned short*)(p + 4) + *(const unsigned short*)(p + 6);
+        if (end > nv) nv = end;
+    }
+    if (!nv || !(w = calloc((size_t)nv, 3 * sizeof(float)))) return;
+    for (p = (const unsigned char*)md->vlist; *p != 255; p += 4 + 4 * *(const unsigned short*)(p + 2)) {
+        int first = *p == 51 ? 64 : *p == 41 ? 8 : 0, stride = *p == 51 ? 32 : 24;
+        int i0 = *(const unsigned short*)(p + 4), n = *(const unsigned short*)(p + 6);
+        for (int i = 0; first && i < n; i++)
+            njCalcPoint(m, (NJS_POINT3*)(p + first + stride * i), (NJS_POINT3*)&w[3 * (i0 + i)]);
+    }
+    for (p = (const unsigned char*)md->plist; *p != 255;) {
+        int t = *p, size = *(const unsigned short*)(p + 2);
+        if (t < 8) { p += 2; continue; }
+        if (t < 16) { p += 4; continue; }
+        if (t < 64) { p += 4 + 2 * size; continue; }
+        if (!(p[1] & 0x08)) {   /* (not NJD_FST_UA: alpha) */
+            const unsigned char* q = p + 6;
+            int ns = *(const unsigned short*)(p + 4) & 0x3FFF, user = *(const unsigned short*)(p + 4) >> 14;
+            int uv = t == 65 || t == 66 || t == 68 || t == 69;
+            for (int s = 0; s < ns; s++) {
+                int cnt = abs(*(const short*)q), ix[3] = { 0, 0, 0 };
+                q += 2;
+                for (int i = 0; i < cnt; i++) {
+                    ix[0] = ix[1]; ix[1] = ix[2]; ix[2] = *(const unsigned short*)q;
+                    q += 2 + (uv ? 4 : 0) + (i >= 2 ? 2 * user : 0);
+                    if (i < 2 || ix[0] >= nv || ix[1] >= nv || ix[2] >= nv) continue;
+                    if (mesh_nt == mesh_tcap) {
+                        float* g = realloc(mesh_t, (size_t)(mesh_tcap = mesh_tcap ? 2 * mesh_tcap : 4096) * 9 * sizeof(float));
+                        if (!g) { free(w); return; }
+                        mesh_t = g;
+                    }
+                    for (int k = 0; k < 3; k++) memcpy(&mesh_t[9 * mesh_nt + 3 * k], &w[3 * ix[k]], 3 * sizeof(float));
+                    mesh_nt++;
+                }
+            }
+        }
+        p += 4 + 2 * size;
+    }
+    free(w);
+    if (mesh_nt > t0 && mesh_np == mesh_pcap) {
+        MeshPart* g = realloc(mesh_p, (size_t)(mesh_pcap = mesh_pcap ? 2 * mesh_pcap : 64) * sizeof(MeshPart));
+        if (!g) { mesh_nt = t0; return; }
+        mesh_p = g;
+    }
+    if (mesh_nt > t0) {   /* bounding sphere: the box's middle, the farthest corner */
+        MeshPart* pt = &mesh_p[mesh_np++];
+        float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f }, r2 = 0;
+        for (int i = 9 * t0; i < 9 * mesh_nt; i++) { lo[i % 3] = fminf(lo[i % 3], mesh_t[i]); hi[i % 3] = fmaxf(hi[i % 3], mesh_t[i]); }
+        for (int k = 0; k < 3; k++) pt->c[k] = (lo[k] + hi[k]) / 2, r2 += (hi[k] - pt->c[k]) * (hi[k] - pt->c[k]);
+        pt->r = sqrtf(r2);
+        pt->t0 = t0; pt->n = mesh_nt - t0;
+    }
+}
+
+/* the room's object tree as njCnkEasyDrawObject draws it (all parts: third person shows the cuts' hidden ones) */
+static void mesh_walk(const NJS_CNK_OBJECT* o, NJS_MATRIX* parent)
+{
+    for (; o; o = o->sibling) {
+        NJS_MATRIX m;
+        unsigned f = o->evalflags;
+        memcpy(&m, parent, sizeof(m));
+        if (!(f & 1)) njTranslate(&m, o->pos[0], o->pos[1], o->pos[2]);
+        if (!(f & 2)) {
+            if (f & 0x20) { njRotateY(&m, o->ang[1]); njRotateX(&m, o->ang[0]); njRotateZ(&m, o->ang[2]); }
+            else { njRotateZ(&m, o->ang[2]); njRotateY(&m, o->ang[1]); njRotateX(&m, o->ang[0]); }
+        }
+        if (!(f & 4)) njScale(&m, o->scl[0], o->scl[1], o->scl[2]);
+        if (o->model) mesh_model(o->model, &m);
+        if (!(f & 0x10) && (!(f & 0x100) || o->model)) mesh_walk(o->child, &m);
+    }
+}
+
+static void mesh_room(void)
+{
+    NJS_MATRIX m;
+    if (mesh_gen == enemy_room_gen && mesh_obj == rom->mdl.objP) return;
+    mesh_gen = enemy_room_gen; mesh_obj = rom->mdl.objP;
+    mesh_nt = mesh_np = 0;
+    if (!rom->mdl.objP) return;
+    njUnitMatrix(&m);
+    mesh_walk(rom->mdl.objP, &m);
+    if (trace) printf("tps: room model for the camera: %d triangles in %d parts\n", mesh_nt, mesh_np);
+}
+
+/* the first hit of the segment a..b with the room model, from either side: its fraction of the way, 1: none */
+static float mesh_ray(const float* a, const float* b)
+{
+    float d[3] = { b[0] - a[0], b[1] - a[1], b[2] - a[2] }, m[3], hl2, best = 1;
+    for (int k = 0; k < 3; k++) m[k] = a[k] + d[k] / 2;
+    hl2 = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) / 4;
+    for (int i = 0; i < mesh_np; i++) {
+        const MeshPart* pt = &mesh_p[i];
+        float dx = pt->c[0] - m[0], dy = pt->c[1] - m[1], dz = pt->c[2] - m[2], rr = pt->r + sqrtf(hl2);
+        if (dx * dx + dy * dy + dz * dz > rr * rr) continue;
+        for (const float* t = &mesh_t[9 * pt->t0]; t < &mesh_t[9 * (pt->t0 + pt->n)]; t += 9) {   /* Moller-Trumbore */
+            float e1[3] = { t[3] - t[0], t[4] - t[1], t[5] - t[2] }, e2[3] = { t[6] - t[0], t[7] - t[1], t[8] - t[2] };
+            float pv[3] = { d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0] };
+            float det = e1[0] * pv[0] + e1[1] * pv[1] + e1[2] * pv[2], inv, tv[3], qv[3], u, v, h;
+            if (fabsf(det) < 1e-9f) continue;
+            inv = 1 / det;
+            tv[0] = a[0] - t[0]; tv[1] = a[1] - t[1]; tv[2] = a[2] - t[2];
+            u = (tv[0] * pv[0] + tv[1] * pv[1] + tv[2] * pv[2]) * inv;
+            if (u < 0 || u > 1) continue;
+            qv[0] = tv[1] * e1[2] - tv[2] * e1[1]; qv[1] = tv[2] * e1[0] - tv[0] * e1[2]; qv[2] = tv[0] * e1[1] - tv[1] * e1[0];
+            v = (d[0] * qv[0] + d[1] * qv[1] + d[2] * qv[2]) * inv;
+            if (v < 0 || u + v > 1) continue;
+            h = (e2[0] * qv[0] + e2[1] * qv[1] + e2[2] * qv[2]) * inv;
+            if (h >= 0 && h < best) best = h;
+        }
+    }
+    return best;
+}
+
+/* b moved towards a to `margin` units before the room model, if it is in the way */
+static void clear_of_mesh(const NJS_POINT3* a, NJS_POINT3* b, float margin)
+{
+    float len = sqrtf((b->x - a->x) * (b->x - a->x) + (b->y - a->y) * (b->y - a->y) + (b->z - a->z) * (b->z - a->z));
+    float h = len > 0.01f ? mesh_ray(&a->x, &b->x) : 1, k;
+    if (h >= 1) return;
+    k = (h * len - margin) / len;
+    if (k < 0) k = 0;
+    b->x = a->x + (b->x - a->x) * k; b->y = a->y + (b->y - a->y) * k; b->z = a->z + (b->z - a->z) * k;
+}
+
+/* camera collision, eased: the pivot lowered under a ceiling (units) and the arm to the eye
+   shortened (fraction). Into the way at once (the view never goes through), back out by
+   EASE_OUT of the rest a frame */
+#define EASE_OUT 0.12f
+/* free room beside and above/below the eye: the near plane's half width and height (1 unit away,
+   tps_camera; widened in hor+ widescreen) and a quarter unit */
+static float eye_side, eye_up;
+#define EYE_SIDE eye_side
+#define EYE_UP eye_up
+/* col_aim: 0 the arm starts at the head (walking), 1 at the shoulder point (free aim), eased */
+static float obstruct(float* st, float raw)
+{
+    *st = raw > *st ? raw : *st + (raw - *st) * EASE_OUT;
+    return *st;
+}
+
+/* how much of the arm from o to the eye e is free: to the first wall or room part (a unit
+   before it), then back a unit at a time while the side (right axis rx, rz), top or bottom of
+   the eye is closer than EYE_SIDE / EYE_UP */
+static float arm(const NJS_POINT3* o, const NJS_POINT3* e, float rx, float rz)
+{
+    NJS_POINT3 b = *e;
+    float len = sqrtf((e->x - o->x) * (e->x - o->x) + (e->y - o->y) * (e->y - o->y) + (e->z - o->z) * (e->z - o->z)), d;
+    if (len < 0.01f) return 1;
+    clear_of_walls(o, &b);
+    clear_of_mesh(o, &b, 1.0f);
+    for (d = sqrtf((b.x - o->x) * (b.x - o->x) + (b.y - o->y) * (b.y - o->y) + (b.z - o->z) * (b.z - o->z)); d > 0; d -= 1.0f) {
+        float f = d / len, p[3] = { o->x + (e->x - o->x) * f, o->y + (e->y - o->y) * f, o->z + (e->z - o->z) * f };
+        const float pr[4][3] = { { p[0] + rx * EYE_SIDE, p[1], p[2] + rz * EYE_SIDE }, { p[0] - rx * EYE_SIDE, p[1], p[2] - rz * EYE_SIDE },
+                                 { p[0], p[1] + EYE_UP, p[2] }, { p[0], p[1] - EYE_UP, p[2] } };
+        int i;
+        for (i = 0; i < 4 && mesh_ray(p, pr[i]) >= 1; i++) {}
+        if (i == 4) break;
+    }
+    return d > 0 ? d / len : 0;
+}
+
 /* camera for the current yaw/pitch: dir = viewing direction, sh = the shoulder point (the aim
-   ray starts there), eye = behind it on the ray through it. Walls pull a camera shoulder point
-   in sideways (only if the shoulder itself is in a wall) and slide the eye forward along the
-   ray; `sh` stays the wall-free one, so camera collision never moves the aim or the facing.
-   Depends on the player's position only (the followed point: follow). */
+   ray starts there), eye = behind it on the ray through it. Walls and the room model lower the
+   pivot under a ceiling and pull the camera's shoulder point in sideways; then the arm to the eye
+   shortens until the eye has free room around it: walking, the arm from a quarter of the way from
+   the head to the shoulder point, so the character stays in the picture beside the way ahead; with free aim the eye slides along the
+   view ray, so the screen centre stays on the crosshair's ray. `sh` stays the wall-free one, so
+   camera collision never moves the aim or the facing. Depends on the player's position only
+   (the followed point: follow). place: tps_camera's once a frame, which places the eye and moves
+   the eased state; 0: the direction and shoulder point only (the aim), eye without collision.
+   First person uses the head node's height and a ray from there; it never uses the shoulder. */
 static float first_person_eye_height(void)
 {
     /* Native bhSetPlEyeCamera uses head node 5 and local (0,1.5,-1).
@@ -230,13 +438,13 @@ static float first_person_eye_height(void)
     if (!(height > 3 && height < 40)) height = 16.5f;
     return (height + (g_tps.height - 165) / 10.0f) * actor_cam_scale();
 }
-static void view(NJS_POINT3* eye, NJS_POINT3* dir, NJS_POINT3* sh)
+static void view(NJS_POINT3* eye, NJS_POINT3* dir, NJS_POINT3* sh, int place)
 {
     float s = sinf(RAD(yaw)), c = cosf(RAD(yaw)), sp = sinf(RAD(pitch)), cp = cosf(RAD(pitch));
     float k = actor_cam_scale();   /* "You appear as" a taller or shorter model: its height (1: the character's) */
-    float side = (g_tps.left ? -g_tps.shoulder : g_tps.shoulder) / 10.0f * k;
+    float side = (g_tps.left ? -g_tps.shoulder : g_tps.shoulder) / 10.0f * k, d = cur_dist, f, raw = 1;
     const NJS_POINT3* o = fol_move ? &fol : (const NJS_POINT3*)&plp->px;
-    NJS_POINT3 at, csh;
+    NJS_POINT3 at, csh, lo, e;
 
     /* forward (-sin, 0, -cos), right (cos, 0, -sin) */
     dir->x = -s * cp; dir->y = sp; dir->z = -c * cp;
@@ -249,10 +457,38 @@ static void view(NJS_POINT3* eye, NJS_POINT3* dir, NJS_POINT3* sh)
     }
     at.x = o->x; at.y = o->y + g_tps.height / 10.0f * k; at.z = o->z;
     sh->x = at.x + c * side; sh->y = at.y; sh->z = at.z - s * side;
-    csh = *sh;
+    if (!place) { eye->x = sh->x - dir->x * d; eye->y = sh->y - dir->y * d; eye->z = sh->z - dir->z * d; return; }
+    if (no_cam_walls) {
+        csh = *sh;
+        clear_of_walls(&at, &csh);
+        eye->x = csh.x - dir->x * d; eye->y = csh.y - dir->y * d; eye->z = csh.z - dir->z * d;
+        return;
+    }
+    mesh_room();
+    eye_up = tanf(RAD(DEG(cur_fov)) / 2) * 0.75f;
+    eye_side = eye_up / 0.75f * pc_hor_scale() + 0.25f;
+    eye_up += 0.25f;
+    {   /* a ceiling over the head (from the chest up): the pivot below it */
+        NJS_POINT3 top = { at.x, at.y + EYE_UP, at.z };
+        lo = at; lo.y = o->y + 8.0f * k;
+        clear_of_mesh(&lo, &top, 0);
+        at.y -= obstruct(&col_drop, at.y + EYE_UP - top.y);
+        if (at.y < lo.y) at.y = lo.y;
+    }
+    csh.x = sh->x; csh.y = at.y; csh.z = sh->z;
     clear_of_walls(&at, &csh);
-    eye->x = csh.x - dir->x * cur_dist; eye->y = csh.y - dir->y * cur_dist; eye->z = csh.z - dir->z * cur_dist;
-    if (!no_cam_walls) clear_of_walls(&csh, eye);
+    clear_of_mesh(&at, &csh, EYE_SIDE);
+    e.x = csh.x - dir->x * d; e.y = csh.y - dir->y * d; e.z = csh.z - dir->z * d;
+    col_aim += ((aiming() && !lock_aim() ? 1.0f : 0.0f) - col_aim) * 0.35f;
+    if (col_aim < 0.01f) col_aim = 0;
+    if (col_aim > 0.99f) col_aim = 1;
+    at.x += (csh.x - at.x) * 0.25f; at.z += (csh.z - at.z) * 0.25f;   /* (the walking arm's start: a quarter of the way to the shoulder point) */
+    if (col_aim < 1) raw = arm(&at, &e, c, -s);
+    if (col_aim > 0) raw = fminf(raw, arm(&csh, &e, c, -s));
+    f = 1 - obstruct(&col_pull, 1 - raw);
+    eye->x = (at.x + (e.x - at.x) * f) * (1 - col_aim) + (csh.x + (e.x - csh.x) * f) * col_aim;
+    eye->y = (at.y + (e.y - at.y) * f) * (1 - col_aim) + (csh.y + (e.y - csh.y) * f) * col_aim;
+    eye->z = (at.z + (e.z - at.z) * f) * (1 - col_aim) + (csh.z + (e.z - csh.z) * f) * col_aim;
 }
 
 static void look(float sens, float stick_sens)
@@ -276,6 +512,14 @@ void tps_camera(void)
 
     aim = aiming() && !lock_aim();
     g_tps.aiming = aiming();
+    {   /* the game's quick turn (player.c bhCPM2_act_bak/bk2: flg 0x4100000, ay turned to ay + 180 degrees over 8
+           frames, both bits cleared with the last step): the camera turns with the character, step by step, in
+           every style (camera A and the gamepad keep their yaw otherwise) */
+        static int ay0, was;
+        int now = plp->mode1 == 0 && (plp->flg & 0x4100000) == 0x4100000;
+        if (now || was) yaw = wrap(yaw + (short)(plp->ay - ay0));
+        ay0 = plp->ay; was = now;
+    }
     if (!(sys->sp_flg & 0x40)) mouse_dx = mouse_dy = stick_yaw = stick_pitch = 0;   /* frozen (above): no mouse look */
     if (recenter > 0 && !aiming()) {   /* gamepad: the camera eases behind the character */
         recenter--;
@@ -300,7 +544,7 @@ void tps_camera(void)
         float y0 = yaw;
         if (orbit < 0) no_cam_walls = (orbit = getenv("RECVX_TPS_ORBIT") ? DEG(atof(getenv("RECVX_TPS_ORBIT"))) : 0) != 0;
         yaw += orbit;
-        view(&eye, &dir, &sh);
+        view(&eye, &dir, &sh, 1);
         cam.ay = (short)(int)-yaw;
         yaw = y0;
     }
@@ -685,6 +929,7 @@ static int pad_sticks(unsigned int* pad)
     if (!g_tps.pad_modern) pad_cam = 0;
     stick_yaw = stick_pitch = 0;
     stick_moved = pad_move = 0;
+    aw_f = aw_r = 0;
     {   /* the right stick turns the camera (Modern) and aims. Classic keeps the game's buttons, whose turn while aiming
            cannot move free aim's crosshair (the shot follows the crosshair), so there the right stick (free in every key
            type: the game reads only the left one) aims too. In both, while aiming freely, the left stick and the d-pad
@@ -695,6 +940,10 @@ static int pad_sticks(unsigned int* pad)
             float ax = lx, ay = ly, dx, dy;
             if (modern_stick(&rx, &ry, g_tps.pad_dead_look / 100.0f, 2.0f) > 0) recenter = 0, stick_moved = 1;
             if (aim_free && tps_cam_active) {
+                if (aim_walk_ok()) {   /* "Move While Aiming": the left stick walks (as it walks: linear past its dead zone) */
+                    modern_stick(&ax, &ay, g_tps.pad_dead_move / 100.0f, 1.0f);
+                    aw_f = ay, aw_r = ax, ax = ay = 0;
+                }
                 modern_stick(&ax, &ay, g_tps.pad_dead_move / 100.0f, 2.0f);
                 tps_pad_dpad(&dx, &dy);
                 rx += ax + dx; ry += ay + dy;
@@ -766,12 +1015,37 @@ static unsigned toggle_closes(void)
 unsigned int tps_pad(unsigned int pad)
 {
     unsigned k;
-    int scope;
+    int scope, menu;
     int player_input = sys && plp && (sys->sp_flg & 1) && !(plp->flg & 0x4000000);
     if (sys->ss_flg & 0x400000) return pad;   /* attract demo playback */
     pad |= toggle_closes();
     k = tps_input_keys(player_input && pad_sticks(&pad));
     if (!player_input) pad_move = 0;
+    /* a menu, message or pick-up (the game frozen) or the trade screen: the movement keys are its d-pad, as in
+       camera B (camera A's walk below gave them all "forward", the cursor only went up) */
+    menu = !(sys->sp_flg & 0x40) || pc_trade_screen();
+    {   /* a movement key held as a sub-screen (inventory, item box, files, map, save screen) or the trade screen opens
+           or closes counts for neither until let go: no cursor step as it opens, no step forward as it closes. The
+           sub-screens' own bits (system.c bhCheckSubTask: status 0x8, map 0x40000, computer, typewriter, option), not
+           ts_flg 0x80 (no 3D scene), which a door, a room load or a movie also set (W held through a door stopped in the new room).
+           As it closes: only a key held since the last button press (the one that closed it; not run) or since it opened,
+           not one pressed during its closing animation (the bits clear as it ends) or as control comes back. The trade
+           screen closed by the partner (no press of ours just before; it has no closing animation): every key held */
+        static int was, trade_was, since;
+        static unsigned stale, used, btn_was;
+        int trade = pc_trade_screen(), sub = (sys->st_flg & 0x1C040008) || trade;
+        unsigned btn = (pad & 0xFB00) << 16 | (k & (TPS_K_ACTION | TPS_K_FIRE | TPS_K_CANCEL | TPS_K_STATUS | TPS_K_MAP | TPS_K_OPTIONS));
+        if ((btn & ~btn_was) || (sub && !was)) used = k & (TPS_K_FWD | TPS_K_BACK | TPS_K_LEFT | TPS_K_RIGHT);
+        since = btn & ~btn_was ? 0 : since < 1000 ? since + 1 : since;
+        btn_was = btn;
+        used &= k;
+        if (trade_was && !trade && since > 2) used = k & (TPS_K_FWD | TPS_K_BACK | TPS_K_LEFT | TPS_K_RIGHT);
+        trade_was = trade;
+        if (sub != was) stale = used;
+        was = sub;
+        stale &= k;
+        k &= ~stale;
+    }
     pad_steer = (pad & 0xF) != 0 && !pad_cam;   /* (the gamepad: its stick, or a d-pad turn: the camera stays) */
     scope = in_scope();
     {   /* the scope: the recenter row (right stick click) switches the zoom (the game's "change aim" bit 0x80,
@@ -790,12 +1064,20 @@ unsigned int tps_pad(unsigned int pad)
         was = now;
     }
     move_keys = 0;
-    if (player_input && (g_tps.free_cam || tps_on == 2) && tps_cam_active && plp && plp->mode1 == 0 && !(k & TPS_K_QUICKTURN)) {
-        /* camera A: any direction walks forward, tps_player turns the character towards it */
+    if (player_input && (g_tps.free_cam || tps_on == 2) && tps_cam_active && !menu && plp && plp->mode0 == 1 && plp->mode1 == 0 && !(k & TPS_K_QUICKTURN)) {
+        /* camera A: any direction walks forward, tps_player turns the character towards it. Not in a grab or hit
+           (mode0 4, 2): there each key is its own direction, so the struggle (bhEne_LeverCheck) counts every new one */
         move_keys = k & (TPS_K_FWD | TPS_K_BACK | TPS_K_LEFT | TPS_K_RIGHT);
         k &= ~move_keys;
         if (!!(move_keys & TPS_K_FWD) != !!(move_keys & TPS_K_BACK) || !!(move_keys & TPS_K_LEFT) != !!(move_keys & TPS_K_RIGHT))
             pad |= 0x1;
+    }
+    if (!menu && aim_walk_ok()) {   /* "Move While Aiming": the movement keys walk under the aim (tps_player aim_walk), the
+                                       game's directions (its turn while aiming, the arrows, Classic's stick) do nothing */
+        aw_f += !!(k & TPS_K_FWD) - !!(k & TPS_K_BACK);
+        aw_r += !!(k & TPS_K_RIGHT) - !!(k & TPS_K_LEFT);
+        k &= ~(TPS_K_FWD | TPS_K_BACK | TPS_K_LEFT | TPS_K_RIGHT);
+        pad &= ~0xF;
     }
     if (k & TPS_K_FWD) pad |= 0x21;   /* as the d-pad: also aim up/down (game auto-aim) */
     if (k & TPS_K_BACK) pad |= 0x42;
@@ -844,7 +1126,7 @@ static int aimable(const BH_PWORK* e) { return (e->flg & 0x1) && (e->flg & 0x20)
 #define SHOTGUN_R0 0.3f       /* the shotgun's cone: this wider at the muzzle, */
 #define SHOTGUN_K 0.06f       /* plus this per unit of distance (3.4 degrees either side), */
 #define SHOTGUN_MAX 3.0f      /* at most this */
-unsigned char tps_hit_precise[128];   /* per enemy slot: its last gun hit was precise, as weapon + 1 (0: not; coop_glue.c) */
+unsigned char tps_hit_precise[PC_ENE_SLOTS];   /* per enemy slot: its last gun hit was precise, as weapon + 1 (0: not; coop_glue.c) */
 static float xr[7];                   /* the crosshair's ray (aim_at_crosshair): from, direction, length to its wall */
 static int dual_yaw;                  /* dual weapons, precise hits: the yaw of the gun turned to another enemy (dual_aim) */
 static int ticks, xr_tick = -1;      /* tps_player calls; the one in which it was cast (a shot in the mode handler before the next: the same) */
@@ -905,7 +1187,9 @@ static float body_ray(const BH_PWORK* e, const float* p, const float* d, int con
         t = pc_ray_capsule(p, d, a, b, r, &m);
         if (t >= 0 && (best < 0 || t < best)) best = t, *jnt = j, *no = n;
     }
-    if (!e->cpcl) {
+    /* the bat's and the moth's table holds only the body (the bat's 1 unit across under wings 7 wide): missed, their hit
+       capsule (wing to wing, radius 2; the fixed cameras' test, there with the shot's cone around it) */
+    if (!e->cpcl || (best < 0 && (e->id == 7 || e->id == 6))) {
         const NJS_CAPSULE* w = &e->watr;
         r = w->r;
         if (cone) {
@@ -953,23 +1237,260 @@ int pc_precise_hit(BH_PWORK* pp, int wpn, const float* c1, const float* c2, floa
     return j;
 }
 
+static void react_hit(BH_PWORK* pp, int jnt, int precise);
+
+/* ---------------------------------------------------------------- "Headshots & Piercing" (docs/THIRDPERSON.md)
+   With our camera or its scope, and in co-op the host's choice (coop_glue.c pc_headshots):
+   * head damage of a precise head hit: the sniper rifle 300 %, the assault rifle 200 % (others HEAD_DAMAGE); not on the
+     bosses with a head joint (Alexia 1, Steve, the Tyrant), which keep HEAD_DAMAGE;
+   * a precise head hit that kills a zombie bursts its head (en01.c bhEne01_DmgCheck -> pc_head_burst), the game's burst,
+     with the magnum, the Gold Lugers, the shotgun, the sniper rifle (the game's own burst weapons: there only a
+     walking zombie) and the assault rifle; not the handguns, the sub machine guns, the bow gun (the game never);
+   * the sniper rifle's shot goes through the enemies as the magnum's (bhCheckGunAtari -> pc_pierce). */
+int pc_headshots(void) { return g_tps.headshots; }
+static int headshots(void) { return tps_on && pc_headshots() && (tps_cam_active || in_scope()); }
+
+static int head_damage(int id, int wpn)
+{
+    if (!headshots() || id == 12 || id == 17 || id == 19) return HEAD_DAMAGE;
+    return wpn == 13 ? 300 : wpn == 12 ? 200 : HEAD_DAMAGE;
+}
+
+int pc_pierce(int wpn) { return wpn == 13 && headshots(); }
+
+int pc_head_burst(BH_PWORK* pp)
+{
+    int w = pp->wpnr_no;
+    if (pp->id != 1 || !pc_headshots() || !pc_precise_head(pp) || pp->dam[11] <= 0 || pp->hp >= 0 || !(w == 6 || w == 7 || w == 11 || w == 12 || w == 13))
+        return 0;
+    if (trace) printf("tps: KILL BURST enemy %d weapon %d modes %d/%d type %d\n", (int)(pp - ene), w, pp->mode0, pp->mode2, pp->type);
+    return 1;
+}
+
 /* bhCheckGunAtari after a gun hit added to enemy pp's damage on joint jnt (d0 before): whether it was a
    precise hit (with the weapon), and a precise hit on the head does HEAD_DAMAGE percent */
 void pc_precise_dam(BH_PWORK* pp, int jnt, int d0, int precise, int wpn)
 {
     int i = (int)(pp - ene);
-    if (i >= 0 && i < 128) tps_hit_precise[i] = precise ? wpn + 1 : 0;
-    if (precise && jnt == head_joint(pp->id)) pp->dam[jnt] = d0 + (pp->dam[jnt] - d0) * HEAD_DAMAGE / 100;
+    if (i >= 0 && i < PC_ENE_SLOTS) tps_hit_precise[i] = precise ? wpn + 1 : 0;
+    if (precise && jnt == head_joint(pp->id)) pp->dam[jnt] = d0 + (pp->dam[jnt] - d0) * head_damage(pp->id, wpn) / 100;
     if (trace) printf("tps: HIT wpn %d enemy %d (type %d, hp %d) joint %d damage %d%s, its state %d modes %d/%d, %.1f above its feet\n", wpn, i, pp->id,
                       pp->hp, jnt, pp->dam[jnt] - d0, !precise ? " (game's test)" : jnt == head_joint(pp->id) ? " (precise, head)" : " (precise)",
                       pp->type, pp->mode0, pp->mode2, pp->dpy - pp->py);
+    react_hit(pp, jnt, precise);
 }
 
 /* en01.c bhEne01_CheckExpHead: the zombie's hit being judged was precise (a head burst only on the head) */
 int pc_precise_head(BH_PWORK* pp)
 {
     int i = (int)(pp - ene);
-    return i >= 0 && i < 128 && tps_hit_precise[i] && tps_hit_precise[i] == pp->wpnr_no + 1;
+    return i >= 0 && i < PC_ENE_SLOTS && tps_hit_precise[i] && tps_hit_precise[i] == pp->wpnr_no + 1;
+}
+
+/* zonzon.c bhEne_SetBlood, en01.c bhEne01_SetBlood: a precise hit's blood goes where the shot hit, on the joint it hit
+   (the game: a spot on that part from the enemy's blood table, a zombie's head and neck on its chest; the kill and
+   shotgun sprays on the chest or the hips). ofs: the hit point (dp, the ray's entry; ours, or the partner's from
+   EV_ENE_HIT) in that joint's frame, as the game places the sniper rifle's. -1: the game's place */
+int pc_blood_at_hit(BH_PWORK* pp, float* ofs)
+{
+    int j = pp->djnt_no;
+    const float* m;
+    float v[3], c[3], d;
+    if (!pc_precise_head(pp) || !pp->mlwP || !pp->mlwP->owP || j <= 0 || j >= (int)pp->mlwP->obj_num) return -1;
+    m = pp->mlwP->owP[j].mtx;
+    v[0] = pp->dpx - m[12]; v[1] = pp->dpy - m[13]; v[2] = pp->dpz - m[14];
+    if (v[0] * v[0] + v[1] * v[1] + v[2] * v[2] > 10.0f * 10.0f) return -1;   /* ponytail: not its own point (the game's piercing
+                                                                                  stores the nearest enemy's): the game's place */
+    /* v = x m0 + y m4 + z m8 (the rows: the joint's axes), solved by Cramer's rule */
+    c[0] = m[5] * m[10] - m[6] * m[9]; c[1] = m[6] * m[8] - m[4] * m[10]; c[2] = m[4] * m[9] - m[5] * m[8];   /* m4 x m8 */
+    if (!(fabsf(d = m[0] * c[0] + m[1] * c[1] + m[2] * c[2]) > 1e-8f)) return -1;
+    ofs[0] = (v[0] * c[0] + v[1] * c[1] + v[2] * c[2]) / d;
+    ofs[1] = (m[0] * (v[1] * m[10] - v[2] * m[9]) + m[1] * (v[2] * m[8] - v[0] * m[10]) + m[2] * (v[0] * m[9] - v[1] * m[8])) / d;   /* m0 . (v x m8) */
+    ofs[2] = (m[0] * (m[5] * v[2] - m[6] * v[1]) + m[1] * (m[6] * v[0] - m[4] * v[2]) + m[2] * (m[4] * v[1] - m[5] * v[0])) / d;   /* m0 . (m4 x v) */
+    if (trace) printf("tps: BLOOD enemy %d (type %d) joint %d at %.1f %.1f %.1f, %.2f from the joint, %.1f above its feet\n", (int)(pp - ene), pp->id, j,
+                      pp->dpx, pp->dpy, pp->dpz, sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), pp->dpy - pp->py);
+    return j;
+}
+
+/* ---------------------------------------------------------------- "Locational Hit Reactions" (docs/THIRDPERSON.md)
+   The game has one hit motion for a zombie wherever a shot lands. In third person a gun hit on its head, an arm
+   or a leg (the joint bhCheckGunAtari damaged: Precise Shots' volume, else the game's nearest bone) also flinches
+   that part: the part's nodes are turned about its joints while the zombie is drawn (eneset.c bhDrawEnemy ->
+   pc_hit_react) and put back after the draw, so the motion, hits, damage, stun, AI and timings stay the game's.
+   The head snaps back along the shot, the arm is knocked back along it and out (the forearm further), the leg's knee
+   buckles (thigh forward, shin back). Up in 2 ticks, eased out by REACT_T: the time of the game's own jolt of the
+   spine on a hit while walking (en01.c bhEne01_SetMtn rot_tbl, 8 ticks). The
+   torso keeps the game's reaction alone; a zombie lying or crawling (its head not above its chest) none. */
+#define REACT_T 10
+enum { RG_TORSO, RG_HEAD, RG_ARM_R, RG_ARM_L, RG_LEG_R, RG_LEG_L, RG_N };
+static const char* const rg_name[RG_N] = { "torso", "head", "right arm", "left arm", "right leg", "left leg" };
+static const signed char rg_chain[RG_N][3] = { { -1 }, { 10, 11, -1 }, { 12, 13, 14 }, { 15, 16, 17 }, { 2, 3, 4 }, { 5, 6, 7 } };   /* the joints turned, the bone's end */
+static const float rg_amp[RG_N][2] = { { 0 }, { 0.3f, 0.4f }, { 0.8f, 0.6f }, { 0.8f, 0.6f }, { 0.35f, -0.9f }, { 0.35f, -0.9f } };   /* radians per joint */
+static struct { int t0; unsigned char rg; float d[3]; } react[PC_ENE_SLOTS];   /* t0: ticks at the hit + 1 (0: none); d: shot direction */
+static void coop_react_out(int slot, int rg, const float* d) { (void)slot; (void)rg; (void)d; }   /* offline: no partner */
+
+static int zombie_region(int j)
+{
+    return j == 10 || j == 11 ? RG_HEAD : j >= 12 && j <= 14 ? RG_ARM_R : j >= 15 && j <= 17 ? RG_ARM_L : j >= 2 && j <= 4 ? RG_LEG_R :
+           j >= 5 && j <= 7 ? RG_LEG_L : RG_TORSO;
+}
+
+/* the flinch of region rg along d (|d| > 0) starts on enemy slot i (ours, or the partner's hit: coop_glue.c) */
+void tps_react_start(int i, int rg, const float* d)
+{
+    float l = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (i < 0 || i >= PC_ENE_SLOTS || rg <= RG_TORSO || rg >= RG_N || !(l > 1e-6f)) return;
+    react[i].t0 = ticks + 1;
+    react[i].rg = rg;
+    for (int k = 0; k < 3; k++) react[i].d[k] = d[k] / l;
+    if (trace) printf("tps: REACT enemy %d %s\n", i, rg_name[rg]);
+}
+
+/* pc_precise_dam: our gun hit on joint jnt of enemy pp (precise: judged along the crosshair's ray; else the game's
+   nearest bone to where its wide test touched the body, so the part under the crosshair is taken when the ray meets one) */
+static void react_hit(BH_PWORK* pp, int jnt, int precise)
+{
+    int i = (int)(pp - ene), rg, j, no;
+    float d[3] = { pp->dvx, pp->dvy, pp->dvz }, t;
+    if (pp->id != 1 || !(tps_cam_active || in_scope())) return;
+    if (!precise && tps_cam_active && xr_tick == ticks && (t = body_ray(pp, xr, xr + 3, 0, &j, &no)) >= 0 && t <= xr[6]) jnt = j;
+    rg = zombie_region(jnt);
+    if (trace) printf("tps: REGION enemy %d joint %d: %s\n", i, jnt, rg_name[rg]);
+    if (rg == RG_TORSO) return;
+    tps_react_start(i, rg, d);
+    if (react[i].t0 == ticks + 1) coop_react_out(i, rg, react[i].d);
+}
+
+typedef struct { float u[3], c[3], a; uint64_t nodes; } Turn;
+
+static void subtree(const ML_WORK* m, const NJS_CNK_OBJECT* o, uint64_t* s, int top)
+{
+    int k = (int)(o - m->objP);
+    if (k < 0 || k >= (int)m->obj_num || k >= 64) return;
+    *s |= 1ull << k;
+    if (o->child) subtree(m, o->child, s, 0);
+    if (!top && o->sibling) subtree(m, o->sibling, s, 0);
+}
+
+static void turn(float* m, const float* u, const float* c, float a);
+
+/* point p turned as turn() turns an origin */
+static void turn_point(float* p, const Turn* t)
+{
+    float m[16] = { 0 };
+    memcpy(&m[12], p, 12);
+    turn(m, t->u, t->c, t->a);
+    memcpy(p, &m[12], 12);
+}
+
+/* the turns of zombie z's flinch this tick (0: none), from its pose as the game left it */
+static int react_turns(BH_PWORK* z, Turn* t)
+{
+    int i = (int)(z - ene), age, n = 0, k, j;
+    const signed char* ch;
+    const O_WORK* ow;
+    float w, p[3][3], f[3], a[3];
+    if (i < 0 || i >= PC_ENE_SLOTS || !react[i].t0 || z->id != 1) return 0;
+    age = ticks - (react[i].t0 - 1);
+    if (age < 0 || age >= REACT_T || !(z->flg & 0x1)) { react[i].t0 = 0; return 0; }
+    if (!z->mlwP || !z->mlwP->owP || !z->mlwP->objP || z->mlwP->obj_num < 18) return 0;
+    ow = z->mlwP->owP;
+    if (ow[11].mtx[13] - ow[9].mtx[13] < 1.0f) return 0;   /* lying, crawling */
+    if (react[i].rg == RG_HEAD && z->exp0 && *(int*)(z->exp0 + 0x78) == -1) return 0;   /* its head burst (en01.c) */
+    w = (REACT_T - age) / (float)(REACT_T - 2);
+    w = age < 2 ? (age + 1) / 3.0f : w * w * (3 - 2 * w);
+    ch = rg_chain[react[i].rg];
+    f[0] = sinf(z->ay * (3.14159265f / 32768)); f[1] = 0; f[2] = cosf(z->ay * (3.14159265f / 32768));   /* its facing */
+    for (k = 0; k < 3; k++)
+        for (j = 0; j < 3; j++) p[k][j] = ch[k] >= 0 ? ow[(int)ch[k]].mtx[12 + j] : 2 * p[1][j] - p[0][j];   /* the head: on along the neck */
+    if (react[i].rg == RG_ARM_R || react[i].rg == RG_ARM_L) {   /* an arm: back along the shot and out to its side */
+        float o[3] = { p[0][0] - ow[9].mtx[12], 0, p[0][2] - ow[9].mtx[14] }, l = sqrtf(o[0] * o[0] + o[2] * o[2]);
+        for (j = 0; j < 3; j++) a[j] = react[i].d[j] + (l > 1e-4f ? 0.8f * o[j] / l : 0);
+    } else
+        memcpy(a, react[i].rg >= RG_LEG_R ? f : react[i].d, sizeof(a));
+    for (k = 0; k < 2; k++) {   /* joint k turns its bone (k -> k + 1) towards a (the shot; an arm also out; a leg's knee forward) */
+        Turn* q = &t[n];
+        const float* d = a;
+        float v[3] = { p[k + 1][0] - p[k][0], p[k + 1][1] - p[k][1], p[k + 1][2] - p[k][2] }, l;
+        q->u[0] = v[1] * d[2] - v[2] * d[1]; q->u[1] = v[2] * d[0] - v[0] * d[2]; q->u[2] = v[0] * d[1] - v[1] * d[0];
+        l = sqrtf(q->u[0] * q->u[0] + q->u[1] * q->u[1] + q->u[2] * q->u[2]);
+        if (!(l > 1e-4f)) continue;   /* the bone along the shot */
+        for (j = 0; j < 3; j++) q->u[j] /= l, q->c[j] = p[k][j];
+        q->a = rg_amp[react[i].rg][k] * w;
+        q->nodes = 0;
+        subtree(z->mlwP, &z->mlwP->objP[(int)ch[k]], &q->nodes, 1);
+        for (j = k + 1; j < 3; j++) turn_point(p[j], q);
+        n++;
+    }
+    return n;
+}
+
+static float react_save[64][16];
+static ML_WORK* react_m;
+
+/* model m's node matrices to s (back: 1 = from s), each O_WORK's mtx (the work is 0x50 bytes, its matrix at 0x10) */
+static void node_mtx(ML_WORK* m, float (*s)[16], int back)
+{
+    for (int j = 0; j < (int)m->obj_num && j < 64; j++)
+        if (back) memcpy(m->owP[j].mtx, s[j], sizeof(s[j])); else memcpy(s[j], m->owP[j].mtx, sizeof(s[j]));
+}
+
+/* effect.c bhControlEffect and bhDrawEffect: 1 = every flinching zombie's turns put on its nodes, so the effects linked to
+   them (the blood at the hit, effect.c's and the particles' njCalcPoint on owP) go with the part as drawn; 0 = put back,
+   1 returned when any were on. The hit tests an effect makes (weapon.c: bolts, grenades, blasts) take them off and put
+   them back, so they see the nodes as the game has them */
+#define REACT_FX 8   /* ponytail: zombies flinching at once whose effects follow; more keep theirs where the game has them */
+int pc_hit_react_fx(int on)
+{
+    static float save[REACT_FX][64][16];
+    static ML_WORK* sm[REACT_FX];
+    static int n;
+    int i, k, j, was = n > 0;
+    if (!on) {
+        while (n > 0) { n--; node_mtx(sm[n], save[n], 1); }
+        return was;
+    }
+    if (n || !tps_on || !g_tps.hit_react || !(tps_cam_active || in_scope()) || !sys) return was;
+    for (i = 0; i < (int)sys->ewk_n && i < PC_ENE_SLOTS && n < REACT_FX; i++) {
+        Turn t[2];
+        ML_WORK* m = ene[i].mlwP;
+        int c;
+        if (!react[i].t0 || !m || !m->owP || !(c = react_turns(&ene[i], t))) continue;
+        node_mtx(m, save[n], 0);
+        sm[n++] = m;
+        for (k = 0; k < c; k++)
+            for (j = 0; j < (int)m->obj_num && j < 64; j++)
+                if (t[k].nodes >> j & 1) turn(m->owP[j].mtx, t[k].u, t[k].c, t[k].a);
+    }
+    return was;
+}
+
+/* eneset.c bhDrawEnemy, around drawing ep: 1 = its flinch (or its zombie's, a part linked to a node that flinches:
+   caps, the upper body) put on for the draw (1 returned: put it back after), 0 = put back */
+int pc_hit_react(BH_PWORK* ep, int on)
+{
+    Turn t[2];
+    BH_PWORK* z = ep;
+    ML_WORK* m = ep->mlwP;
+    int n, k, j;
+    if (!on) {
+        if (react_m) node_mtx(react_m, react_save, 1);
+        react_m = NULL;
+        return 0;
+    }
+    if (!tps_on || !g_tps.hit_react || !(tps_cam_active || in_scope()) || !m || !m->owP || ep < ene || ep >= ene + PC_ENE_SLOTS) return 0;
+    if (!(n = react_turns(z, t)) && (ep->flg & 0x80)) {   /* a part on its zombie's node */
+        z = (BH_PWORK*)ep->lkwkp;
+        if (z < ene || z >= ene + PC_ENE_SLOTS || ep->lkono < 0 || ep->lkono >= 64) return 0;
+        n = react_turns(z, t);
+    }
+    if (!n) return 0;
+    node_mtx(m, react_save, 0);
+    react_m = m;
+    for (k = 0; k < n; k++)
+        for (j = 0; j < (int)m->obj_num && j < 64; j++)
+            if (z == ep ? t[k].nodes >> j & 1 : t[k].nodes >> ep->lkono & 1) turn(m->owP[j].mtx, t[k].u, t[k].c, t[k].a);
+    return 1;
 }
 
 /* the enemy whose middle is nearest the crosshair by angle: its offset (target minus crosshair,
@@ -980,7 +1501,7 @@ static int nearest_enemy(float* oy, float* op, int* walled)
     NJS_LINE line;
     ATR_WORK* ahtp;
     float best = -1, t[3] = { 0, 0, 0 }, len;
-    view(&eye, &dir, &sh);
+    view(&eye, &dir, &sh, 0);
     for (int i = 0; i < sys->ewk_n; i++) {
         const NJS_CAPSULE* c = &ene[i].watr;
         float x = (c->c1.x + c->c2.x) / 2 - sh.x, y = (c->c1.y + c->c2.y) / 2 - sh.y, z = (c->c1.z + c->c2.z) / 2 - sh.z, ey, ep;
@@ -1024,7 +1545,7 @@ static void aim_at_crosshair(void)
     float dist = 1000.0f, wall, len, h, r = WpnTab[plp->wpnr_no].r;
     int ay, prec = pc_precise_hits();
 
-    view(&eye, &dir, &sh);
+    view(&eye, &dir, &sh, 0);
     line.px = sh.x; line.py = sh.y; line.pz = sh.z;
     line.vx = dir.x * dist; line.vy = dir.y * dist; line.vz = dir.z * dist;
     apos = sys->apos; ahtp = sys->ahtp;
@@ -1385,6 +1906,135 @@ static void scope_look(void)
     }
 }
 
+/* "Move While Aiming" (docs/THIRDPERSON.md "Moving while aiming"): with the weapon raised (free aim; the knife too),
+   firing, slashing or reloading, the movement keys or the left stick walk slowly towards their direction seen from
+   the camera, the aim staying on the crosshair. The legs play the game's walk (forward, sideways with the hips turned
+   up to LEG_YAW) or its backward walk at LEG_RATE of its speed, its travel per frame as the game's walk takes it
+   (PlyTrsZ), so the feet keep step; the upper body keeps the weapon motion (tps_legs). The game's own wall, enemy and
+   floor checks run after it in bhControlPlayer as for any step. */
+extern char PlyTrsZ[6][3];   /* player.c: the walks' travel tables (bhGetTransZ) by motion and injury */
+TpsLegs tps_legs_me;         /* our legs this tick (a gender-matched copy plays them too) */
+#define LEG_YAW DEG(55.0f)   /* the hips turned at most this far from the aim (sideways: the feet slide the rest) */
+#define LEG_RATE 0.6f        /* of the walk's speed and frame rate */
+#define LEG_EASE 0.3f        /* the legs blended in and out per tick */
+
+/* the movement keys / left stick walk under the aim: the weapon raised (not lowering it, nor the scope), free aim or
+   the reload of a lowered weapon, normal play */
+static int aim_walk_ok(void)
+{
+    return g_tps.aim_walk && tps_cam_active && plp && plp->mode0 == 1 && plp->mode1 == 1 && plp->mode2 != 68 && plp->mode2 != 71 &&
+           (reload_at_rest() || !lock_aim()) && !(plp->flg & 6) && pc_in_play(plp, 0);
+}
+
+static void aim_walk(void)
+{
+    static int unfixed, back, last_frm;
+    TpsLegs* l = &tps_legs_me;
+    EXP_WORK* x = (EXP_WORK*)plp->exp0;
+    float m = sqrtf(aw_f * aw_f + aw_r * aw_r), on;
+    int ok = aim_walk_ok() && m > 0.05f && x;
+    if (m > 1) aw_f /= m, aw_r /= m, m = 1;
+    if (ok) {
+        float md = wrap(yaw - atan2f(aw_r, aw_f) * (32768.0f / 3.14159265f)), rel = wrap(md - (short)plp->ay), ly, spd, *trsz;
+        int dm = x->dmlvl < 0 ? 0 : x->dmlvl > 2 ? 2 : x->dmlvl, tp = x->wpntp & 1, mtn, n, f, k;
+        back = fabsf(rel) > (back ? DEG(100.0f) : DEG(115.0f));   /* sideways: forward (a stick near it does not flip between them) */
+        mtn = PlMtnAct[tp][dm][back ? 4 : 2];
+        n = plp->mnwPb && plp->mnwPb[mtn].datP ? (int)plp->mnwPb[mtn].frm_num : 0;
+        trsz = n ? (float*)bhGetTransZ(PlyTrsZ[back][dm]) : NULL;
+        if (!trsz) ok = 0;
+        else {
+            if (l->w <= 0 || l->mtn != mtn) l->frm = back ? 25 << 16 : 5 << 16, last_frm = -1;   /* where the game's walks start */
+            l->mtn = mtn;
+            l->frm = (l->frm + (int)(LEG_RATE * m * 65536.0f)) % (n << 16);
+            f = l->frm >> 16;
+            spd = fabsf(trsz[f + 1]) * LEG_RATE * m;
+            if (plp->stflg & 0x100000) spd *= 0.8f;   /* in water, as the walks */
+            plp->px -= spd * sinf(RAD(md));
+            plp->pz -= spd * cosf(RAD(md));
+            ly = back ? wrap(rel + 32768.0f) : rel;
+            ly = ly > LEG_YAW ? LEG_YAW : ly < -LEG_YAW ? -LEG_YAW : ly;
+            l->yaw += (int)((ly - l->yaw) * 0.35f);
+            for (k = 0; k < 2 && f != last_frm; k++)   /* footsteps on the walks' frames (bhCPM2_act_wlk / bak) */
+                if (f == PlFootSnd[sys->ply_id & 3][k][back ? 2 : 0]) {
+                    const float* foot = plp->mlwP->owP[k ? 21 : 17].mtx;
+                    CallPlayerFootStepSe(bhCheckFloorSound(plp, plp->flr_no, foot[12], foot[14]), 0, 1);
+                    plp->stflg |= 0x200;   /* (enemies hear it) */
+                }
+            last_frm = f;
+        }
+    }
+    l->on = ok;
+    on = ok ? 1.0f : 0.0f;
+    l->w += (on - l->w) * LEG_EASE;
+    if (plp->mode0 != 1 || plp->mode1 != 1) l->w = 0;   /* hit, grabbed, the weapon down: the game's own motion at once */
+    /* the weapon modes fix the feet where they stand (flg 0x40000, bhFixPosition: the drawn foot of the last tick kept
+       in place); with the legs walking that put the character back each step, and lowering the weapon (which sets it
+       again) slid it by the stride */
+    if (l->w > 0 && (plp->flg & 0x40000)) plp->flg &= ~0x40000, unfixed = 1;
+    if (!ok && l->w < 0.02f) {
+        if (l->w > 0) l->w = 0;
+        else if (unfixed) {   /* a tick after the legs are back in the aim's stance: its feet fixed again, as the mode set them */
+            if (plp->mode0 == 1 && plp->mode1 == 1) plp->flg |= 0x40000;
+            unfixed = 0;
+        }
+        l->yaw = 0;
+    }
+    if (trace && (ok || l->w > 0))
+        printf("tps: aimwalk frame %u mode %d/%d/%d input %.2f %.2f legs mtn %d frm %d yaw %.1f w %.2f at (%.2f %.2f %.2f) ay %.1f\n",
+               (unsigned)gs_frame_count(), plp->mode1, plp->mode2, plp->mode3, aw_f, aw_r, l->mtn, l->frm >> 16,
+               l->yaw * (360.0f / 65536.0f), l->w, plp->px, plp->py, plp->pz, (short)plp->ay * (360.0f / 65536.0f));
+}
+
+static void turn(float* m, const float* u, const float* c, float a);
+
+/* The legs walking under another motion (the zombie's upper half, en01.c, the other way round): the hips and legs
+   (nodes 0, 1, 14..21) from the walk l->mtn of `set` blended in by l->w, turned by l->yaw about the root, while the
+   upper body (node 2 on: spine, chest, arms, head) keeps the world orientation p's own motion gave it, so the aim and
+   the weapon motions (shots, slashes, the reload) stay as they are, only carried along. The caller has just posed
+   and computed p (bhCalcModel); its matrices are posed again, its motion state (node angles) is left as it was. */
+void tps_legs(BH_PWORK* p, MN_WORK* set, const TpsLegs* l)
+{
+    ML_WORK* ml = p->mlwP;
+    NJS_CNK_OBJECT* o;
+    O_WORK* ow;
+    struct { float pos[3]; int ang[3]; } keep[22];
+    float a2[12], w = l->w;
+    BH_PWORK t;
+    int i, j, n;
+    if (w <= 0 || !set || !ml || ml->obj_num < 22 || l->mtn < 0 || l->mtn >= 100 || !set[l->mtn].datP || set[l->mtn].obj_num > 22) return;
+    o = ml->objP; ow = ml->owP;
+    n = (int)set[l->mtn].frm_num;
+    if (n <= 0) return;
+    memcpy(a2, ow[2].mtx, sizeof(a2));   /* the upper body's axes as its motion has them */
+    for (i = 0; i < 22; i++) { memcpy(keep[i].pos, o[i].pos, sizeof(keep[i].pos)); memcpy(keep[i].ang, o[i].ang, sizeof(keep[i].ang)); }
+    t = *p;   /* (a work of its own: the frame and blend of p's motion stay) */
+    t.mnwP = set; t.mtn_no = l->mtn; t.frm_no = l->frm % (n << 16); t.hokan_count = 0;
+    bhSetMotion(&t, 0, 0, NULL);
+    for (i = 0; i < 22; i++) {
+        if (i >= 2 && i < 14) {   /* the upper body: p's own */
+            memcpy(o[i].pos, keep[i].pos, sizeof(keep[i].pos)); memcpy(o[i].ang, keep[i].ang, sizeof(keep[i].ang));
+            continue;
+        }
+        for (j = 0; j < 3; j++) {
+            o[i].pos[j] = keep[i].pos[j] + (o[i].pos[j] - keep[i].pos[j]) * w;
+            o[i].ang[j] = keep[i].ang[j] + (int)((short)(o[i].ang[j] - keep[i].ang[j]) * w);
+        }
+    }
+    bhCalcModel(p);
+    if (l->yaw) {   /* the hips turned towards a sideways walk, about the root, upright in the character's frame */
+        float u[3], c[3], len = sqrtf((*p->mtx)[4] * (*p->mtx)[4] + (*p->mtx)[5] * (*p->mtx)[5] + (*p->mtx)[6] * (*p->mtx)[6]);
+        for (j = 0; j < 3; j++) { u[j] = (*p->mtx)[4 + j] / len; c[j] = ow[0].mtx[12 + j]; }
+        turn(ow[0].mtx, u, c, RAD(l->yaw * w));
+        ow[0].flg |= 1;
+        bhCalcModel(p);
+    }
+    memcpy(ow[2].mtx, a2, sizeof(a2));   /* (its place: from the walking hips) */
+    ow[2].flg |= 1;
+    bhCalcModel(p);
+    ow[0].flg &= ~1; ow[2].flg &= ~1;
+    for (i = 0; i < 22; i++) { memcpy(o[i].pos, keep[i].pos, sizeof(keep[i].pos)); memcpy(o[i].ang, keep[i].ang, sizeof(keep[i].ang)); }
+}
+
 /* player.c bhControlPlayer, right after the mode handler (before the auto-turn, the motion
    and bhCalcModel): mouse X turns the character, or the camera while aiming freely */
 void tps_player(void)
@@ -1402,8 +2052,8 @@ void tps_player(void)
     ticks++;   /* (pc_precise_hit: the crosshair's ray is this tick's only if aim_at_crosshair casts it below) */
     if (trace && tps_cam_active && plp->mode1 == 1) trace_shot();
     if (trace) {   /* a zombie's head burst (en01.c: exp0 + 0x78 set to -1) */
-        static int head[128];
-        for (int i = 0; i < sys->ewk_n && i < 128; i++) {
+        static int head[PC_ENE_SLOTS];
+        for (int i = 0; i < sys->ewk_n && i < PC_ENE_SLOTS; i++) {
             int h = ene[i].id == 1 && (ene[i].flg & 1) && ene[i].exp0 ? *(int*)(ene[i].exp0 + 0x78) : 0;
             if (h == -1 && head[i] != -1) printf("tps: HEAD BURST enemy %d (last hit joint %d, weapon %d)\n", i, ene[i].djnt_no, ene[i].wpnr_no);
             head[i] = h;
@@ -1411,6 +2061,7 @@ void tps_player(void)
     }
     /* (the scope's first tick still has our camera: the free aim below points the scope at the crosshair's target) */
     if (!tps_cam_active && plp->mode0 == 1 && plp->mode1 == 1 && plp->mode2 == 71) { scope_look(); return; }
+    aim_walk();
     if (!tps_cam_active || plp->mode0 != 1 || (plp->mode1 == 0 && plp->mode2 > 13) || reload_at_rest()) { frac = 0; return; }
     if (trace && plp->mode1 == 1)
         printf("tps: weapon mode %d/%d motion %d frame %d/%d at (%.1f %.1f) ay %.1f hand y %.1f\n", plp->mode2, plp->mode3, plp->mtn_no, plp->frm_no >> 16,
@@ -1428,7 +2079,7 @@ void tps_player(void)
         if (aim_aid_on()) {   /* at RECVX_TPS_AIM_AT */
             NJS_POINT3 eye, dir, sh;
             float dx, dy, dz, p[3];
-            view(&eye, &dir, &sh);
+            view(&eye, &dir, &sh, 0);
             aim_aid(&sh.x, p);
             dx = p[0] - sh.x; dy = p[1] - sh.y; dz = p[2] - sh.z;
             yaw = atan2f(-dx, -dz) * (32768.0f / 3.14159265f);
@@ -1511,9 +2162,18 @@ static void bend(BH_PWORK* p, float a)
     turn(ow[3].mtx, u, c, a);
     for (int j = 0; j < 3; j++) c[j] = ow[3].mtx[12 + j];
     turn(ow[3].mtx, u, c, a);
-    ow[2].flg |= 1; ow[3].flg |= 1;
+    for (int k = 0; k < p->mlwP->obj_num && k < 22; k++)   /* the hips and legs as they are (tps_legs: walking) */
+        if (k < 4 || k >= 14) ow[k].flg |= 1;
     bhCalcModel(p);
-    ow[2].flg &= ~1; ow[3].flg &= ~1;
+    for (int k = 0; k < p->mlwP->obj_num && k < 22; k++)
+        if (k < 4 || k >= 14) ow[k].flg &= ~1;
+}
+
+/* bhCalcModel of our player, with the legs walking under the aim ("Move While Aiming") */
+static void calc(void)
+{
+    bhCalcModel(plp);
+    tps_legs(plp, plp->mnwPb, &tps_legs_me);
 }
 
 void tps_calc_model(void)
@@ -1523,7 +2183,7 @@ void tps_calc_model(void)
     float a, dx, dz, ofs[3];
     int on = tps_cam_active && !lock_aim() && plp->mode0 == 1 && plp->mode1 == 1 && plp->mode2 != 68 && !reload_at_rest();
 
-    bhCalcModel(plp);
+    calc();
     bend_a = 0;
     w += (on - w) * 0.35f;
     if (w < 0.01f || plp->mlwP->obj_num <= 9) { aim_corr = 0; return; }
@@ -1541,7 +2201,10 @@ void tps_calc_model(void)
     {   /* "You appear as" another model (the retargeting): the weapon is drawn in the model's hand, which
            the bend swings about the chest as well, farther the taller the model, and in a gender-matched
            pose the hand turns the weapon as that motion does. The pitch is solved on the weapon as it will
-           be drawn: its barrel (the hand's x axis from the muzzle) through the crosshair target.
+           be drawn: its barrel through the crosshair target. The barrel runs from the muzzle (wp_fps1) on to
+           wp_fps2 where that point lies beyond it, else along the hand's x axis: the grenade launcher's runs at
+           45 degrees to that axis (both its points on the barrel), and solved on the x axis it was held 44
+           degrees up (the other weapons' second point is the muzzle, on the x axis or unset).
            actor_aim_hand is the hand as drawn last tick, in the frame of the chest now, so it is solved
            only while the aim pose stands still (weapon raised, mode2 65, no motion blend) and not for the
            knife (no barrel). Raising, shots, recoil and slashes keep the last correction, which is eased:
@@ -1552,13 +2215,20 @@ void tps_calc_model(void)
         still = plp->mode2 == 65 && !plp->hokan_count && !(WpnTab[plp->wpnr_no].flg & 0x40000000) ? still + 1 : 0;
         steady = still >= 2;
         if (!actor_aim_hand(plp, h)) { aim_corr = 0; return; }   /* no model: the hand's pitch */
+        const NJS_POINT3 *f = &WpnTab[plp->wpnr_no].wp_fps1, *f2 = &WpnTab[plp->wpnr_no].wp_fps2;
+        float ax[3] = { f2->x - f->x, f2->y - f->y, f2->z - f->z }, l = sqrtf(ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2]);
+        if (l < 0.01f || ax[0] * f->x + ax[1] * f->y + ax[2] * f->z <= 0) ax[0] = 1, ax[1] = ax[2] = 0;   /* no second point
+            beyond the muzzle (the same, unset, or behind it: the rocket launcher's back end): the x axis */
+        else for (int j = 0; j < 3; j++) ax[j] /= l;
         for (it = 0; steady && it < 4 && (it == 0 || actor_aim_hand(plp, h)); it++) {
-            const NJS_POINT3* f = &WpnTab[plp->wpnr_no].wp_fps1;
-            float m[3], e, sg;
-            for (int j = 0; j < 3; j++) m[j] = f->x * h[j] + f->y * h[4 + j] + f->z * h[8 + j] + h[12 + j];
+            float m[3], b[3], e, sg;
+            for (int j = 0; j < 3; j++) {
+                m[j] = f->x * h[j] + f->y * h[4 + j] + f->z * h[8 + j] + h[12 + j];
+                b[j] = ax[0] * h[j] + ax[1] * h[4 + j] + ax[2] * h[8 + j];
+            }
             dx = aim_t.x - m[0]; dz = aim_t.z - m[2];
-            sg = dx * h[0] + (aim_t.y - m[1]) * h[1] + dz * h[2] < 0 ? -1.0f : 1.0f;   /* (the barrel's way along the axis) */
-            e = atan2f(aim_t.y - m[1], sqrtf(dx * dx + dz * dz)) - atan2f(sg * h[1], sqrtf(h[0] * h[0] + h[2] * h[2]));
+            sg = dx * b[0] + (aim_t.y - m[1]) * b[1] + dz * b[2] < 0 ? -1.0f : 1.0f;   /* (the barrel's way along the axis) */
+            e = atan2f(aim_t.y - m[1], sqrtf(dx * dx + dz * dz)) - atan2f(sg * b[1], sqrtf(b[0] * b[0] + b[2] * b[2]));
             if (fabsf(e) < 0.002f) break;
             if (fabsf(e) >= pe) { t = pt; break; }   /* not converging (a target a few units from the muzzle: each step
                 moves the muzzle as much as the line; the solve swung to 50 degrees and the upper body jumped
@@ -1566,14 +2236,14 @@ void tps_calc_model(void)
             pe = fabsf(e); pt = t;
             t += e;
             t = t > 1.047f ? 1.047f : t < -1.047f ? -1.047f : t;
-            bhCalcModel(plp);   /* (unbent) */
+            calc();   /* (unbent) */
             bend(plp, w * t / 2);
         }
         if (steady) goal = t - t0;
         aim_corr += (goal - aim_corr) * 0.35f;
         t = t0 + aim_corr;
         t = t > 1.047f ? 1.047f : t < -1.047f ? -1.047f : t;
-        bhCalcModel(plp);   /* (unbent) */
+        calc();   /* (unbent) */
         bend_a = w * t / 2;
         bend(plp, bend_a);
     }
@@ -1639,6 +2309,10 @@ void tps_frame(void)
     g_tps.kb_play = on && pc_in_game() && !pc_options_up();
     g_tps.pad_play = on && g_tps.pad_modern && (tps_cam_active || in_scope()) && sys && ((sys->sp_flg & 0x41) == 0x41) && !(sys->ss_flg & 0x400000);
     /* with or without third person: the player has control, so no menu has the mouse (menu_mouse.c);
-       the co-op trade screen is open in play */
-    g_menu_mouse.play = pc_in_game() && plp && pc_in_play(plp, 1);   /* the scope also uses mouse aim */
+       the trade screen is open in play. Also a message without choices (st_flg 0x200; an examined
+       panel or manhole, its camera): its pages turn with Cross, so a mouse button bound to it plays there
+       (the fixed cameras take mouse presses only in play, tps_input.c) */
+    g_menu_mouse.play = pc_in_game() && plp && !pc_trade_screen() &&
+                        (pc_in_play(plp, 1) ||   /* (the scope too: its mouse aim) */
+                         (sys && (sys->st_flg & 0x200) && !((sys->st_flg & 0x8000) && sys->mes_seln > 0) && !(sys->ts_flg & 0x80)));
 }

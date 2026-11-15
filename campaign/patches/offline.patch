@@ -117,19 +117,302 @@ index 8836adda..8c2d858e 100644
          if ((ap->NextReturnCode == 3) || (ap->NextReturnCode == 2) || (ap->NextReturnCode == 6) || (ap->NextReturnCode == 8)) 
  #endif
          {
+diff --git a/src/ps2/veronica/prog/dread.c b/src/ps2/veronica/prog/dread.c
+index 2ba1053e..8d75b59f 100644
+--- a/src/ps2/veronica/prog/dread.c
++++ b/src/ps2/veronica/prog/dread.c
+@@ -308,6 +308,11 @@ void bhReadWeaponData()
+     
+     sz = *(unsigned int*)dp;
+     
++#ifdef TARGET_PC   /* a file without the reload motion (116: knife, Gold Lugers, SMG, M-100P, linear and rocket launcher) skips
++                      its entry, which kept the previous weapon's, pointing into this buffer now overwritten (or NULL):
++                      empty, bhCPM2_act_rld reloads without a motion */
++    if (plp->mnwP != NULL) memset(&plp->mnwP[116], 0, sizeof(plp->mnwP[116]));
++#endif
+     if (sz != 0) 
+     {
+         plmtnp = sys->plwmtp;
+diff --git a/src/ps2/veronica/prog/effect.c b/src/ps2/veronica/prog/effect.c
+index 9f2507ff..2c2a7d21 100644
+--- a/src/ps2/veronica/prog/effect.c
++++ b/src/ps2/veronica/prog/effect.c
+@@ -762,6 +762,9 @@ void bhControlEffect()
+     int i;        
+     int* entp;    
+     
++#ifdef TARGET_PC
++    pc_hit_react_fx(1);   /* third person: the effects linked to a flinching zombie's part follow it (tps_glue.c) */
++#endif
+     if (((sys->sp_flg & 0x8)) || ((sys->ef_flg & 0x1))) 
+     {
+         entp = &sys->ef_poln;
+@@ -873,6 +876,9 @@ void bhControlEffect()
+             }
+         } 
+     }
++#ifdef TARGET_PC
++    pc_hit_react_fx(0);
++#endif
+ }
+ 
+ // 100% matching!
+@@ -880,6 +886,9 @@ void bhDrawEffect()
+ {
+     int i;
+ 
++#ifdef TARGET_PC
++    pc_hit_react_fx(1);
++#endif
+     njSetMatrix(NULL, cam.mtx);
+     
+     njControl3D(0x100);
+@@ -976,6 +985,9 @@ void bhDrawEffect()
+     {
+         bhDrawThunder(sys->rom_no, sys);
+     }
++#ifdef TARGET_PC
++    pc_hit_react_fx(0);
++#endif
+ }
+ 
+ // 99.84% matching
+diff --git a/src/ps2/veronica/prog/en01.c b/src/ps2/veronica/prog/en01.c
+index 88634f68..c05f43b3 100644
+--- a/src/ps2/veronica/prog/en01.c
++++ b/src/ps2/veronica/prog/en01.c
+@@ -3199,6 +3199,30 @@ void bhEne01_CalcEnemy(BH_PWORK* epw)
+     }
+ }
+ 
++#ifdef TARGET_PC
++/* third person, "Headshots & Piercing" (tps_glue.c pc_head_burst): a killing head hit bursts the zombie's head where the
++   game's rule (bhEne01_DmgCheckType00: a weapon with flag 0x10, a walking zombie) did not, as that rule does it; hp: before
++   the hit (a hit on the dying zombie bursts nothing) */
++static void pc_burst_head(BH_PWORK* epw, int hp)
++{
++    BH_PWORK* cepw = (BH_PWORK*)epw->exp1;
++
++    if ((hp < 0) || (EXP0_I(0x78) == -1) || (EXP0_I(0x40) & 0x80440000) || (epw->mdlver == 31) || (epw->mdlver == 42) || !pc_head_burst(epw))
++    {
++        return;
++    }
++
++    epw->hp = -1;
++    if (cepw != NULL)
++    {
++        cepw->hp = epw->hp;
++    }
++    bhEne01_ExpHeadEffect2(epw, 0);
++    EXP0_I(0x78) = -1;
++    bhEne01_SePlay(epw, (NJS_VECTOR*)&epw->px, 4869);
++}
++#endif
++
+ // 100% matching!
+ void bhEne01_DmgCheck(BH_PWORK* epw)
+ {
+@@ -3243,6 +3267,9 @@ void bhEne01_DmgCheck(BH_PWORK* epw)
+             {
+                 if (epw->mode0 >= 3)
+                 {
++#ifdef TARGET_PC
++                    pc_burst_head(epw, now_hp);
++#endif
+                     bhEne01_SetBlood(epw, now_hp);
+                     return;
+                 }
+@@ -3251,6 +3278,9 @@ void bhEne01_DmgCheck(BH_PWORK* epw)
+                      (epw->mode0 == 3 && epw->mode2 >= 3) ||
+                      ((EXP0_I(0x40) & 0x40000) && epw->mode0 == 1 && epw->mode3 == 0))
+             {
++#ifdef TARGET_PC
++                pc_burst_head(epw, now_hp);
++#endif
+                 bhEne01_SetBlood(epw, now_hp);
+                 return;
+             }
+@@ -3315,6 +3345,9 @@ void bhEne01_DmgCheck(BH_PWORK* epw)
+             }
+ 
+             bhEne01_DmgCheckType[epw->type](epw);
++#ifdef TARGET_PC
++            pc_burst_head(epw, now_hp);
++#endif
+ 
+             if (cepw != NULL)
+             {
+@@ -3346,6 +3379,10 @@ void bhEne01_SetBlood(BH_PWORK* epw, int hp)
+     BH_PWORK* epp;
+     NJS_POINT3 ofp;
+ 	int obj_no;
++#ifdef TARGET_PC
++    NJS_POINT3 pc_ofs;
++    int pc_j;
++#endif
+ 
+     wp_tbl = En01_WpnDamageTbl;
+     wp_tbl += epw->wpnr_no;
+@@ -3357,6 +3394,10 @@ void bhEne01_SetBlood(BH_PWORK* epw, int hp)
+     {
+         epp = epw;
+     }
++#ifdef TARGET_PC   /* third person, a precise hit (tps_glue.c pc_blood_at_hit): the blood bursts where the shot hit, on the
++                      joint it hit (the game: on the chest, or the hips for a leg) */
++    pc_j = epp == epw ? pc_blood_at_hit(epw, &pc_ofs.x) : -1;
++#endif
+     
+     if (!(wp_tbl->flg & 0x4000))
+     {
+@@ -3386,6 +3427,13 @@ void bhEne01_SetBlood(BH_PWORK* epw, int hp)
+                     ofp.y = 2.5f;
+                     obj_no = 9;
+                 }
++#ifdef TARGET_PC
++                if (pc_j >= 0)
++                {
++                    ofp = pc_ofs;
++                    obj_no = pc_j;
++                }
++#endif
+ 
+                 if (wp_tbl->cb_blood == 9)
+                 {
+@@ -3426,6 +3474,13 @@ void bhEne01_SetBlood(BH_PWORK* epw, int hp)
+                     ofp.y = 2.5f;
+                     obj_no = 9;
+                 }
++#ifdef TARGET_PC
++                if (pc_j >= 0)
++                {
++                    ofp = pc_ofs;
++                    obj_no = pc_j;
++                }
++#endif
+                 
+                 if (epw->comb_flg & 0x40)
+                 {
+@@ -3448,6 +3503,14 @@ void bhEne01_SetBlood(BH_PWORK* epw, int hp)
+         ofp.x = owk->mtx[12];
+         ofp.y = owk->mtx[13];
+         ofp.z = owk->mtx[14];
++#ifdef TARGET_PC
++        if (pc_j >= 0)   /* the chunks from the hit (the game: the joint the blood table named, the chest for the head) */
++        {
++            ofp.x = epw->dpx;
++            ofp.y = epw->dpy;
++            ofp.z = epw->dpz;
++        }
++#endif
+         bhEne_SetNikuhenEffect2(epp, 0, &ofp, 4, bhEne01_ChgTextID(epp, 5));
+     }
+ }
+@@ -3591,6 +3654,15 @@ void bhEne01_DmgCheckType00(BH_PWORK* epw)
+             return;
+         }
+         act = wp_tbl->cb_act;
++#ifdef TARGET_PC
++        /* PC: the rows of weapons 0 and 1 (no weapon, the lighter; the knife is 2) have no combo action, which kills.
++           In the game they never hit, but a hit with one (a test aid) left damage mode with the move's mode2 (after
++           MV12 the NULL DG12, a crash; others undying). It falls as from a gun instead (en26.c likewise). */
++        if (act == 0)
++        {
++            act = 3;
++        }
++#endif
+     }
+ 
+     if ((wp_tbl->flg & 0x40) && !(plp->flg & 4) && (epw->mode0 != 2) && !(EXP0_I(0x40) & 0x440000))
+diff --git a/src/ps2/veronica/prog/en17.c b/src/ps2/veronica/prog/en17.c
+index c1876b3d..3d6554a1 100644
+--- a/src/ps2/veronica/prog/en17.c
++++ b/src/ps2/veronica/prog/en17.c
+@@ -369,7 +369,11 @@ void bhEne17(BH_PWORK* epw)
+     NJS_POINT3 pd;
+ 
+     bhEne17_MainLoop(epw);
++#ifdef TARGET_PC
++    if (!pc_enemy_refused && ((plp->mode0 == 4) || (plp->mode0 == 6))) {   /* not another enemy's hold (eneset.c) */
++#else
+     if ((plp->mode0 == 4) || (plp->mode0 == 6)) {
++#endif
+         if (plp->mode2 == 0) {
+             bhEne17_PlyDG00(plp, epw);
+         } else {
+diff --git a/src/ps2/veronica/prog/en22.c b/src/ps2/veronica/prog/en22.c
+index d7f589e1..8c9a5278 100644
+--- a/src/ps2/veronica/prog/en22.c
++++ b/src/ps2/veronica/prog/en22.c
+@@ -516,7 +516,11 @@ void bhEne22(BH_PWORK* epw)
+ 
+     bhEne22_MainLoop(epw);
+ 
++#ifdef TARGET_PC
++    if (!pc_enemy_refused && ((plp->mode0 == 4) || (plp->mode0 == 6)))   /* not another enemy's hold (eneset.c) */
++#else
+     if ((plp->mode0 == 4) || (plp->mode0 == 6))
++#endif
+     {
+         if (plp->mode2 == 0)
+         {
+diff --git a/src/ps2/veronica/prog/en26.c b/src/ps2/veronica/prog/en26.c
+index 17cfeb72..22fd1274 100644
+--- a/src/ps2/veronica/prog/en26.c
++++ b/src/ps2/veronica/prog/en26.c
+@@ -891,6 +891,17 @@ void bhEne26_DmgCheckType00(BH_PWORK* epw, EN26_WPNDAMAGE_WORK* wp_tbl)
+         act = wp->cb_act;
+     }
+     
++#ifdef TARGET_PC
++    /* PC: the rows of weapons 0 and 1 (no weapon, the lighter; the knife is 2) have no death or combo action. In the
++       game they never hit, but a hit with one (a test aid) put the enemy into damage mode with its move's mode2:
++       DG00/DG01 froze it, DG02 sent it back to its moves undying, 5..7 are NULL (a crash), 16 is past the table.
++       It falls as from a gun or staggers instead. */
++    if (act == 0 && epw->mode0 == 3)
++    {
++        act = (epw->hp < 0) ? 3 : 2;
++    }
++#endif
++
+     if (act == 0)
+     {
+         if (!(EXP0_I(0x40) & 0x8000000))
 diff --git a/src/ps2/veronica/prog/eneset.c b/src/ps2/veronica/prog/eneset.c
-index 1449f0dc..c90009e6 100644
+index 1449f0dc..b09cb2f0 100644
 --- a/src/ps2/veronica/prog/eneset.c
 +++ b/src/ps2/veronica/prog/eneset.c
-@@ -199,7 +199,6 @@ void pc_enemy_mark_added(void)
+@@ -178,6 +178,10 @@ static BH_PWORK* pc_running;               /* the enemy whose code runs (bhContr
+    enemy's code changed it (its parts and children count as the holder). Per player: co-op runs
+    an enemy against the partner's work (coop_glue.c swaps plp). */
+ static struct { BH_PWORK* pl; BH_PWORK* by; } pc_held[2];
++/* set while the code of an enemy runs on a player another enemy holds: types that step the hold of any
++   held player (the albinoid's and Monster Steve's bhEne22 / bhEne17 PlyDG*) leave that one alone; they
++   read their own motion table with the holder's motion (an infant albinoid's 42: crash) */
++int pc_enemy_refused;
+ 
+ static BH_PWORK* pc_root(BH_PWORK* ep) { return pc_root_in(ep, ene, 128); }   /* a part's or child's parent enemy (pc_rules.h) */
+ 
+@@ -199,8 +203,8 @@ void pc_enemy_mark_added(void)
      pc_enemy_added = 1;
  }
  
 -void pc_enemy_watch(BH_PWORK* ep, int slot, int ran);   /* coop_glue.c */
  void pc_enemy_unhold(BH_PWORK* ep);
++int pc_hit_react(BH_PWORK* ep, int on);     /* tps_glue.c */
  void host_log(const char* fmt, ...);
  
-@@ -528,7 +527,6 @@ void bhControlEnemy()
+ /* co-op (coop_glue.c grab_in): the host's zombie hands its grab to our game, which puts our player in
+@@ -252,7 +256,9 @@ static void pc_call_enemy(BH_PWORK* ep, int slot)
+     if (pc_held[h].by && (!(pl->flg & 0x4) || !(pc_held[h].by->flg & 0x1))) pc_held[h].by = NULL;
+     if (pc_held[h].by && !pc_family(ep, pc_held[h].by)) {
+         BH_PWORK keep = *pl;
++        pc_enemy_refused = 1;
+         f(ep);
++        pc_enemy_refused = 0;
+         busy = pl->mode0 != keep.mode0 && (pl->mode0 == 4 || pl->mode0 == 6);   /* it started a grab */
+         *pl = keep;
+         /* refused: a zombie would play its grab on nobody (and its bites would drive the other holder's
+@@ -528,7 +534,6 @@ void bhControlEnemy()
                          coop_enemy_end(ep);
                      }
  
@@ -137,6 +420,50 @@ index 1449f0dc..c90009e6 100644
                  }
  #else
                  bhJumpEnemy[ep->id](ep);
+@@ -957,17 +962,30 @@ void bhDrawEnemy()
+     BH_PWORK* ep;
+     int i;
+     unsigned int argb;
++#ifdef TARGET_PC
++    int pc_react;
++#endif
+     
+     ep = ene;
+     
+     for (i = 0; i < sys->ewk_n; i++, ep++)
+     {
++#ifdef TARGET_PC   /* a work without a model (an enemy's helper, e.g. the moths' leader) is never drawn: flags made it
++                      drawable (a co-op snapshot of another enemy type) and bhCalcModel crashed on its NULL mlwP */
++        if (ep->mlwP == NULL)
++        {
++            continue;
++        }
++#endif
+         if ((((ep->flg & 0x1)) && (!(ep->flg & 0x80000000))) && (!(ep->stflg & 0x41000000)) && (((sys->st_flg & 0x20)) || (!(ep->mdflg & 0x200))) && ((!(ep->flg & 0x80)) || (!(((BH_PWORK*)ep->lkwkp)->stflg & 0x1000000))))
+         {
+             if ((ep->mdflg & 0x4)) 
+             {
+                 bhCalcModel(ep);
+             }
++#ifdef TARGET_PC
++            pc_react = pc_hit_react(ep, 1);   /* third person: a zombie flinches where it was hit, for the draw only (tps_glue.c) */
++#endif
+             
+             if ((((ep->mdflg & 0x20)) || (bhCheckClipModel(ep) == 0)) && (!(ep->mdflg & 0x1)) && (ep->mlwP->objP != NULL)) 
+             {
+@@ -1029,6 +1047,12 @@ void bhDrawEnemy()
+                     }
+                 }
+             }
++#ifdef TARGET_PC
++            if (pc_react)
++            {
++                pc_hit_react(ep, 0);
++            }
++#endif
+         }
+     }
+ }
 diff --git a/src/ps2/veronica/prog/game.c b/src/ps2/veronica/prog/game.c
 index f925b45a..e3d06d38 100644
 --- a/src/ps2/veronica/prog/game.c
@@ -188,10 +515,23 @@ index f925b45a..e3d06d38 100644
  #endif
      if ((rom->mdl.texP != 0) && !(sys->error & 2)) {
 diff --git a/src/ps2/veronica/prog/main.c b/src/ps2/veronica/prog/main.c
-index 66f4beb9..4d1cac14 100644
+index 66f4beb9..331a670d 100644
 --- a/src/ps2/veronica/prog/main.c
 +++ b/src/ps2/veronica/prog/main.c
-@@ -230,6 +230,9 @@ Sint32 njUserMain(void)
+@@ -144,7 +144,11 @@ void njUserInit(void)
+     
+     njpmemp = freemem + (12255232 + PC_ARENA_EXTRA - hws->vtx_total); 
+     
+-    Ps2_PXLCONV = njpmemp + 4294639616;
++    /* the swizzle scratch of every texture over 128x128 (ps2_pxlconv.c Tim2_Format_Check): its own block, not the
++       320 KB at the room arena's top, where a room file is read before it is expanded. Our own models load their
++       textures at any frame (extras, actors, the co-op partner): one loaded on the game over's retry, while the room
++       was read, damaged the room and it crashed (bhSetRoom). 1 MB: the largest it converts (1023 x 1023, 8 bits) */
++    Ps2_PXLCONV = malloc(1 << 20);
+     
+     vwbmemp = freemem + (12517376 + PC_ARENA_EXTRA - hws->vtx_total); 
+     vebmemp = freemem + (12845056 + PC_ARENA_EXTRA - hws->vtx_total); 
+@@ -230,6 +234,9 @@ Sint32 njUserMain(void)
      PS2_jikken(); 
      
      bhCheckSoftReset(); 
@@ -227,7 +567,7 @@ index 43af36b6..a00e53ef 100644
      
      sys->pad_ps = pad & ~sys->pad_oncpy; 
 diff --git a/src/ps2/veronica/prog/player.c b/src/ps2/veronica/prog/player.c
-index ec2c4bd9..70e5cdc8 100644
+index ec2c4bd9..801778af 100644
 --- a/src/ps2/veronica/prog/player.c
 +++ b/src/ps2/veronica/prog/player.c
 @@ -1,4 +1,7 @@
@@ -238,7 +578,24 @@ index ec2c4bd9..70e5cdc8 100644
  #include "../../../ps2/veronica/prog/MdlPut.h"
  #include "../../../ps2/veronica/prog/Motion.h"
  #include "../../../ps2/veronica/prog/cut.h"
-@@ -1434,6 +1437,7 @@ void bhControlPlayer()
+@@ -1173,6 +1176,16 @@ void bhKaidanPlayerMotion(int flg, int idx)
+ 
+     exp = &rom->etcp[idx];
+     
++#ifdef TARGET_PC
++    /* a player already on other stairs (in co-op the partner's scene runs here at any moment: the palace main
++       hall's first descent, 1/02, caught a player on the side stairs): those stairs are left as its climb's end
++       would leave them, else their "in use" mark (attr 0x400000) stayed and they took nobody until the room
++       was entered again (docs/COOP.md "World events and records") */
++    if ((plp->kdnp != NULL) && ((plp->stflg & 0x10)))
++    {
++        bhClrUseKaidanFlag(plp);
++    }
++#endif
+     bhSetUseKaidanFlag(plp, exp, idx);
+     
+     plp->stflg |= 0x80010010;
+@@ -1434,6 +1447,7 @@ void bhControlPlayer()
  
          modern_player();   /* modern controls: turn towards the direction held (modern_glue.c) */
          reload_player();   /* the reload button: the game's reload of an empty magazine at any time (reload_glue.c) */
@@ -246,6 +603,23 @@ index ec2c4bd9..70e5cdc8 100644
  #endif
          
          if ((plp->flg & 0x100000)) 
+@@ -6033,6 +6047,16 @@ void bhCPM2_act_rld()
+     switch (plp->mode3)
+     {
+     case 0: 
++#ifdef TARGET_PC   /* the weapon file has no reload motion (dual weapons: the SMG; dread.c bhReadWeaponData empties the entry):
++                      the ammo is already combined (bhSearchBullet), so back to the aim as at the motion's end. The PS2
++                      played whatever entry 116 still held (the previous weapon's, its data overwritten); the PC crashed */
++        if (plp->mnwP[116].md2P == NULL)
++        {
++            plp->mode2 = (plp->at_flg & 0x8) ? 67 : (plp->at_flg & 0x4) ? 66 : 65;
++            plp->mode3 = 0;
++            return;
++        }
++#endif
+         plp->flg |= 0xC0000;
+         
+         plp->mtn_no = 116;
 diff --git a/src/ps2/veronica/prog/ps2_NaSystem.c b/src/ps2/veronica/prog/ps2_NaSystem.c
 index 76f3e1ef..ccaa97b4 100644
 --- a/src/ps2/veronica/prog/ps2_NaSystem.c
@@ -268,7 +642,7 @@ index 76f3e1ef..ccaa97b4 100644
      }
      
 diff --git a/src/ps2/veronica/prog/ps2_NaTextureFunction.c b/src/ps2/veronica/prog/ps2_NaTextureFunction.c
-index 3b6f2116..4b3d0619 100644
+index 3b6f2116..1c60e492 100644
 --- a/src/ps2/veronica/prog/ps2_NaTextureFunction.c
 +++ b/src/ps2/veronica/prog/ps2_NaTextureFunction.c
 @@ -399,13 +399,11 @@ int njSetTextureNumSys(unsigned int n)
@@ -287,6 +661,18 @@ index 3b6f2116..4b3d0619 100644
  #endif
      njInitTexture(Ps2_tex_info, Ps2_texmemlist_num);
  }
+@@ -424,6 +422,11 @@ Sint32	njReleaseTexture(NJS_TEXLIST *texlist)
+     for (i = 0; i < tex_num; i++)
+     {
+         p = (NJS_TEXMEMLIST*)texlist->textures[i].texaddr;
++#ifdef TARGET_PC
++        /* never uploaded (a mod's room file whose record takes another look than its models, its texture
++           table short of what the room reads): nothing to release; read here, it crashed leaving the room */
++        if (p == NULL) continue;
++#endif
+         
+         if (p->globalIndex != -1)
+         {
 diff --git a/src/ps2/veronica/prog/sdfunc.c b/src/ps2/veronica/prog/sdfunc.c
 index 22cb48fc..a4c3a19e 100644
 --- a/src/ps2/veronica/prog/sdfunc.c
@@ -343,10 +729,54 @@ index 22cb48fc..a4c3a19e 100644
      if ((MovieType & 0x2))
      {
 diff --git a/src/ps2/veronica/prog/sub1.c b/src/ps2/veronica/prog/sub1.c
-index 53f4752a..57ee63a0 100644
+index 53f4752a..7275811b 100644
 --- a/src/ps2/veronica/prog/sub1.c
 +++ b/src/ps2/veronica/prog/sub1.c
-@@ -8931,7 +8931,9 @@ int bhSearchBullet()
+@@ -24,6 +24,7 @@
+ #include "../../../ps2/veronica/prog/itemview.h"
+ #include "../../../ps2/veronica/prog/player.h"
+ #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
++#include "pc_rules.h"
+ #endif
+ 
+ #pragma optimization_level 4
+@@ -4090,7 +4091,11 @@ void GetItem(S_WORK* st)
+                     {
+                         st->pip[amari + 1] = (sys->sb_id << 16) | (unsigned char)sys->itm[224]; 
+                     } 
++#ifdef TARGET_PC   /* the lighter into its slot only while that is empty (Claire's lockpick may be there: pc_rules.h), else into this cell */
++                    else if (pc_to_special(st->pip, sys->sb_id, 55, 55))
++#else
+                     else if (sys->sb_id == 55) 
++#endif
+                     {
+                         st->gb = (unsigned int*)&getbulletmax[sys->sb_id][sys->gm_mode];
+                         
+@@ -7930,7 +7935,11 @@ void ItemBoxChange(S_WORK* st, unsigned short ibcsr)
+ 		{
+ 			chk2 = 1;
+             
++#ifdef TARGET_PC   /* into the special slot only while it is empty, else into the cell as any item (pc_rules.h): the game wrote it over the lighter or lockpick there */
++			if (pc_to_special(st->pip, id2, standard[sys->ply_id][0], standard[sys->ply_id][1]))
++#else
+ 			if ((id2 == standard[sys->ply_id][0]) || (id2 == standard[sys->ply_id][1]))
++#endif
+ 			{
+ 				lt_c3 = lt_c;
+ 				lt_c2 = 1;
+@@ -7998,7 +8007,11 @@ void ItemBoxChange(S_WORK* st, unsigned short ibcsr)
+         
+ 		if ((*st->pip > 1) && (lt_c != 1))
+ 		{
++#ifdef TARGET_PC   /* the cell was emptied: nothing came in, or the item went to the special slot (lt_c3, above) */
++			if ((!id2) || (lt_c3 == lt_c))
++#else
+ 			if ((!id2) || ((id2 == standard[sys->ply_id][0]) || (id2 == standard[sys->ply_id][1])))
++#endif
+ 			{
+ 				if (lt_c < *st->pip)
+ 				{
+@@ -8931,7 +8944,9 @@ int bhSearchBullet()
  
      st = &swork; 
  
@@ -381,3 +811,173 @@ index 6eea82ab..37660eb5 100644
                          }
  #endif
                          for (i = 0; i < plp->mdl_n; i++)
+diff --git a/src/ps2/veronica/prog/weapon.c b/src/ps2/veronica/prog/weapon.c
+index f9449bc4..96c09f0a 100644
+--- a/src/ps2/veronica/prog/weapon.c
++++ b/src/ps2/veronica/prog/weapon.c
+@@ -477,8 +477,21 @@ int bhCountBullet()
+     return 1;
+ }
+ 
++#ifdef TARGET_PC
++/* third person, "Locational Hit Reactions": while the effects step, a flinching zombie's nodes are turned for the
++   effects linked to it to follow (effect.c bhControlEffect, tps_glue.c pc_hit_react_fx). The hit tests an effect makes
++   (bolts, grenades, blasts) take the turns off and put them back, so their hits, joints and damage are the game's */
++#define PC_UNFLINCHED(call) { int pc_fx = pc_hit_react_fx(0); call; if (pc_fx) pc_hit_react_fx(1); }
++static int pc_CheckGunAtari(GA_WORK* gap);
++int bhCheckGunAtari(GA_WORK* gap) { int r; PC_UNFLINCHED(r = pc_CheckGunAtari(gap)) return r; }
++#endif
++
+ // 98.84% matching (matches on NGC)
++#ifdef TARGET_PC
++static int pc_CheckGunAtari(GA_WORK* gap)
++#else
+ int bhCheckGunAtari(GA_WORK* gap)
++#endif
+ {
+     NJS_CAPSULE gatr;    
+     NJS_CAPSULE wal;    
+@@ -511,7 +524,7 @@ int bhCheckGunAtari(GA_WORK* gap)
+     float px, py, pz; // not from DWARF 
+     static int igct;     
+ #ifdef TARGET_PC
+-    int prec, d0;
++    int prec, d0, pierce;
+ #endif
+     
+     wno = gap->wpn_no;
+@@ -526,6 +539,13 @@ int bhCheckGunAtari(GA_WORK* gap)
+ #ifdef TARGET_PC   /* third person, "Precise hits": the player's hitscan shot (not a projectile: arrows, launchers) hits only
+                       the enemies' bodies (tps_glue.c pc_precise_hit); 0: the game's test */
+     prec = (wp_flg & 0x30000000) == 0x10000000 && pc_precise_hits();
++    /* third person, "Headshots & Piercing": the player's shot goes through the enemies as the magnum's (WpnTab flg
++       0x80000000: each enemy along it up to the wall is hit; tps_glue.c pc_pierce: the sniper rifle) */
++    pierce = !(wp_flg & 0x80000000) && pc_pierce(gap->wpn_no);
++    if (pierce)
++    {
++        wp_flg |= 0x80000000;
++    }
+ #endif
+     
+     if (((gap->at_flg & 0x4)) && ((wp_flg & 0x5000))) 
+@@ -752,8 +772,8 @@ label_2:
+                                     
+                                     pp->wpnr_no = gap->wpn_no;
+                                     
+-#ifdef TARGET_PC   /* precise: this enemy's own hit point, joint and range (the game: the nearest enemy's) */
+-                                    if (prec)
++#ifdef TARGET_PC   /* precise, or pierced by our rule: this enemy's own hit point, joint and range (the game: the nearest enemy's) */
++                                    if (prec || pierce)
+                                     {
+                                         px = ps.x;
+                                         py = ps.y;
+@@ -764,6 +784,13 @@ label_2:
+                                         nr = ll;
+                                     }
+ 
++                                    if (pierce)   /* (the game's piercing keeps the point stored above) */
++                                    {
++                                        pp->dpx = px;
++                                        pp->dpy = py;
++                                        pp->dpz = pz;
++                                    }
++
+                                     if (!(wp_flg & 0x8) && !prec)
+ #else
+                                     if (!(wp_flg & 0x8)) 
+@@ -1200,8 +1227,17 @@ void bhCheckKnifeAtari(GA_WORK* gap)
+     }
+ }
+ 
++#ifdef TARGET_PC
++static int pc_CheckFlyAtari(GA_WORK* gap, int eidx);
++int bhCheckFlyAtari(GA_WORK* gap, int eidx) { int r; PC_UNFLINCHED(r = pc_CheckFlyAtari(gap, eidx)) return r; }
++#endif
++
+ // 100% matching1
++#ifdef TARGET_PC
++static int pc_CheckFlyAtari(GA_WORK* gap, int eidx)
++#else
+ int bhCheckFlyAtari(GA_WORK* gap, int eidx)
++#endif
+ {
+     NJS_CAPSULE wal; 
+     NJS_SPHERE spr;  
+@@ -1310,8 +1346,17 @@ int bhCheckFlyAtari(GA_WORK* gap, int eidx)
+     return id;
+ }
+ 
++#ifdef TARGET_PC
++static void pc_SetBowDamage();
++void bhSetBowDamage() PC_UNFLINCHED(pc_SetBowDamage())
++#endif
++
+ // 99.09% matching (matches on NGC)
++#ifdef TARGET_PC
++static void pc_SetBowDamage()
++#else
+ void bhSetBowDamage()
++#endif
+ {
+     NJS_VECTOR sca; 
+     float knr;     
+@@ -1373,8 +1418,17 @@ void bhSetBowDamage()
+     }
+ }
+ 
++#ifdef TARGET_PC
++static void pc_CheckBombAtari(NJS_POINT3* pos, float ar, int dmax, int dmin);
++void bhCheckBombAtari(NJS_POINT3* pos, float ar, int dmax, int dmin) PC_UNFLINCHED(pc_CheckBombAtari(pos, ar, dmax, dmin))
++#endif
++
+ // 100% matching!
++#ifdef TARGET_PC
++static void pc_CheckBombAtari(NJS_POINT3* pos, float ar, int dmax, int dmin)
++#else
+ void bhCheckBombAtari(NJS_POINT3* pos, float ar, int dmax, int dmin)
++#endif
+ {
+     NJS_CAPSULE wal; 
+     NJS_SPHERE spr;
+diff --git a/src/ps2/veronica/prog/zonzon.c b/src/ps2/veronica/prog/zonzon.c
+index 072bda74..1e95ee5b 100644
+--- a/src/ps2/veronica/prog/zonzon.c
++++ b/src/ps2/veronica/prog/zonzon.c
+@@ -422,6 +422,10 @@ void bhEne_SetBlood(BH_PWORK* epw, unsigned char type, BT_WORK* bt)
+     NJS_POINT3 ps; 
+     int fhit;
+     BT_WORK* btp; // not from DWARF
++#ifdef TARGET_PC
++    NJS_POINT3 pc_ofs;
++    int pc_j;
++#endif
+ 
+     fhit = 0;
+     
+@@ -440,6 +444,10 @@ void bhEne_SetBlood(BH_PWORK* epw, unsigned char type, BT_WORK* bt)
+     } 
+     else 
+     {
++#ifdef TARGET_PC   /* third person, a precise hit (tps_glue.c pc_blood_at_hit): the blood where the shot hit, on the joint it
++                      hit, as the game places the sniper rifle's (the table: a spot on that part, a zombie's head on its chest) */
++        pc_j = pc_blood_at_hit(epw, &pc_ofs.x);
++#endif
+         if (bhDGCdirCheck2((NJS_VECTOR*)&epw->dvx, owk) == 0)
+         {
+             fhit = 1;
+@@ -460,6 +468,15 @@ void bhEne_SetBlood(BH_PWORK* epw, unsigned char type, BT_WORK* bt)
+         }
+         
+         epw->djnt_no = btp->lnk_obj;
++#ifdef TARGET_PC
++        if (pc_j >= 0)   /* (the table's random draws above stay, and djnt_no as the game leaves it) */
++        {
++            epw->djnt_no = pc_j;
++            bhEne_SetBlood2(epw, type, &pc_ofs, plp->way);
++            epw->djnt_no = btp->lnk_obj;
++            return;
++        }
++#endif
+     }
+     
+     bhEne_SetBlood2(epw, type, &ofp, plp->way);

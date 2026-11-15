@@ -88,6 +88,10 @@ static unsigned char rec_flags[128];
 static const ActorModel* rand_src[128];   /* randomized records: where their new type comes from */
 static unsigned short rand_var[128];    /* and which enemy variant they became (0: none) */
 static int all_dead_check;              /* the script counts kills (DieEventCk): "all dead" doors */
+static unsigned char die_rec[1024];     /* ed_flg bit -> 1 + the record whose kill sets it (DieCk) */
+static unsigned char ed_set_ck[128];    /* ed_flg bits a Ck tests for set (code that waits for that kill) */
+static unsigned char kill_gated[128];   /* records whose kill some code waits for (the Battle Game's exits) */
+static int any_kill_gated;
 static int rm_flg_used;                 /* the script tests or sets rm_flg bits 29..31 (= 0x4, 0x2, 0x1), which some types write */
 
 static void scan_script(void)
@@ -95,9 +99,12 @@ static void scan_script(void)
     unsigned char* base = (unsigned char*)rom->evtp;
     unsigned int* tab = (unsigned int*)base;
     unsigned int offs[256], first, o, end;
-    int n = 0, i, j;
+    int n = 0, i, j, k;
     memset(rec_flags, 0, sizeof(rec_flags));
-    all_dead_check = rm_flg_used = 0;
+    memset(die_rec, 0, sizeof(die_rec));
+    memset(ed_set_ck, 0, sizeof(ed_set_ck));
+    memset(kill_gated, 0, sizeof(kill_gated));
+    all_dead_check = rm_flg_used = any_kill_gated = 0;
     if (!base) return;
     first = tab[0];
     for (i = 0; (unsigned)i * 4 < first && i < 256; i++) {
@@ -127,9 +134,11 @@ static void scan_script(void)
             case 153: case 208: rec_flags[p[1] & 127] |= REC_HP; break;   /* EnemyHpUp, EneLifeSetM */
             case 36: if (p[1] == 1) rec_flags[p[2] & 127] |= REC_SHOWN; break;   /* InitModelSet */
             case 33: all_dead_check = 1; break;   /* DieEventCk */
+            case 13: die_rec[(p[2] | p[3] << 8) & 0x3FF] = (unsigned char)((p[1] & 127) + 1); break;   /* DieCk record, ed_flg bit */
             case 4: case 5: {   /* Ck / Set rm_flg (bit n: mask 0x80000000 >> n) */
                 int b = (p[2] | p[3] << 8) & 0x3FF;
                 if (p[1] == 4 && b >= 29 && b <= 31) rm_flg_used = 1;
+                if (p[1] == 3 && !p[5]) ed_set_ck[b >> 3] |= (unsigned char)(1 << (b & 7));   /* Ck ed_flg bit b is set */
                 break;
             }
             case 1: if (depth < 64) ends[depth++] = o + p[1] + 1; break;   /* IfelCk */
@@ -140,6 +149,8 @@ static void scan_script(void)
             if (!depth && (op == 0 || (i >= 2 && op == 255))) break;
         }
     }
+    for (k = 0; k < 1024; k++)   /* (the DieCk may come after the test) */
+        if (die_rec[k] && (ed_set_ck[k >> 3] >> (k & 7) & 1)) kill_gated[die_rec[k] - 1] = 1, any_kill_gated = 1;
 }
 
 /* a free spot near (x, z) on floor `flr`: no wall between it and the spot (plus a body's width
@@ -344,9 +355,9 @@ static void randomize(const EnemyOpts* o)
         rnd_seed((unsigned)o->seed, (unsigned)room * 977u + 0x3000u);
         for (j = 0; j < 2; j++) {
             int t = 0, r;
-            for (k = 0; k < nk; k++) t += k != room_kinds[0] && !(kt[k].flags & K_NOCOUNT && all_dead_check) ? kt[k].w[0] : 0;
+            for (k = 0; k < nk; k++) t += k != room_kinds[0] && !(kt[k].flags & K_NOCOUNT && (all_dead_check || any_kill_gated)) ? kt[k].w[0] : 0;
             for (r = (int)(rnd() % (unsigned)t), k = 0; k < nk; k++) {
-                int w = k != room_kinds[0] && !(kt[k].flags & K_NOCOUNT && all_dead_check) ? kt[k].w[0] : 0;
+                int w = k != room_kinds[0] && !(kt[k].flags & K_NOCOUNT && (all_dead_check || any_kill_gated)) ? kt[k].w[0] : 0;
                 if (r < w) break;
                 r -= w;
             }
@@ -371,7 +382,7 @@ static void randomize(const EnemyOpts* o)
                 int f = kt[i].flags;
                 w[i] = kt[i].w[wild];
                 if (!(f & K_FLIER) != !flier_record(save.id)) w[i] = 0;
-                if ((f & K_NOCOUNT) && all_dead_check) w[i] = 0;
+                if ((f & K_NOCOUNT) && (all_dead_check || kill_gated[k])) w[i] = 0;
                 if ((f & K_RMFLG) && rm_flg_used) w[i] = 0;
                 if ((f & K_HEAVY) && heavy) w[i] = 0;
                 if (cost - slot_cost(save.id) + kt[i].cost > 128 - SPAWN_SLOTS_FREE) w[i] = 0;

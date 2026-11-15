@@ -226,6 +226,15 @@ static inline void pc_inv_sort(unsigned int* b, const ITEM_WORK* items)
     if (b[0] >= 2) b[0] = eq >= 0 ? eq : 0;
 }
 
+/* sub1.c ItemBoxChange / GetItem: a special-slot item (`standard`: the lighter, Claire's lockpick too)
+   goes into word 1 only while that is empty. Claire can hold both (the lockpick from a pickup lies in
+   a cell, an event puts it into the slot); the game wrote it over the item there, which was lost. Else
+   it takes a cell like any other item. */
+static inline int pc_to_special(const unsigned int* b, int id, int std0, int std1)
+{
+    return (id == std0 || id == std1) && !((b[1] >> 16) & 0xFF);
+}
+
 /* an inventory word (id << 16 | count, flags kept) in as a pickup puts it: onto stacks of the same
    stackable item (up to 999), the rest into the first free word (a two-slot item needs two free
    cells, as GetItem asks, and goes to the front as ItemSort puts it); all or none. A word that does not
