@@ -12,6 +12,13 @@ if(WIN32)
     # the crash log walks the EBP frame chain (host/log.c); measured on Linux: +1..5% game logic
     add_compile_options(-fno-omit-frame-pointer)
 endif()
+# SSE flags are x86-only; arm64 uses the portable C paths.
+if(CMAKE_SYSTEM_NAME STREQUAL "Android")
+    set(RECVX_SSE_FLAGS "")
+else()
+    set(RECVX_SSE_FLAGS -msse2 -mfpmath=sse)
+endif()
+
 set(PROG ${DECOMP}/src/ps2/veronica/prog)
 set(KATANA_INC ${DECOMP}/include/recvx-decomp-katana/KATANA/Include)
 
@@ -97,7 +104,7 @@ target_compile_options(recvx_game PRIVATE
     -fwrapv
     -fsigned-char             # EE char is signed
     -ffp-contract=off         # no FMA fusion: keep the PS2's operation order
-    -msse2 -mfpmath=sse       # IEEE single precision, no x87 extended intermediates
+    ${RECVX_SSE_FLAGS}         # IEEE single precision, no x87 extended intermediates (x86 only)
     -fno-tree-vectorize
     -ftrivial-auto-var-init=zero  # deterministic stand-in for MWCC's stale registers (docs/dev/uninitialized-locals.txt)
 )
@@ -126,6 +133,11 @@ endif()
 file(GLOB_RECURSE PLATFORM_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
+if(CMAKE_SYSTEM_NAME STREQUAL "Android")
+    # The sampling profiler is x86/Linux-specific (ucontext.gregs[REG_RIP]).
+    # It is not linked in tests-only mode; exclude it from the arm64 object library.
+    list(FILTER PLATFORM_SOURCES EXCLUDE REGEX "src/host/profile\\.c$")
+endif()
 add_library(recvx_platform OBJECT ${PLATFORM_SOURCES})
 # xxHash (BSD-2-Clause, header only): XXH3, the hash PCSX2 names its texture replacements by (src/gs/hdpack.c)
 include(FetchContent)
@@ -150,7 +162,7 @@ target_include_directories(recvx_platform PRIVATE
 )
 target_compile_options(recvx_platform PRIVATE
     $<$<COMPILE_LANGUAGE:C>:-std=gnu11>
-    -fno-strict-aliasing -fwrapv -ffp-contract=off -msse2 -mfpmath=sse
+    -fno-strict-aliasing -fwrapv -ffp-contract=off ${RECVX_SSE_FLAGS}
     -Wall -Wno-unused-function
 )
 target_link_libraries(recvx_platform PRIVATE SDL3::SDL3 imgui)
@@ -159,6 +171,30 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 if(WIN32)
     target_compile_options(recvx_platform PRIVATE $<$<COMPILE_LANGUAGE:C>:-mno-ms-bitfields>)
+endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Android")
+    # Bionic ships execinfo.h but does not expose the backtrace symbols at API 26.
+    # Stub the two functions so the crash-log code in host.c/log.c compiles unchanged.
+    set(_android_backtrace_stub "${CMAKE_BINARY_DIR}/android_backtrace_stub.h")
+    file(WRITE "${_android_backtrace_stub}"
+        "#ifndef ANDROID_BACKTRACE_STUB_H\n"
+        "#define ANDROID_BACKTRACE_STUB_H\n"
+        "#define backtrace(frames, count) 0\n"
+        "#define backtrace_symbols_fd(frames, count, fd) ((void)0)\n"
+        "#endif\n")
+    target_compile_options(recvx_platform PRIVATE "$<$<COMPILE_LANGUAGE:C>:SHELL:-include ${_android_backtrace_stub}>")
+    # tr.c's inline-asm .trtab symbols are global; make them hidden so arm64 uses
+    # PC-relative addressing instead of GOT (which requires 8-byte section alignment).
+    set(_android_tr_visibility "${CMAKE_BINARY_DIR}/android_tr_visibility.h")
+    file(WRITE "${_android_tr_visibility}"
+        "#ifndef ANDROID_TR_VISIBILITY_H\n"
+        "#define ANDROID_TR_VISIBILITY_H\n"
+        "__attribute__((visibility(\"hidden\"))) extern const char tr_table_text[];\n"
+        "__attribute__((visibility(\"hidden\"))) extern const char tr_table_end[];\n"
+        "#endif\n")
+    set_source_files_properties(src/host/tr.c PROPERTIES COMPILE_OPTIONS "-include${_android_tr_visibility}")
+    # arm64 Android devices use 16 KiB max page sizes; match it for segment layout.
+    add_link_options("-Wl,-z,max-page-size=16384")
 endif()
 
 # ---------------------------------------------------------------- executable
@@ -227,14 +263,18 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND TARGET recvx)
 endif()
 
 # ---------------------------------------------------------------- tests
-add_library(ashford_campaign_disc STATIC ${CMAKE_CURRENT_SOURCE_DIR}/../../src/core.cpp)
-target_compile_features(ashford_campaign_disc PUBLIC cxx_std_17)
-target_include_directories(ashford_campaign_disc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../src)
-target_link_libraries(ashford_campaign_disc PUBLIC bcrypt)
-add_executable(test_ashford_disc tests/test_ashford_disc.cpp src/host/ashford_disc.cpp)
-target_include_directories(test_ashford_disc PRIVATE src)
-target_link_libraries(test_ashford_disc PRIVATE ashford_campaign_disc)
-add_test(NAME ashford_disc COMMAND test_ashford_disc)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
+    # bcrypt/windows.h disc validation is not available on Android; the host stub
+    # in ashford_disc.cpp returns "unavailable" until the platform hash is ready.
+    add_library(ashford_campaign_disc STATIC ${CMAKE_CURRENT_SOURCE_DIR}/../../src/core.cpp)
+    target_compile_features(ashford_campaign_disc PUBLIC cxx_std_17)
+    target_include_directories(ashford_campaign_disc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../src)
+    target_link_libraries(ashford_campaign_disc PUBLIC bcrypt)
+    add_executable(test_ashford_disc tests/test_ashford_disc.cpp src/host/ashford_disc.cpp)
+    target_include_directories(test_ashford_disc PRIVATE src)
+    target_link_libraries(test_ashford_disc PRIVATE ashford_campaign_disc)
+    add_test(NAME ashford_disc COMMAND test_ashford_disc)
+endif()
 
 add_executable(test_ashford_panel tests/test_ashford_panel.cpp src/host/ashford_panel.cpp)
 target_include_directories(test_ashford_panel PRIVATE src)
@@ -242,13 +282,13 @@ target_link_libraries(test_ashford_panel PRIVATE imgui)
 add_test(NAME ashford_panel COMMAND test_ashford_panel)
 
 add_executable(test_vu tests/test_vu.c src/ps2/vu.c)
-target_compile_options(test_vu PRIVATE -std=gnu11 -msse2 -mfpmath=sse -ffp-contract=off)
+target_compile_options(test_vu PRIVATE -std=gnu11 ${RECVX_SSE_FLAGS} -ffp-contract=off)
 target_link_libraries(test_vu PRIVATE m)
 add_test(NAME vu COMMAND test_vu)
 # the same against the plain C (non-SSE) native paths, as an arm64 build would compile them
 add_executable(test_vu_portable tests/test_vu.c src/ps2/vu.c)
 target_compile_definitions(test_vu_portable PRIVATE RECVX_VU_PORTABLE)
-target_compile_options(test_vu_portable PRIVATE -std=gnu11 -msse2 -mfpmath=sse -ffp-contract=off)
+target_compile_options(test_vu_portable PRIVATE -std=gnu11 ${RECVX_SSE_FLAGS} -ffp-contract=off)
 target_link_libraries(test_vu_portable PRIVATE m)
 add_test(NAME vu_portable COMMAND test_vu_portable)
 
@@ -395,13 +435,13 @@ add_test(NAME ntex COMMAND test_ntex)
 # GS memory (pc/src/gs/gs_mem.c): texture decodes, read_rect and CLUT loads against per-pixel reads
 # (it #includes gs_mem.c: built with -O3 to catch aggressive optimizer issues on i686)
 add_executable(test_gsmem tests/test_gsmem.c)
-target_compile_options(test_gsmem PRIVATE -std=gnu11 -fno-strict-aliasing -fwrapv -ffp-contract=off -msse2 -mfpmath=sse -O3)
+target_compile_options(test_gsmem PRIVATE -std=gnu11 -fno-strict-aliasing -fwrapv -ffp-contract=off ${RECVX_SSE_FLAGS} -O3)
 target_include_directories(test_gsmem PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/sdk ${CMAKE_CURRENT_SOURCE_DIR}/src)
 add_test(NAME gsmem COMMAND test_gsmem)
 
 # SMAA's lookup textures computed at start (src/gs/smaa_tables.h): the bytes of SMAA's own tables
 add_executable(test_aa_tables tests/test_aa_tables.c)
-target_compile_options(test_aa_tables PRIVATE -std=gnu11 -msse2 -mfpmath=sse -ffp-contract=off)
+target_compile_options(test_aa_tables PRIVATE -std=gnu11 ${RECVX_SSE_FLAGS} -ffp-contract=off)
 target_link_libraries(test_aa_tables PRIVATE m)
 add_test(NAME aa_tables COMMAND test_aa_tables)
 

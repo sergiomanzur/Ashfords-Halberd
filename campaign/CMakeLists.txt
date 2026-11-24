@@ -3,8 +3,9 @@ project(recvx_pc VERSION 0.8.0 LANGUAGES C CXX)   # synced single-player backend
 include(cmake/version.cmake)
 
 # The decomp's data files and code assume the EE's 32-bit pointers. Phase 1
-# targets x86-32; a 64-bit build needs the 32-bit-window memory model first.
-if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
+# targets x86-32; other 32-bit-window loaders (e.g. the Android arm64 loader)
+# are allowed once they provide the fixed low-memory model.
+if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
     message(FATAL_ERROR "recvx_pc must currently be built as 32-bit. "
                         "Linux: -DCMAKE_TOOLCHAIN_FILE=cmake/linux-i686.cmake; Windows: -A Win32")
 endif()
