@@ -39,12 +39,17 @@ void njRotateXYZ(NJS_MATRIX* m, Angle angx, Angle angy, Angle angz);
 #include <ps2/veronica/prog/pwksub.h>
 #include <ps2/veronica/prog/objitm.h>
 #include "../src/host/actors.h"
+#include "../src/host/tps.h"
+#include "../src/import/impmodel.h"
+#include "../include/pc_parse.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 void host_log(const char* fmt, ...);
+FILE* pc_fopen(const char* utf8_path, const char* mode);   /* host/fileio.h */
+void tps_legs(BH_PWORK* p, MN_WORK* set, const TpsLegs* l);   /* tps_glue.c */
 void bhArmIkMdk(BH_PWORK* ewP, int bas_no, NJS_POINT3* effP, int rot);   /* playpch.c */
 Sint32 ADXF_ReadNw32(ADXF adxf, Sint32 nsct, void* buf);   /* PC: synchronous */
 extern NJS_TEXMEMLIST* Ps2_tex_info;
@@ -62,6 +67,7 @@ extern ETTY_WORK lkmtab[2];             /* player.c: Claire's hair (1211), Weske
 /* a humanoid skeleton: player node (0..21) -> node, parents, rest positions (model space) */
 typedef struct Rig {
     signed char map[22];
+    signed char rot[22];                /* the node whose rotation turns role k's bone (rig_rot): map[k], or past a zero-length child */
     signed char par[NODES];
     float rest[NODES][3];
     int n, ok;
@@ -70,14 +76,27 @@ typedef struct Rig {
 typedef struct Disguise {
     O_WORK ow[OW_MAX];                  /* first: 16-byte aligned */
     MN_WORK mth[512];
-    unsigned char keep[KEEP_SIZE];      /* the model's chunk list, then its type's motion list */
+    unsigned char* keep;                /* the model's chunk list, then its type's motion list */
+    int keep_cap;
     BH_PWORK w;                         /* the display actor */
     int model, fail, tex_gone, posed, mapped;   /* mapped: the last pose came from the source's skeleton */
     int face;                           /* faces in its face mask (face_init; 0 none): lip sync mirrored from the double */
     int lip, lip_max;                   /* the double's lip data (a line) and its highest phoneme */
+    signed char src_hand[2];            /* the last pose's source hand nodes (right, left; -1 none) */
+    signed char src_head[2];            /* and its neck and head nodes (-1 none) */
     NJS_TEXLIST* tex[16];               /* texlists we uploaded */
     int tex_n;
     Rig rig;                            /* rig.ok: posed from the source's skeleton */
+    const CvxmSkin* skin;               /* an imported model (.cvxm): its vertices skinned every pose (imp_skin; in file) */
+    unsigned char* file;                /* the .cvxm as read (host memory, outside the address window; load_import_model) */
+    float* vtx;                         /* its vertex chunk's data (position, normal per vertex) */
+    int nv;
+    float hand_dir[3];                  /* its left hand: wrist to fingertips at rest (the two-handed grip) */
+    signed char fbone[IMP_FACES - 1];   /* its face bones (IMP_FACE_* - 1: lids, jaw), -1 none */
+    int blink, blink_wait;              /* the blink: step 0..7 of it (-1 none), ticks since the last */
+    float lid_travel[2];                /* how far each upper lid goes down to close (imp_face) */
+    float talk;                         /* the jaw (degrees) from the player's voice, imp_face */
+    unsigned int seed;                  /* (its own random numbers: the game's rand() stays the game's) */
     struct {   /* the player characters' cutscene models: the head part the scripts link to them (Claire's
                   ponytail, Wesker's sunglasses), from the character's part file (load_head) */
         O_WORK ow[16] __attribute__((aligned(16)));
@@ -89,16 +108,53 @@ typedef struct Disguise {
     } hp;
 } Disguise;
 static Disguise dg[ACTOR_SLOTS] __attribute__((aligned(64)));
+/* the cast slots' and the double's own hands (actor_cast_hands): a player character's unarmed pieces */
+#define HAND_MDL 4096
+static struct {
+    O_WRK obj[2];
+    O_WORK ow[2][4] __attribute__((aligned(16)));
+    unsigned char mdl[2][HAND_MDL] __attribute__((aligned(64)));
+    int on, tried, chr;
+} ch[ACTOR_SLOTS] __attribute__((aligned(64)));
+static unsigned char keep_big[ACTOR_CAST][KEEP_SIZE] __attribute__((aligned(64)));
+#define CAST_MEM (3 << 20)
+static unsigned char cast_mem[CAST_MEM] __attribute__((aligned(64)));
+static int cast_used;
+
+static int keep_fit(Disguise* d, int need)
+{
+    if (d < &dg[ACTOR_CAST]) return need <= KEEP_SIZE;
+    if (d->keep && need <= d->keep_cap) return 1;
+    need = (need + 63) & ~63;
+    if (need > CAST_MEM - cast_used) return 0;
+    d->keep = cast_mem + cast_used;
+    d->keep_cap = need;
+    cast_used += need;
+    return 1;
+}
+
+static void cast_mem_reset(void)
+{
+    int i;
+    for (i = ACTOR_CAST; i < ACTOR_SLOTS; i++) if (dg[i].model >= 0) return;
+    for (i = ACTOR_CAST; i < ACTOR_SLOTS; i++) { dg[i].keep = NULL; dg[i].keep_cap = 0; }
+    cast_used = 0;
+}
+
 static unsigned char pack[6 << 20] __attribute__((aligned(64)));
 static unsigned char room[12 << 20] __attribute__((aligned(64)));   /* the game's arena size: any room it loads fits */
 int actor_on;                           /* a display actor is shown (game.c hooks) */
 static int dbl_tick;                    /* actor_double_tick is posing the double (its hands go to the model's); 2: a second
                                            double of the tick, which takes the ponytail as the first one swung it */
-static BH_PWORK* dbl_posed;             /* the double the display actor's current pose was taken from */
+static BH_PWORK* posed_src[ACTOR_SLOTS];
+#define dbl_posed posed_src[ACTOR_DOUBLE]
+static unsigned int posed_t[ACTOR_SLOTS];
+static unsigned int actor_ticks;
 static void face_init(Disguise* d, int idx);
-/* the retargeting of docs/ACTORS.md "Retargeting" (limb roles along each chain, the root's height
-   scaled, the aim solved on the drawn weapon, the camera scaled); RECVX_RETARGET=0: the previous one */
+static unsigned int k_seed;             /* imported models' blink seeds */
 int actor_retarget = 1;
+int cast_hands = 1;
+int cast_parts = 1;
 
 /* the player's chains: the node whose position gives a node's bone direction (-1: a chain end) */
 static const signed char dir_child[22] = { -1, 2, 3, 4, 5, -1, 7, 8, 9, -1, 11, 12, 13, -1, 15, 16, 17, -1, 19, 20, 21, -1 };
@@ -293,6 +349,14 @@ static int rig_build(Rig* r, const NJS_CNK_OBJECT* o, int n, int bind)
             for (k = 1; k < 4 && j < m; k++) r->map[base + k] = c[j++];
         }
     }
+    for (k = 0; k < 22; k++) {   /* rig_rot: double-node shoulders (Rodrigo, hazmat man) */
+        int a = r->map[k], b = dir_child[k] >= 0 ? r->map[(int)dir_child[k]] : -1, p, best = -1;
+        r->rot[k] = (signed char)a;
+        if (a < 0 || b < 0) continue;
+        for (p = r->par[b]; p >= 0 && p != a; p = r->par[p])
+            if (best < 0 && rig_dist(r, p, a) < 0.05f) best = p;
+        if (p == a && best >= 0) r->rot[k] = (signed char)best;
+    }
     return r->ok = 1;
 }
 
@@ -413,27 +477,33 @@ static void retarget(Disguise* d, BH_PWORK* src, const Rig* sr)
     const Rig* tr = &d->rig;
     const float* dm = (const float*)d->w.mtxbuf;   /* the actor's own matrix (d->w.mtx points here) */
     const float* root = sr->map[0] >= 0 ? &sow[(int)sr->map[0]].mtx[12] : NULL;   /* the root: feet on the source's floor */
-    float rot[NODES][9], scaled[3];
+    float rot[NODES][9], scaled[3], fs = 1e9f, rs = 1e9f, rt = 1e9f, flr = dm[13], hs = 0, ht = 0;
+    int i, k, j, from[NODES];
     if (root && actor_retarget && tr->map[1] >= 0 && sr->map[1] >= 0) {
-        /* The root's height above the floor (crouching, kneeling, the walk's bob) scaled by the hips'
-           heights: a taller body's legs bend as the source's and reach as far down in proportion, so
-           its feet stay on the floor instead of floating (a shorter one's: sinking). Only the height:
-           room motions move cutscene doubles across the room with the root. */
-        float hs = sr->rest[(int)sr->map[1]][1] - sr->rest[(int)sr->map[0]][1], ht = tr->rest[(int)tr->map[1]][1] - tr->rest[(int)tr->map[0]][1];
+        hs = sr->rest[(int)sr->map[1]][1] - sr->rest[(int)sr->map[0]][1];
+        ht = tr->rest[(int)tr->map[1]][1] - tr->rest[(int)tr->map[0]][1];
+        for (k = 16; k <= 21; k++) {   /* the ankles and toes */
+            if (k == 18 || k == 19 || tr->map[k] < 0 || sr->map[k] < 0) continue;
+            fs = fminf(fs, sow[(int)sr->map[k]].mtx[13]);
+            rs = fminf(rs, sr->rest[(int)sr->map[k]][1] - sr->rest[(int)sr->map[0]][1]);
+            rt = fminf(rt, tr->rest[(int)tr->map[k]][1] - tr->rest[(int)tr->map[0]][1]);
+        }
+        if (fs < 1e8f) flr = fs - rs;
         memcpy(scaled, root, sizeof(scaled));
-        if (hs > 1.0f && ht > 1.0f) scaled[1] = dm[13] + (root[1] - dm[13]) * ht / hs;
+        if (hs > 1.0f && ht > 1.0f) scaled[1] = flr + (root[1] - flr) * ht / hs;
         root = scaled;
     }
-    int i, k, j, from[NODES];
     for (i = 0; i < tr->n; i++) from[i] = -1;
     for (k = 0; k < 22; k++) if (tr->map[k] >= 0 && sr->map[k] >= 0) from[(int)tr->map[k]] = k;
     for (i = 0; i < tr->n; i++) {
         int p = tr->par[i];
         k = from[i];
         if (k >= 0) {   /* source world rotation, after the rest correction */
-            const float* s = sow[(int)sr->map[k]].mtx;
+            const float* s = sow[(int)(actor_retarget ? sr->rot[k] : sr->map[k])].mtx;
             float a[9] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 }, sw[9];
-            if (k > 0) {   /* the bone towards the chain's next node; a chain end takes its parent bone's */
+            /* An imported model (d->skin) is skinned to its own T-pose, the same pose as the source's
+               rest: it takes the source's rotations unchanged. */
+            if (k > 0 && !d->skin) {   /* the bone towards the chain's next node; a chain end takes its parent bone's */
                 int kk = dir_child[k] >= 0 ? k : k - 1, dk = dir_child[kk];
                 if (dk >= 0 && tr->map[dk] >= 0 && sr->map[dk] >= 0 && tr->map[kk] >= 0 && sr->map[kk] >= 0) {
                     float u[3], v[3];
@@ -446,28 +516,33 @@ static void retarget(Disguise* d, BH_PWORK* src, const Rig* sr)
             }
             for (j = 0; j < 9; j++) sw[j] = s[(j / 3) * 4 + j % 3];
             mul3(a, sw, rot[i]);
-        } else if (p >= 0) follow(d, rot, i, p);   /* rigidly with its parent */
-        else for (j = 0; j < 9; j++) rot[i][j] = dm[(j / 3) * 4 + j % 3];
+        } else if (p >= 0) {
+            int s;
+            follow(d, rot, i, p);   /* rigidly with its parent */
+            for (s = 7; s <= 11; s += 4)   /* a source without that arm (Nosferatu in straitjacket): arms hang beside body */
+                if (tr->map[s] == i && sr->map[s] < 0 && sr->map[s + 2] < 0 && tr->map[s + 2] >= 0) {
+                    float u[3], v[3] = { 0, -1, 0 }, a[9];
+                    for (j = 0; j < 3; j++) u[j] = tr->rest[(int)tr->map[s + 2]][j] - tr->rest[i][j];
+                    v[0] = u[0] > 0 ? 0.2f : -0.2f;
+                    rot_from_to(u, v, a);
+                    mul3(a, rot[p], rot[i]);
+                }
+        } else for (j = 0; j < 9; j++) rot[i][j] = dm[(j / 3) * 4 + j % 3];
     }
     place(m, tr, rot, dm, root);
-    if (root == scaled) {   /* The feet as the source's: its lowest ankle or toe as far over the floor (in
-        proportion) beyond its rest height as the model's beyond the model's. Feet of another shape (a
-        Hunter's long foot, Monster Steve's claw) lift the leg differently when the source's toe bends. */
-        float fs = 1e9f, ft = 1e9f, rs = 1e9f, rt = 1e9f, hs = sr->rest[(int)sr->map[1]][1] - sr->rest[(int)sr->map[0]][1],
-              ht = tr->rest[(int)tr->map[1]][1] - tr->rest[(int)tr->map[0]][1];
-        for (k = 16; k <= 21; k++) {
-            if (k == 18 || k == 19 || tr->map[k] < 0 || sr->map[k] < 0) continue;
-            fs = fminf(fs, sow[(int)sr->map[k]].mtx[13]);
-            rs = fminf(rs, sr->rest[(int)sr->map[k]][1] - sr->rest[(int)sr->map[0]][1]);
-            ft = fminf(ft, m->owP[(int)tr->map[k]].mtx[13]);
-            rt = fminf(rt, tr->rest[(int)tr->map[k]][1] - tr->rest[(int)tr->map[0]][1]);
-        }
-        if (ft < 1e8f && hs > 1.0f && ht > 1.0f) {
-            float shift = rt + (fs - dm[13] - rs) * ht / hs - (ft - dm[13]);
-            if (shift > 3.0f) shift = 3.0f;
-            if (shift < -3.0f) shift = -3.0f;
-            scaled[1] += shift;
-            place(m, tr, rot, dm, root);
+    if (root == scaled && fs < 1e8f && hs > 1.0f && ht > 1.0f) {
+        float ft = 1e9f, shift, lim = ht * 0.5f;
+        for (k = 16; k <= 21; k++) if (k != 18 && k != 19 && tr->map[k] >= 0 && sr->map[k] >= 0) ft = fminf(ft, m->owP[(int)tr->map[k]].mtx[13]);
+        shift = fs - rs + rt - ft;
+        if (shift > lim) shift = lim;
+        if (shift < -lim) shift = -lim;
+        scaled[1] += shift;
+        place(m, tr, rot, dm, root);
+        if (getenv("RECVX_FEET_TRACE") && !(actor_ticks % 15)) {
+            ft = 1e9f;
+            for (k = 16; k <= 21; k++) if (k != 18 && k != 19 && tr->map[k] >= 0 && sr->map[k] >= 0) ft = fminf(ft, m->owP[(int)tr->map[k]].mtx[13]);
+            host_log("actor: feet slot %d model %d: source %.2f model %.2f over %.2f (hips %.2f/%.2f, rest feet %.2f/%.2f, shift %.2f)\n", (int)(d - dg), d->model,
+                     fs - dm[13], ft - dm[13], dm[13], hs, ht, rs, rt, shift);
         }
     }
     {   /* Both hands on the weapon (two-handed aim and grips): the source's left hand is near its
@@ -480,10 +555,46 @@ static void retarget(Disguise* d, BH_PWORK* src, const Rig* sr)
             float t[3], ds = 0, w;
             for (j = 0; j < 3; j++) ds += (sL[j] - sR[j]) * (sL[j] - sR[j]);
             w = (6.0f - sqrtf(ds)) / 3.0f;
+            if (d->skin && sr->map[11] >= 0) {
+                const float* sS = &sow[(int)sr->map[11]].mtx[12];
+                float fz = 0, zl = 0, fwd;
+                for (j = 0; j < 3; j++) { fz += (sL[j] - sS[j]) * dm[8 + j]; zl += dm[8 + j] * dm[8 + j]; }
+                fwd = zl > 1e-6f ? -fz / sqrtf(zl) : 0;
+                w *= fminf(1.0f, fmaxf(0.0f, (fwd - 0.6f) / 0.4f));
+            }
             if (w > 0) {
                 if (w > 1) w = 1;
-                for (j = 0; j < 3; j++) t[j] = m->owP[h].mtx[12 + j] + w * (m->owP[r].mtx[12 + j] + sL[j] - sR[j] - m->owP[h].mtx[12 + j]);
+                float off[3];
+                for (j = 0; j < 3; j++) off[j] = sL[j] - sR[j];
+                if (d->skin && tr->map[7] >= 0 && sr->map[7] >= 0 && sr->map[11] >= 0) {
+                    float ms = rig_dist(tr, tr->map[7], u), ss = rig_dist(sr, sr->map[7], sr->map[11]), k = 1;
+                    float g = w * fminf(1.0f, fmaxf(0.0f, (1.5f - sqrtf(ds)) / 0.5f)), y[3], dn = 0, yl = 0, rd[3], rl = 0, hl = 0;
+                    if (ms > 0.1f && ss > 0.1f) k = ms / ss;
+                    for (j = 0; j < 3; j++) off[j] *= k;
+                    if (g > 0 && tr->map[8] >= 0) {
+                        const float *rh = &m->owP[r].mtx[12], *re = &m->owP[(int)tr->map[8]].mtx[12];
+                        for (j = 0; j < 3; j++) { y[j] = dm[4 + j]; yl += y[j] * y[j]; rd[j] = rh[j] - re[j]; rl += rd[j] * rd[j]; hl += d->hand_dir[j] * d->hand_dir[j]; }
+                        if (yl > 1e-6f && rl > 1e-6f) {
+                            const float c = -0.05f, dk = 0.6f;
+                            yl = sqrtf(yl); rl = sqrtf(rl); hl = sqrtf(hl);
+                            for (j = 0; j < 3; j++) dn += off[j] * y[j] / yl;
+                            for (j = 0; j < 3; j++) off[j] += g * (dk * dn * y[j] / yl - c * hl * rd[j] / rl - off[j]);
+                        }
+                    }
+                }
+                for (j = 0; j < 3; j++) t[j] = m->owP[h].mtx[12 + j] + w * (m->owP[r].mtx[12 + j] + off[j] - m->owP[h].mtx[12 + j]);
                 arm_ik(m, rot, u, f, h, t);
+                if (d->skin && tr->map[8] >= 0) {
+                    float g = w * fminf(1.0f, fmaxf(0.0f, (1.5f - sqrtf(ds)) / 0.5f)), fdir[3], tdir[3], tl = 0, q[9];
+                    const float *rh = &m->owP[r].mtx[12], *re = &m->owP[(int)tr->map[8]].mtx[12];
+                    for (j = 0; j < 3; j++) { fdir[j] = d->hand_dir[0] * rot[h][j] + d->hand_dir[1] * rot[h][3 + j] + d->hand_dir[2] * rot[h][6 + j]; tdir[j] = rh[j] - re[j]; tl += tdir[j] * tdir[j]; }
+                    if (g > 0 && tl > 1e-4f) {
+                        tl = sqrtf(tl);
+                        for (j = 0; j < 3; j++) tdir[j] = fdir[j] * (1 - g) + tdir[j] / tl * g;
+                        rot_from_to(fdir, tdir, q);
+                        mul3(rot[h], q, rot[h]);
+                    }
+                }
                 for (i = 0; i < tr->n; i++) if (from[i] < 0 && tr->par[i] >= 0) follow(d, rot, i, tr->par[i]);
                 place(m, tr, rot, dm, root);
             }
@@ -538,7 +649,7 @@ static int tex_owner(const ETTY_WORK* recs, int n, const unsigned int* mdltab, c
         p = room + mdltab[m++];
         while (p + 4 <= end && (dt = (int)rd32(p)) != -1) {
             p += 4;
-            if (dt > 0 && is_mlb(p) && mlb_textured(p)) {
+            if (dt >= 16 && is_mlb(p) && mlb_textured(p)) {
                 int key = (recs[i].id << 16) | (recs[i].mdlver << 8) | ++t, j;
                 for (j = 0; j < owners && seen[j] != key; j++);
                 if (j == owners) {
@@ -561,10 +672,15 @@ static void unload(Disguise* d)
         bhGarbageTexture(NULL, 0);
     }
     d->tex_n = d->tex_gone = d->posed = d->face = d->lip = d->lip_max = d->hp.on = 0;
-    if (d == &dg[ACTOR_DOUBLE]) dbl_posed = NULL;
+    ch[d - dg].on = ch[d - dg].tried = 0;
+    posed_src[d - dg] = NULL;
     d->model = -1;
     memset(&d->w, 0, sizeof(d->w));
     d->rig.ok = 0;
+    d->skin = NULL;
+    d->vtx = NULL;
+    free(d->file);
+    d->file = NULL;
 }
 
 static int free_entries(void)
@@ -706,21 +822,60 @@ void actor_tex_free(int* entries, int* heap) { bhGarbageTexture(NULL, 0); *entri
    enemy spawner (spawn_glue.c). */
 static const unsigned char* end;        /* of the room file in `room` */
 
+static int room_ok(uint32_t n)
+{
+    const RDT_WORK* hdr = (const RDT_WORK*)room;
+    const ROM_WORK* rw;
+    const ETTY_WORK* recs;
+    uint32_t i, k = 1, ene_n, cnt;
+    if (n < sizeof(RDT_WORK) || hdr->ver < 1.72f || !pc_range_ok(hdr->hed00, sizeof(ROM_WORK), n)) return 0;
+    rw = (const ROM_WORK*)(room + hdr->hed00);
+    ene_n = (uint32_t)rw->ene_n;
+    if (!pc_range_ok((uint32_t)rw->enep, (uint64_t)ene_n * sizeof(ETTY_WORK), n) ||
+        !pc_range_ok((uint32_t)rw->effp, (uint64_t)(uint32_t)rw->eff_n * sizeof(EF_WRK), n) ||
+        !pc_range_ok(hdr->hed02, (uint64_t)ene_n * 4, n) || !pc_range_ok(hdr->hed04, 4, n))
+        return 0;
+    recs = (const ETTY_WORK*)(room + (uint32_t)rw->enep);
+    for (i = 0; i < ene_n; i++) {
+        if (rd32(room + hdr->hed02 + 4 * i) >= n) return 0;
+        if (!(recs[i].flg & 0x1)) continue;
+        if (!pc_range_ok(hdr->hed01, 4 * ((uint64_t)k + 1), n) || rd32(room + hdr->hed01 + 4 * k) >= n) return 0;
+        k++;
+    }
+    cnt = rd32(room + hdr->hed04);
+    if (!pc_range_ok(hdr->hed04, 4 + 4 * (uint64_t)cnt, n)) return 0;
+    for (i = 0; i < cnt; i++) if (rd32(room + hdr->hed04 + 4 + 4 * i) >= n) return 0;
+    return 1;
+}
+
 static int load_rdx(int rm)
 {
     static int loaded = -1;
-    RDT_WORK* hdr = (RDT_WORK*)room;
     char name[16];
-    int f;
+    int f, len;
     if (loaded == rm) return 1;
     loaded = -1;
     snprintf(name, sizeof(name), "RM_%04d.RDX", rm);
     for (f = 0; f < rdx_image_data_max && strcmp(rdx_files[f], name); f++);
     if (f == rdx_image_data_max || !read_file(17, f)) return 0;
-    end = room + Expand((char*)pack, room);
-    if (hdr->ver < 1.72f || hdr->hed00 + sizeof(ROM_WORK) > (unsigned)(end - room)) return 0;
+    if ((len = pc_prs_decode(pack, sizeof(pack), room, sizeof(room))) < 0 || !room_ok((uint32_t)len)) {
+        host_log("actor: %s %s\n", name, len == PC_PRS_FULL ? "does not fit when expanded" : "is damaged");
+        return 0;
+    }
+    end = room + len;
     loaded = rm;
     return 1;
+}
+
+/* the room file rm read and expanded, *len bytes (placer_glue.c / extras_glue.c); valid, as `pack`
+   (*scratch, *cap bytes free: the packed file is done with), until another room file or part file is read here */
+const unsigned char* actor_room_file(int rm, int* len, unsigned char** scratch, int* cap)
+{
+    if (!load_rdx(rm)) return NULL;
+    *len = (int)(end - room);
+    *scratch = pack;
+    *cap = (int)sizeof(pack);
+    return room;
 }
 
 int actor_find(const ActorModel* am, ActorData* out)
@@ -756,7 +911,7 @@ int actor_find(const ActorModel* am, ActorData* out)
     if (!out->mlen || (out->mtn && !out->nlen)) { host_log("actor: %s: bad chunk list in %s\n", am->name, name); return 0; }
     /* the entries of the room's texture table the game would upload them from */
     for (p = out->mdl; (dt = (int)rd32(p)) != -1 && out->ntex < 16; p += 4 + (dt > 0 ? dt : 0))
-        if (dt > 0 && is_mlb(p + 4) && mlb_textured(p + 4)) {
+        if (dt >= 16 && is_mlb(p + 4) && mlb_textured(p + 4)) {
             const unsigned char* texdat = room + hdr->hed04;
             int o = tex_owner(recs, n, mdltab, end, am->id, am->mdlver, out->ntex);
             out->tex[out->ntex++] = o < 0 || o + 1 >= (int)rd32(texdat) ? NULL : room + rd32(texdat + 8 + 4 * o);
@@ -800,8 +955,9 @@ static int load_room_model(Disguise* d, int idx)
 
     if (!actor_find(am, &a)) return 0;
     mofs = (int)((unsigned int)a.mdl & 63);   /* keep the data's alignment */
+    if (d >= &dg[ACTOR_CAST]) a.mtn = NULL, a.nlen = 0;
     if (a.mtn) nofs = ((mofs + a.mlen + 63) & ~63) + (int)((unsigned int)a.mtn & 63);
-    if (mofs + a.mlen > KEEP_SIZE || nofs + a.nlen > KEEP_SIZE) { host_log("actor: %s does not fit\n", am->name); return 0; }
+    if (!keep_fit(d, mofs + a.mlen) || !keep_fit(d, nofs + a.nlen)) { host_log("actor: %s does not fit\n", am->name); return 0; }
 
     unload(d);
     memcpy(d->keep + mofs, a.mdl, a.mlen);
@@ -830,7 +986,7 @@ static int load_part_model(Disguise* d, int file)
     int i, size, texn;
     char name[24];
     snprintf(name, sizeof(name), "part file %d", file);
-    if (!read_file(sys->sys_partid, file) || (size = (int)rd32(pack)) <= 0 || size > KEEP_SIZE) return 0;
+    if (!read_file(sys->sys_partid, file) || (size = (int)rd32(pack)) <= 0 || size > KEEP_SIZE || !keep_fit(d, size)) return 0;
     unload(d);
     memcpy(d->keep, pack + 4, size);
     texn = realize(d, d->keep, own);
@@ -932,12 +1088,165 @@ static void head_draw(Disguise* d)
     if (d->hp.on && d->mapped && (op->flg & 0x1) && !(op->mdflg & 0x1)) bhPutModel((BH_PWORK*)op);
 }
 
+/* An imported player model (pc/src/import, .cvxm: impmodel.h): its chunk list and textures as the
+   game's, one mesh on the pelvis whose vertices imp_skin moves with the skeleton. */
+_Static_assert(sizeof(CvxmSkin) == 44, "pc_cvxm_check's skin entry");
+static int load_import_model(Disguise* d, int k)
+{
+    const char* path = actor_import_file[k];
+    unsigned char own[16] = { 0 }, *file = NULL;
+    FILE* f = pc_fopen(path, "rb");
+    int size = 0, texn, keep;
+    PcCvxm cv;
+    char why[96];
+    if (f && !fseek(f, 0, SEEK_END)) size = (int)ftell(f);
+    if (!f || size < 64 || size > 4 * KEEP_SIZE || fseek(f, 0, SEEK_SET) || !(file = malloc(size)) || fread(file, 1, size, f) != (size_t)size) {
+        if (f) fclose(f);
+        free(file);
+        host_log("actor: %s cannot be read (%d bytes)\n", path, size);
+        return 0;
+    }
+    fclose(f);
+    if (!pc_cvxm_check(file, (uint32_t)size, &cv, why, sizeof(why))) {
+        host_log("actor: %s is not usable: %s\n", path, why);
+        free(file);
+        return 0;
+    }
+    keep = cv.skin >= cv.end && cv.vtx < cv.end ? (int)cv.end : size;
+    if (keep > KEEP_SIZE || !keep_fit(d, keep)) {
+        host_log("actor: %s does not fit (%d bytes)\n", path, keep);
+        free(file);
+        return 0;
+    }
+    unload(d);
+    memcpy(d->keep, file, keep);
+    d->file = file;
+    if (rd32(d->keep + 4) < 4)
+        for (uint32_t q = rd32(d->keep + 12); rd32(d->keep + q) == 0x324D4954u; q += 32 + rd32(d->keep + q + 4))
+            imp_tim2_alpha_255(d->keep + q + 32, (int)rd32(d->keep + q + 4));
+    texn = realize(d, d->keep + 60, own);
+    if (d->w.mdl_n != 1 || !tex_room(actor_imports[k].name, texn)) return 0;
+    if (own[0]) {
+        bhSetMemPvpTexture(d->w.mdl[0].texP, d->keep + rd32(d->keep + 12), 0);
+        d->w.mdl[0].flg |= 0x200;
+        d->tex[d->tex_n++] = d->w.mdl[0].texP;
+    }
+    d->skin = (const CvxmSkin*)(d->file + cv.skin);
+    d->vtx = (float*)(d->keep + cv.vtx);
+    d->nv = (int)cv.nv;
+    for (int i = 0; i < IMP_FACES - 1; i++)
+        d->fbone[i] = rd32(d->keep + 4) >= 2 && d->keep[28 + i] < d->w.mdl[0].obj_num ? (signed char)d->keep[28 + i] : -1;
+    d->blink = -1;
+    d->blink_wait = 0;
+    for (int e = 0; e < 2; e++) {
+        float t = 0;
+        if (rd32(d->keep + 4) >= 4) memcpy(&t, d->keep + 36 + 4 * e, 4);
+        d->lid_travel[e] = t > 0 && t < 0.3f ? t : 0;
+        if (getenv("RECVX_IMPORT_POSE")) host_log("import: lid %d travel %.3f\n", e, d->lid_travel[e]);
+    }
+    d->seed = 0x2545F491u * (unsigned)(k_seed++ + 1);
+    return 1;
+}
+
+uint64_t gs_frame_count(void);
+float snd_synth_voice_level(void);
+static void imp_face(Disguise* d, const BH_PWORK* src, int step)
+{
+    static const unsigned char tab[8] = { 0, 0, 1, 1, 2, 2, 1, 0 };
+    O_WORK* ow = d->w.mlwP->owP;
+    float shut = 0, jaw = 0;
+    int k;
+    if (step) {
+        d->seed = d->seed * 1103515245u + 12345u;
+        if (d->blink < 0 && ++d->blink_wait > 30 && (d->seed >> 16) % 100 >= 97) d->blink = 0, d->blink_wait = 0;
+        else if (d->blink >= 0 && ++d->blink > 7) d->blink = -1;
+    }
+    if (d->blink >= 0) shut = tab[d->blink] / 2.0f;
+    if (getenv("RECVX_IMPORT_BLINK")) shut = (float)atof(getenv("RECVX_IMPORT_BLINK"));
+    if (src && src->mskp && src->exp1 && (d == &dg[ACTOR_DOUBLE] || d >= &dg[ACTOR_CAST])) {
+        jaw = ((const MASK_WORK*)src->exp1)->param.jawang;
+        if (jaw > 1.5f) jaw += 1.5f * (jaw - 1.5f);
+    } else if (d == &dg[0]) {
+        if (step) {
+            float v = snd_synth_voice_level() * 90.0f;
+            d->talk = v > d->talk ? v : d->talk * 0.6f;
+            if (d->talk > 14.0f) d->talk = 14.0f;
+            if (getenv("RECVX_IMPORT_POSE") && d->talk > 0.05f) host_log("import: voice jaw %.1f (level %.4f) frame %d\n", d->talk, v / 90.0f, (int)gs_frame_count());
+        }
+        jaw = d->talk;
+    }
+    if (getenv("RECVX_IMPORT_JAW")) jaw = (float)atof(getenv("RECVX_IMPORT_JAW"));
+    if (getenv("RECVX_IMPORT_POSE") && step && d == &dg[ACTOR_DOUBLE] && jaw != 0) host_log("import: double's jaw %.1f frame %d\n", jaw, (int)gs_frame_count());
+    jaw *= 3.14159265f / 180.0f;
+    for (k = 0; k < 2; k++) {
+        int up = d->fbone[2 * k], c;
+        if (up < 0 || shut <= 0) continue;
+        for (c = 0; c < 3; c++) ow[up].mtx[12 + c] -= shut * d->lid_travel[k] * ow[up].mtx[4 + c];
+    }
+    if (d->fbone[4] >= 0 && jaw != 0) {
+        float* m = ow[(int)d->fbone[4]].mtx, r[3][3], cs = cosf(jaw), sn = sinf(jaw);
+        int c;
+        for (c = 0; c < 3; c++) {
+            r[0][c] = m[c];
+            r[1][c] = cs * m[4 + c] - sn * m[8 + c];
+            r[2][c] = sn * m[4 + c] + cs * m[8 + c];
+        }
+        for (c = 0; c < 3; c++) { m[c] = r[0][c]; m[4 + c] = r[1][c]; m[8 + c] = r[2][c]; }
+    }
+}
+
+static void imp_skin(Disguise* d)
+{
+    const O_WORK* ow = d->w.mlwP->owP;
+    const float* m1 = ow[1].mtx;
+    int n = d->rig.n, i, j, c;
+    if (!d->skin || !d->rig.ok) return;
+    for (i = 0; i < d->nv; i++) {
+        const CvxmSkin* s = &d->skin[i];
+        float p[3] = { 0 }, q[3] = { 0 }, l[3], *o = d->vtx + 8 * i;
+        for (j = 0; j < 4 && s->w[j] > 0; j++) {
+            int k = s->node[j] < n ? s->node[j] : 1;
+            const float* m = ow[k].mtx;
+            float r[3];
+            for (c = 0; c < 3; c++) r[c] = s->pos[c] - d->rig.rest[k][c];
+            for (c = 0; c < 3; c++) {
+                p[c] += s->w[j] * (r[0] * m[c] + r[1] * m[4 + c] + r[2] * m[8 + c] + m[12 + c]);
+                q[c] += s->w[j] * (s->nrm[0] * m[c] + s->nrm[1] * m[4 + c] + s->nrm[2] * m[8 + c]);
+            }
+        }
+        for (c = 0; c < 3; c++) l[c] = p[c] - m1[12 + c];
+        for (c = 0; c < 3; c++) {
+            o[c] = l[0] * m1[c * 4] + l[1] * m1[c * 4 + 1] + l[2] * m1[c * 4 + 2];
+            o[4 + c] = q[0] * m1[c * 4] + q[1] * m1[c * 4 + 1] + q[2] * m1[c * 4 + 2];
+        }
+    }
+    if (getenv("RECVX_IMPORT_POSE") && d == &dg[0]) {
+        static FILE* f;
+        const float* b = (const float*)d->w.mtxbuf;
+        if (!f) f = fopen(getenv("RECVX_IMPORT_POSE"), "w");
+        if (f) {
+            fprintf(f, "%d %d %d %d", (int)sys->gfrm_ct, (int)plp->mtn_no, (int)(plp->frm_no >> 16), n);
+            for (i = 0; i < n; i++) {
+                const float* m = ow[i].mtx;
+                for (j = 0; j < 4; j++)
+                    for (c = 0; c < 3; c++) {
+                        float v[3] = { m[j * 4], m[j * 4 + 1], m[j * 4 + 2] };
+                        if (j == 3) for (int k = 0; k < 3; k++) v[k] -= b[12 + k];
+                        fprintf(f, " %.4f", v[0] * b[c * 4] + v[1] * b[c * 4 + 1] + v[2] * b[c * 4 + 2]);
+                    }
+            }
+            fputc('\n', f);
+            fflush(f);
+        }
+    }
+}
+
 static int load(Disguise* d, int idx)
 {
     int heap = heap_free(), anim;
-    const char* name = idx >= ACTOR_PART ? "part file" : actor_models[idx].name;
+    const char* name = idx >= ACTOR_PART ? "part file" : actor_model(idx)->name;
     memset(d->mth, 0, sizeof(d->mth));
-    if (!(idx >= ACTOR_PART ? load_part_model(d, idx - ACTOR_PART + 10) : load_room_model(d, idx))) {
+    if (!(idx >= ACTOR_PART ? load_part_model(d, idx - ACTOR_PART + 10) : idx >= ACTOR_MODELS ? load_import_model(d, idx - ACTOR_MODELS) : load_room_model(d, idx))) {
         unload(d);
         return 0;
     }
@@ -948,8 +1257,19 @@ static int load(Disguise* d, int idx)
     d->w.sx = d->w.sy = d->w.sz = d->w.sxb = d->w.syb = d->w.szb = 1.0f;
     d->w.mnwP = d->w.mnwPb = d->mth;
     d->w.mtn_add = 65536;
-    anim = idx >= ACTOR_PART || actor_models[idx].anim;
+    anim = idx >= ACTOR_PART || actor_model(idx)->anim;
     if (anim) rig_build(&d->rig, d->w.mdl[0].objP, d->w.mdl[0].obj_num, 1);
+    memset(d->hand_dir, 0, sizeof(d->hand_dir));
+    if (d->skin && d->rig.ok && d->rig.map[13] >= 0) {
+        int i, c, hn = d->rig.map[13];
+        float best = 0;
+        for (i = 0; i < d->nv; i++) {
+            float e = 0, v[3];
+            if (d->skin[i].node[0] != hn || d->skin[i].w[0] < 0.5f) continue;
+            for (c = 0; c < 3; c++) { v[c] = d->skin[i].pos[c] - d->rig.rest[hn][c]; e += v[c] * v[c]; }
+            if (e > best) { best = e; for (c = 0; c < 3; c++) d->hand_dir[c] = v[c]; }
+        }
+    }
     host_log("actor: %s loaded (%d sub-models, %d nodes, %d KB texture heap), %s; map", name, d->w.mdl_n,
              d->w.mdl[0].obj_num, (heap - heap_free()) >> 10, d->rig.ok ? "player animations" : "own idle motion");
     if (d->rig.ok) { int k; for (k = 0; k < 22; k++) host_log(" %d", d->rig.map[k]); }
@@ -1089,7 +1409,7 @@ static BH_PWORK* shadow_step(Shadow* s, BH_PWORK* src, int from)
     if (set == src->mnwPb) {   /* base and weapon motions: the same number */
         if (s->mth[mtn].datP && s->mth[mtn].obj_num <= 22) set = s->mth;
     } else {   /* grabbed: the player plays the enemy's set */
-        for (i = 0; i < (int)sys->ewk_n && i < 128; i++)
+        for (i = 0; i < (int)sys->ewk_n && i < PC_ENE_SLOTS; i++)
             if ((ene[i].flg & 0x1) && (ene[i].mnwP == set || ene[i].mnwPb == set)) {
                 k = appear_grab_motion(ene[i].id, mtn, from, s->chr);
                 if (k >= 0 && set[k].datP && set[k].obj_num <= 22) mtn = k;
@@ -1133,6 +1453,8 @@ static BH_PWORK* shadow_step(Shadow* s, BH_PWORK* src, int from)
         s->obj[9].ang[1] = -910;
         bhCalcModel(&s->w);
     }
+    if (src == plp && tps_legs_me.w > 0 && tps_legs_me.mtn >= 0 && tps_legs_me.mtn < 100 && s->mth[tps_legs_me.mtn].datP && s->mth[tps_legs_me.mtn].obj_num <= 22)
+        tps_legs(&s->w, s->mth, &tps_legs_me);
     tps_bend(&s->w, s->pitch);
     return &s->w;
 }
@@ -1155,7 +1477,7 @@ static BH_PWORK* shadow(int who, BH_PWORK* src)
     s->body = 0;
     if (s->src != src || s->motion < 0 || s->motion > 3) return NULL;   /* no actor_source this tick (a lobby preview) */
     s->src = NULL;
-    if (d->model >= 0) anim = !d->rig.ok ? ANIM_IDLE : d->model >= ACTOR_PART ? appear_part_anim(d->model - ACTOR_PART) : actor_models[d->model].anim;
+    if (d->model >= 0) anim = !d->rig.ok ? ANIM_IDLE : d->model >= ACTOR_PART ? appear_part_anim(d->model - ACTOR_PART) : actor_model(d->model)->anim;
     else anim = s->mesh >= 0 && s->mesh <= 3 ? appear_part_anim(s->mesh) : ANIM_IDLE;
     chr = appear_motion_chr(anim, s->motion);
     if (chr < 0 || chr == s->fail) return NULL;
@@ -1200,7 +1522,7 @@ int actor_put_body(int who, BH_PWORK* src)
    player control the game's own come back (actor_hands_back, game.c): bhControlPlayer reads the hand
    for the shot (the wall test of bhCheckGunAtari starts at the muzzle, owP[9]), the knife and sounds,
    so a taller model shot higher than the crosshair. */
-static struct { BH_PWORK* src; O_WORK* ow; float mtx[3][16]; } real[2];
+static struct { BH_PWORK* src; O_WORK* ow; float mtx[3][16], chest[16]; } real[2];
 static float aim_ofs[3];   /* our weapon hand as drawn minus the real one, in the frame of the real chest (node 3) */
 static float aim_rot[9];   /* the drawn weapon hand's rotation in that frame (the gender-matched pose's hand turns otherwise) */
 static int aim_set;        /* aim_rot is set */
@@ -1208,11 +1530,13 @@ static int aim_set;        /* aim_rot is set */
 static void hands_save(int who, BH_PWORK* src)
 {
     int i;
-    if (real[who].src == src && real[who].ow == src->mlwP->owP) return;   /* saved this tick */
+    if (real[who].src == src && real[who].ow == src->mlwP->owP && !memcmp(real[who].chest, real[who].ow[3].mtx, sizeof(real[who].chest)))
+        return;   /* saved this tick (and not computed again since) */
     if (src->mlwP->obj_num < 14) return;
     real[who].src = src;
     real[who].ow = src->mlwP->owP;
     for (i = 0; i < 3; i++) memcpy(real[who].mtx[i], real[who].ow[5 + 4 * i].mtx, sizeof(real[who].mtx[i]));
+    memcpy(real[who].chest, real[who].ow[3].mtx, sizeof(real[who].chest));
 }
 
 static void hands_back(int who)
@@ -1220,7 +1544,7 @@ static void hands_back(int who)
     O_WORK* ow = real[who].ow;
     int i, j;
     if (!real[who].src) return;
-    if (real[who].src->mlwP && ow == real[who].src->mlwP->owP) {
+    if (real[who].src->mlwP && ow == real[who].src->mlwP->owP && !memcmp(real[who].chest, ow[3].mtx, sizeof(real[who].chest))) {
         if (who == 0 && real[0].src == plp) {   /* local = world x R^T, R: the chest's rows */
             float dl[3];
             for (j = 0; j < 3; j++) dl[j] = ow[9].mtx[12 + j] - real[0].mtx[1][12 + j];
@@ -1238,6 +1562,7 @@ static void hands_back(int who)
 /* game.c, before bhControlPlayer */
 void actor_hands_back(void)
 {
+    actor_ticks++;
     pc_plp_frm = -1;   /* (set again by this tick's bhControlPlayer) */
     if (!real[0].src) aim_ofs[0] = aim_ofs[1] = aim_ofs[2] = 0, aim_set = 0;
     hands_back(0);
@@ -1304,7 +1629,8 @@ int actor_set(int who, int idx)
     actor_on = 0;
     for (who = 0; who < ACTOR_SLOTS; who++) actor_on |= dg[who].model >= 0;
     actor_on |= sh[0].body | sh[1].body;
-    if (idx < 0 || (idx >= ACTOR_MODELS && idx < ACTOR_PART) || idx > ACTOR_PART + 9) return 0;
+    if (d >= &dg[ACTOR_CAST]) cast_mem_reset();
+    if (idx < 0 || (idx >= ACTOR_MODELS && idx < ACTOR_PART && !actor_model(idx)) || idx > ACTOR_PART + 9) return 0;
     if (!load(d, idx)) {
         d->fail = idx;
         host_log("actor: model %d cannot be shown\n", idx);
@@ -1313,12 +1639,38 @@ int actor_set(int who, int idx)
     d->model = idx;
     d->fail = -1;
     actor_on = 1;
-    if (d == &dg[ACTOR_DOUBLE] && g_appear_face) face_init(d, idx);
+    if ((d == &dg[ACTOR_DOUBLE] && g_appear_face) || d >= &dg[ACTOR_CAST]) face_init(d, idx);
     return 1;
 }
 
 int actor_shown(int who) { return dg[who].model >= 0; }
+int actor_shown_model(int who) { return dg[who].model; }
 int actor_rigged(int who) { return dg[who].model >= 0 && dg[who].rig.ok; }
+
+void actor_weapon_hands(int who, O_WRK* wpn, int n)
+{
+    int hide = who >= 0 && who < ACTOR_SLOTS && dg[who].model >= 0 && dg[who].skin && dg[who].mapped;
+    for (int i = 0; wpn && i < n; i++) {
+        NJS_CNK_OBJECT* o = wpn[i].mlwP && wpn[i].mlwP->objP && wpn[i].mlwP->obj_num > 0 ? &wpn[i].mlwP->objP[0] : NULL;
+        if (!o || (wpn[i].lkono != 9 && wpn[i].lkono != 13)) continue;
+        if (hide) o->evalflags |= 0x8; else o->evalflags &= ~0x8u;
+    }
+}
+
+/* The double's and the cast's source hand nodes as the game computed them, and as actor_pose put them at the model's
+   hands. Restored before re-posing while a message is up so hands never spin. */
+static struct { const BH_PWORK* src; int node[2]; float was[2][16], put[2][16]; } lent[ACTOR_SLOTS];
+
+static void lent_back(int who, BH_PWORK* src)
+{
+    int k;
+    if (lent[who].src != src) return;
+    for (k = 0; k < 2; k++) {
+        float* h = lent[who].node[k] >= 0 && lent[who].node[k] < (int)src->mlwP->obj_num ? src->mlwP->owP[lent[who].node[k]].mtx : NULL;
+        if (h && !memcmp(h, lent[who].put[k], sizeof(lent[who].put[k]))) memcpy(h, lent[who].was[k], sizeof(lent[who].was[k]));
+    }
+    lent[who].src = NULL;
+}
 
 /* pose slot `who` from `src` (after its bhSetMotion and bhCalcModel), in its gender-matched pose
    if it has one (slots 0, 1: actor_source) */
@@ -1329,6 +1681,7 @@ void actor_pose(int who, BH_PWORK* src)
     BH_PWORK* drv;
     if (!src->mlwP || !src->mlwP->objP || !src->mlwP->owP || !src->mtx) return;
     if (who < 2) hands_save(who, src);
+    else if (dbl_tick) lent_back(who, src);
     if (who < 2 && !redraw) sh[who].drv = shadow(who, src);
     drv = who < 2 && sh[who].drv ? sh[who].drv : src;
     if (d->model < 0) { trace_hands(who, src); return; }
@@ -1379,13 +1732,29 @@ void actor_pose(int who, BH_PWORK* src)
                         for (j = 0; j < 12; j++) h[j] *= 1e-3f;
                     }
                 trace_hands(who, src);
-            } else if (dbl_tick) {   /* the cutscene double: what the script links to its hands (the cast's hand
-                pieces, props) goes to the model's hands; its own come back with its next bhCalcModel */
+            } else if (dbl_tick) {   /* the cutscene double and cast: what the script links to hands goes to the model's hands */
                 int k;
-                for (k = 9; k <= 13; k += 4)
-                    if (d->rig.map[k] >= 0 && sr.map[k] >= 0) memcpy(&src->mlwP->owP[(int)sr.map[k]].mtx[12], &m->owP[(int)d->rig.map[k]].mtx[12], 12);
+                lent[who].src = src;
+                for (k = 9; k <= 13; k += 4) {
+                    float* h;
+                    lent[who].node[k > 9] = -1;
+                    if (d->rig.map[k] < 0 || sr.map[k] < 0) continue;
+                    h = src->mlwP->owP[(int)sr.map[k]].mtx;
+                    lent[who].node[k > 9] = sr.map[k];
+                    memcpy(lent[who].was[k > 9], h, sizeof(lent[who].was[0]));
+                    memcpy(who >= ACTOR_CAST && cast_hands ? h : &h[12],
+                           who >= ACTOR_CAST && cast_hands ? m->owP[(int)d->rig.map[k]].mtx : &m->owP[(int)d->rig.map[k]].mtx[12],
+                           who >= ACTOR_CAST && cast_hands ? 15 * sizeof(float) : 12);
+                    memcpy(lent[who].put[k > 9], h, sizeof(lent[who].put[0]));
+                }
             }
-            head_pose(d, who == ACTOR_DOUBLE ? dbl_tick == 1 : !redraw);   /* (one head part, one swing per tick) */
+            d->src_hand[0] = sr.map[9];
+            d->src_hand[1] = sr.map[13];
+            d->src_head[0] = sr.map[4];
+            d->src_head[1] = sr.map[5];
+            head_pose(d, who == ACTOR_DOUBLE || who >= ACTOR_CAST ? dbl_tick == 1 : !redraw);
+            if (d->skin) imp_face(d, src, who == ACTOR_DOUBLE || who >= ACTOR_CAST ? dbl_tick == 1 : !redraw);
+            imp_skin(d);
             return;
         }
     }
@@ -1419,9 +1788,19 @@ int actor_put_player(void)
 
 /* eneset.c bhDrawEnemy, in place of bhPutModel(ep): the event double of the character played
    (cutscenes) drawn as the chosen model. 1 = drawn. */
+extern int cast_n;
+int  cast_draw(BH_PWORK* ep);
+void cast_tick(void);
+void cast_show(void);
+void pc_voice_tick(void);
+void cast_double_parts(BH_PWORK* ep, int pid);
+int  cast_slot(const BH_PWORK* ep);
+static void cast_hands_draw(int who, const BH_PWORK* ep);
+
 int actor_put_enemy(BH_PWORK* ep)
 {
     int i, id = ep->id, pid = sys->ply_id & 3;
+    if (cast_n && cast_draw(ep)) return 1;
     if (dg[ACTOR_DOUBLE].model < 0) return 0;
     for (i = 0; i < 3 && doubles[pid][i] != id; i++);
     if (i == 3 || !id) return 0;
@@ -1432,32 +1811,22 @@ int actor_put_enemy(BH_PWORK* ep)
     if (!dg[ACTOR_DOUBLE].mapped) return 0;   /* only a skeleton-driven model stands in for a cutscene double */
     bhPutModel(&dg[ACTOR_DOUBLE].w);
     head_draw(&dg[ACTOR_DOUBLE]);
+    cast_hands_draw(ACTOR_DOUBLE, ep);
     return 1;
 }
 
-/* ---------------------------------------------------------------- the cutscene double's face
-   The cast's cutscene models (ids 91..99) talk with a face mask (face.c, face_bh.c): a muscle model
-   that bends the face mesh, the jaw, tongue and eyes, driven per phoneme by the room's lip data
-   (bhSetLip; LIP_WORK: phoneme, time). A cast model shown for the double gets its own mask set up
-   (bhInitMask, its allocations in face_mem) and every tick the double's lip state; its own face
-   table gives the mouth shapes. The double's expressions (bhSetMask: face sets authored for that
-   character's mask) are not taken: the model keeps its neutral face. Option "Talking faces"
-   (g_appear_face). */
-static unsigned char face_mem[1 << 20] __attribute__((aligned(64)));
+/* ---------------------------------------------------------------- the cutscene double's & cast's faces */
+#define FACE_MEM (128 << 10)
+static unsigned char face_mem[1 + ACTOR_SLOTS - ACTOR_CAST][FACE_MEM] __attribute__((aligned(64)));
 
-/* A rest mesh of the mask (its face, its tongue) on a 64-byte boundary, as bhInitMask places the
-   copies it morphs: _fmCnkCalcMuscle / _fmCnkCalcTang read the rest vertices with lq, which drops the
-   low 4 address bits. In the room file they are aligned for the room the model was made for; our copy
-   of a model from another room's list kept its 8-byte offset, and every moved vertex was read two
-   floats early (the face's rim jumped out of the head as a spike). */
 static NJS_CNK_MODEL* face_src(NJS_CNK_MODEL* m, int vofs)
 {
     NJS_CNK_MODEL* c;
     int n;
     if (!m) return NULL;
-    n = (((unsigned int)m->vlist[1] >> 16) * vofs + 128) * 4;   /* (bhInitMask's copy size) */
+    n = (((unsigned int)m->vlist[1] >> 16) * vofs + 128) * 4;
     if (!((uintptr_t)m->vlist & 15)) return m;
-    if (!(c = (NJS_CNK_MODEL*)bhGetFreeMemory(sizeof(NJS_CNK_MODEL), 64))) return NULL;   /* face_mem full */
+    if (!(c = (NJS_CNK_MODEL*)bhGetFreeMemory(sizeof(NJS_CNK_MODEL), 64))) return NULL;
     *c = *m;
     if (!(c->vlist = (int*)bhGetFreeMemory(n, 64))) return NULL;
     memcpy(c->vlist, m->vlist, n);
@@ -1468,63 +1837,80 @@ static void face_init(Disguise* d, int idx)
 {
     ML_WORK* m = d->w.mlwP;
     MASK_WORK* fm;
-    unsigned char *memp = sys->memp, *arena = freemem;
+    unsigned char *memp = sys->memp, *arena = freemem, *mem = face_mem[d >= &dg[ACTOR_CAST] ? 1 + (d - &dg[ACTOR_CAST]) : 0];
     int used, ok;
     if (!d->w.mskp || !d->rig.ok) return;
-    sys->memp = face_mem;   /* bhGetFreeMemory's limit (freemem + 12.25 MB + PC_ARENA_EXTRA) at its end */
-    freemem = (unsigned char*)((uintptr_t)face_mem + sizeof(face_mem) - 12845056 - PC_ARENA_EXTRA);
-    bhInitMask(&d->w);   /* (copies the face mesh, inserts the jaw/tongue/eye pivots: a new object array) */
-    fm = (MASK_WORK*)d->w.exp1;   /* (bhGetFreeMemory: NULL when face_mem is full) */
+    sys->memp = mem;
+    freemem = (unsigned char*)((uintptr_t)mem + FACE_MEM - 12845056 - PC_ARENA_EXTRA);
+    bhInitMask(&d->w);
+    fm = (MASK_WORK*)d->w.exp1;
     ok = fm && d->w.exp0 && d->w.exp2 && fm->head;
     if (ok) {
-        NJS_CNK_MODEL *src = face_src(fm->src, fm->vofs), *tang = fm->tangsrc ? face_src(fm->tangsrc, fm->vofs) : NULL;   /* the morph reads its rest vertices 16 bytes at a time (lq) */
+        NJS_CNK_MODEL *src = face_src(fm->src, fm->vofs), *tang = fm->tangsrc ? face_src(fm->tangsrc, fm->vofs) : NULL;
         ok = src && (tang || !fm->tangsrc);
         if (ok) { fm->src = src; fm->tangsrc = tang; }
     }
-    used = sys->memp - face_mem;
+    used = sys->memp - mem;
     sys->memp = memp;
     freemem = arena;
-    /* bhControlMask writes the jaw, tongue and eye angles to nodes 7, 11, 9, 13 of the new array (the
-       cast's layout); the pivots it inserted have the same model as these nodes and no child */
-    ok = ok && used <= (int)sizeof(face_mem) && m->obj_num <= NODES && fm->toothsrc && fm->tangorg && fm->eyesrc[0] && fm->eyesrc[1] &&
+    ok = ok && used <= FACE_MEM && m->obj_num <= NODES && fm->toothsrc && fm->tangorg && fm->eyesrc[0] && fm->eyesrc[1] &&
          m->objP[7].model == fm->toothsrc->model && m->objP[7].child && m->objP[11].model == fm->tangorg->model && m->objP[11].child &&
          m->objP[9].model == fm->eyesrc[0]->model && m->objP[9].child && m->objP[13].model == fm->eyesrc[1]->model && m->objP[13].child &&
          rig_build(&d->rig, m->objP, m->obj_num, 0);
     host_log("actor: face mask %s (%d nodes, %d faces, %d KB)\n", ok ? "set up" : "does not fit, left out", m->obj_num, fm && fm->head ? (int)fm->head->nFace : 0, used >> 10);
     if (ok) {
         d->face = (int)fm->head->nFace;
-        d->w.mdflg |= 0x100;   /* npCalcSkinFM: the skin over the array with the pivots, as the cast's */
-        /* The mask's own face table holds the mouth shapes (banks of 6 phonemes, bhLipSet), not key
-           frames: played as the face (fmCnkSetCurrentFrame) its last shape was taken, a spike out of
-           the head. The face at rest is its first: phoneme 0 of bank 0, the closed mouth. */
+        d->w.mdflg |= 0x100;
         fm->fnum = 1;
-        ((int*)d->w.exp0)[8] = 1;   /* (what bhControlMask resets the face to) */
+        ((int*)d->w.exp0)[8] = 1;
     }
-    else if (load(d, idx)) d->model = idx;   /* (the objects were changed: again without it; load leaves model -1) */
+    else if (load(d, idx)) d->model = idx;
     else d->fail = idx;
 }
 
-/* the double's lip sync on our face (coop_control_remote, after the enemies' bhControlMask) */
+static int bank_still(const Disguise* d, int b)
+{
+    const PARAM_WORK* t = (const PARAM_WORK*)((const int*)d->w.exp0)[267] + b * 6;
+    for (int f = 0; f < 6; f++) {
+        if (*(const int*)&t[f].jawang) return 0;
+        for (int k = 12; k < 26; k++) if (t[f].muscle[k] != t[0].muscle[k]) return 0;
+    }
+    return 1;
+}
+
 static void face_step(Disguise* d, const BH_PWORK* ep)
 {
     int* e = (int*)d->w.exp0;
     const int* s = (const int*)ep->exp0;
     if (!ep->mskp || !s || !ep->exp2) return;
-    e[0] = (e[0] & ~0x4) | (s[0] & 0x4);    /* lip sync running */
-    e[4] = s[4];                            /* the phoneme bank (bhLipSet): 6 faces each */
-    e[268] = s[268];                        /* the lip data (bhSetLip) */
+    e[0] = (e[0] & ~0x4) | (s[0] & 0x4);
+    e[4] = s[4];
+    e[268] = s[268];
     *(LIP_WORK*)d->w.exp2 = *(const LIP_WORK*)ep->exp2;
-    if (e[268] && e[268] != d->lip) {   /* a new line: its highest phoneme (pairs phoneme, time; 0xFF ends) */
+    if (e[268] && e[268] != d->lip) {
         const unsigned char* p = (const unsigned char*)e[268];
         int k;
         d->lip = e[268];
         for (d->lip_max = k = 0; k < 4096 && p[k] != 0xFF; k += 2) if (p[k] > d->lip_max) d->lip_max = p[k];
     }
-    if (e[4] < 0 || e[4] * 6 + d->lip_max >= d->face) { e[0] &= ~0x4; ((LIP_WORK*)d->w.exp2)->flag = 0; }   /* mouth shapes past our face table: none */
+    if (e[4] < 0 || e[4] * 6 + d->lip_max >= d->face || bank_still(d, e[4])) e[4] = 0;
+    if (d->lip_max >= d->face || bank_still(d, 0)) { e[0] &= ~0x4; ((LIP_WORK*)d->w.exp2)->flag = 0; }
     bhControlMask(&d->w);
+    if (ep->mlwP && ep->mlwP->obj_num > 13 && d->w.mlwP->obj_num > 13) {
+        int k;
+        for (k = 0; k < 2; k++) {
+            d->w.mlwP->objP[9].ang[k] = ep->mlwP->objP[9].ang[k];
+            d->w.mlwP->objP[13].ang[k] = ep->mlwP->objP[13].ang[k];
+        }
+    }
 }
 
-/* ep is a shown cutscene double of the character played */
+int actor_talks(int who)
+{
+    const Disguise* d = &dg[who];
+    return d->model >= 0 && d->rig.ok && ((d->face > 5 && !bank_still(d, 0)) || (d->skin && d->fbone[4] >= 0));
+}
+
 static int double_acting(const BH_PWORK* ep, int pid)
 {
     int j;
@@ -1533,54 +1919,126 @@ static int double_acting(const BH_PWORK* ep, int pid)
     return j < 3;
 }
 
-/* a cutscene: a double of the character played is shown (whether as our model or as itself) */
+int actor_double_shown(const BH_PWORK* ep)
+{
+    int j, pid = sys->ply_id & 3;
+    if (dg[ACTOR_DOUBLE].model < 0 || !dg[ACTOR_DOUBLE].rig.ok || !(ep->flg & 0x1) || !ep->id) return -1;
+    for (j = 0; j < 3 && doubles[pid][j] != ep->id; j++);
+    return j < 3 ? dg[ACTOR_DOUBLE].model : -1;
+}
+
 int actor_double_acting(void)
 {
     int i;
-    for (i = 0; i < (int)sys->ewk_n && i < 128; i++) if (double_acting(&ene[i], sys->ply_id & 3)) return 1;
+    for (i = 0; i < (int)sys->ewk_n && i < PC_ENE_SLOTS; i++) if (double_acting(&ene[i], sys->ply_id & 3)) return 1;
     return 0;
 }
 
-/* coop_control_remote, every tick after the enemies moved and before the objects follow their links:
-   the double of the character played posed as our model, its face and hands with it */
 void actor_double_tick(void)
 {
     Disguise* d = &dg[ACTOR_DOUBLE];
     int i, pid = sys->ply_id & 3;
-    dbl_posed = NULL;
+    memset(posed_src, 0, sizeof(posed_src));
+    cast_show();
+    pc_voice_tick();
+    if (cast_n) cast_tick();
     if (d->model < 0 || !d->rig.ok) return;
-    for (i = 0; i < (int)sys->ewk_n && i < 128; i++) {
+    for (i = 0; i < (int)sys->ewk_n && i < PC_ENE_SLOTS; i++) {
         BH_PWORK* ep = &ene[i];
         if (!double_acting(ep, pid)) continue;
         if (d->face) face_step(d, ep);
         dbl_tick = dbl_posed ? 2 : 1;
         actor_pose(ACTOR_DOUBLE, ep);
         dbl_tick = 0;
-        if (d->mapped) dbl_posed = ep;
+        if (d->mapped) { dbl_posed = ep; cast_double_parts(ep, pid); }
     }
 }
 
-/* at the hand-off: the model for the cutscene doubles of the character played (appearance: a
-   catalogue index, ACTOR_PART + part file - 10, or -1); loaded only while the room has one.
-   "Swapped model in cutscenes" off: none, the game draws its doubles (hands, face, all their own) */
+void actor_act(int who, BH_PWORK* ep)
+{
+    Disguise* d = &dg[who];
+    if (who < ACTOR_CAST || who >= ACTOR_SLOTS || d->model < 0 || !d->rig.ok) return;
+    if (d->face) face_step(d, ep);
+    if (d->face && ep->mskp && ep->exp1 && d->w.exp1 && getenv("RECVX_CAST_TRACE") && !(actor_ticks % 10)) {
+        const PARAM_WORK *a = &((const MASK_WORK*)ep->exp1)->param, *b = &((const MASK_WORK*)d->w.exp1)->param;
+        float ma = 0, mb = 0;
+        for (int k = 0; k < 32; k++) { ma += fabsf(a->muscle[k]); mb += fabsf(b->muscle[k]); }
+        host_log("cast: tick %u slot %d: source type %d lips %d muscles %.2f jaw %.2f, model lips %d muscles %.2f jaw %.2f\n", actor_ticks, who - ACTOR_CAST, ep->id,
+                 (((const int*)ep->exp0)[0] & 4) != 0, ma, a->jawang, (((const int*)d->w.exp0)[0] & 4) != 0, mb, b->jawang);
+    }
+    dbl_tick = posed_src[who] ? 2 : 1;
+    actor_pose(who, ep);
+    dbl_tick = 0;
+    posed_src[who] = d->mapped ? ep : NULL;
+    posed_t[who] = actor_ticks;
+}
+
+int actor_put_as(int who, BH_PWORK* ep)
+{
+    Disguise* d = &dg[who];
+    if (who < ACTOR_CAST || who >= ACTOR_SLOTS || d->model < 0) return 0;
+    if (ep != posed_src[who] || posed_t[who] != actor_ticks) {
+        actor_pose(who, ep);
+        posed_src[who] = d->mapped ? ep : NULL;
+        posed_t[who] = actor_ticks;
+    }
+    if (!d->mapped) return 0;
+    bhPutModel(&d->w);
+    head_draw(d);
+    cast_hands_draw(who, ep);
+    return 1;
+}
+
+int actor_drawn_for(BH_PWORK* ep)
+{
+    int who = cast_n ? cast_slot(ep) : -1;
+    if (who < 0 && actor_double_shown(ep) >= 0) who = ACTOR_DOUBLE;
+    if (who < 0) return -1;
+    if (ep != posed_src[who] || (who != ACTOR_DOUBLE && posed_t[who] != actor_ticks)) {
+        actor_pose(who, ep);
+        posed_src[who] = dg[who].mapped ? ep : NULL;
+        posed_t[who] = actor_ticks;
+    }
+    return dg[who].mapped ? who : -1;
+}
+
+void actor_draw_nodes(int who, const NJS_MATRIX* m, int n)
+{
+    Disguise* d = &dg[who];
+    O_WORK* ow = d->w.mlwP->owP;
+    NJS_MATRIX now[n];
+    int i;
+    for (i = 0; i < n; i++) { memcpy(now[i], ow[i].mtx, sizeof(NJS_MATRIX)); memcpy(ow[i].mtx, m[i], sizeof(NJS_MATRIX)); }
+    imp_skin(d);
+    bhPutModel(&d->w);
+    for (i = 0; i < n; i++) memcpy(ow[i].mtx, now[i], sizeof(NJS_MATRIX));
+    imp_skin(d);
+}
+
 static int dbl_kept;
 int actor_double_kept(void) { return dbl_kept; }
+
+int actor_double_model(int idx, int pid, int* kept)
+{
+    static const signed char twin[5] = { 0, 1, 3, 5, -1 };
+    if (!g_appear_cutscene) idx = -1;
+    if (g_appear_face && idx >= ACTOR_PART && idx < ACTOR_PART + 5 && twin[idx - ACTOR_PART] >= 0) idx = twin[idx - ACTOR_PART];
+    *kept = idx >= 0 && idx < ACTOR_MODELS && actor_models[idx].id == doubles[pid & 3][0];
+    return *kept ? -1 : idx;
+}
 
 void actor_doubles(int idx)
 {
     int i, j, pid = sys->ply_id & 3, any = 0;
-    static const signed char twin[5] = { 0, 1, 3, 5, -1 };   /* the player files' cutscene models (a face mask): Claire, Chris, Steve, Wesker */
-    if (!g_appear_cutscene) idx = -1;
-    if (g_appear_face && idx >= ACTOR_PART && idx < ACTOR_PART + 5 && twin[idx - ACTOR_PART] >= 0) idx = twin[idx - ACTOR_PART];
-    dbl_kept = idx >= 0 && idx < ACTOR_MODELS && actor_models[idx].id == doubles[pid][0];
-    if (dbl_kept) idx = -1;   /* the played character's own cutscene model: the game's double (its face, its hands, its head part) */
+    idx = actor_double_model(idx, pid, &dbl_kept);
     if (idx >= 0)
-        for (i = 0; i < (int)sys->ewk_n && i < 128 && !any; i++)
+        for (i = 0; i < (int)sys->ewk_n && i < PC_ENE_SLOTS && !any; i++)
             for (j = 0; j < 3; j++) any |= (ene[i].flg & 0x1) && doubles[pid][j] && ene[i].id == doubles[pid][j];
-    actor_set(ACTOR_DOUBLE, any ? idx : -1);
+    if (actor_set(ACTOR_DOUBLE, any ? idx : -1)) actor_cast_hands(ACTOR_DOUBLE);
 }
 
-/* njReleaseTextureAll took ours too */
+void placer_textures_released(void);
+
 void actor_textures_released(void)
 {
     int i;
@@ -1589,15 +2047,51 @@ void actor_textures_released(void)
         unload(&dg[i]);
         dg[i].fail = -1;
     }
+    cast_mem_reset();
+    placer_textures_released();
     actor_on = 0;
+}
+
+/* Snapshot safety for .cvxm models whose host-heap file buffer lives outside the PS2 address window. */
+void actor_snapshot_before_restore(void)
+{
+    int i;
+    for (i = 0; i < ACTOR_SLOTS; i++) {
+        free(dg[i].file);
+        dg[i].file = NULL;
+        dg[i].skin = NULL;
+        dg[i].vtx = NULL;
+        dg[i].nv = 0;
+    }
+}
+
+void actor_snapshot_after_restore(void)
+{
+    int i;
+    for (i = 0; i < ACTOR_SLOTS; i++) {
+        int m = dg[i].model;
+        int was_import = dg[i].file != NULL || dg[i].skin != NULL || (m >= ACTOR_MODELS && m < ACTOR_PART);
+        dg[i].file = NULL;
+        dg[i].skin = NULL;
+        dg[i].vtx = NULL;
+        dg[i].nv = 0;
+        if (!was_import) continue;
+        unload(&dg[i]);
+        dg[i].fail = -1;
+        if (m >= ACTOR_MODELS && m < ACTOR_PART && actor_model(m))
+            actor_set(i, m);
+    }
 }
 
 __attribute__((constructor)) static void actor_init(void)
 {
     int i;
     for (i = 0; i < ACTOR_SLOTS; i++) dg[i].model = dg[i].fail = -1;
+    for (i = 0; i < ACTOR_CAST; i++) { dg[i].keep = keep_big[i]; dg[i].keep_cap = KEEP_SIZE; }
     for (i = 0; i < 2; i++) sh[i].chr = sh[i].fail = sh[i].wpn_no = sh[i].motion = -1;
     if (getenv("RECVX_RETARGET")) actor_retarget = atoi(getenv("RECVX_RETARGET")) != 0;
+    if (getenv("RECVX_CAST_HANDS")) cast_hands = atoi(getenv("RECVX_CAST_HANDS")) != 0;
+    if (getenv("RECVX_CAST_PARTS")) cast_parts = atoi(getenv("RECVX_CAST_PARTS")) != 0;
 }
 
 /* the display actor's work (its model, node matrices after actor_pose), NULL when none is shown */
@@ -1618,13 +2112,106 @@ static int node_has_mesh(const BH_PWORK* w, int n)
     return flg & 1;
 }
 
+int actor_own_hand(int who, int side, int* node)
+{
+    Disguise* d = &dg[who];
+    int n = d->model >= 0 && d->mapped ? d->rig.map[side ? 13 : 9] : -1;
+    *node = d->src_hand[side & 1];
+    if (*node < 0 || d->model < 0 || !d->mapped) return 0;
+    if (n < 0) return 2;
+    return d->skin || node_has_mesh(&d->w, n);
+}
+
+int actor_cast_hands_chr(int who) { return who >= 0 && who < ACTOR_SLOTS && ch[who].on ? ch[who].chr : -1; }
+
+void actor_cast_hands(int who)
+{
+    Disguise* d = &dg[who];
+    unsigned char* p = pack;
+    const unsigned char* pend = pack + sizeof(pack);
+    int side, c, n, need = 0;
+    if ((who < ACTOR_CAST && who != ACTOR_DOUBLE) || who >= ACTOR_SLOTS || d->model < 0 || !d->rig.ok || d->skin || ch[who].tried) return;
+    ch[who].tried = 1;
+    for (side = 0; side < 2; side++) need |= (n = d->rig.map[side ? 13 : 9]) >= 0 && !node_has_mesh(&d->w, n);
+    if (!need) return;
+    n = d->model - ACTOR_PART;
+    c = d->model >= ACTOR_PART ? (n <= 3 ? n : appear_part_anim(n) == ANIM_FEMALE ? 0 : 1) : appear_voice(COOP_CHR_ACTOR + d->model);
+    if (c < 0 || c > 3 || !read_file(sys->sys_partid, c * 30 + 20)) { host_log("actor: slot %d: no hands (character %d)\n", who, c); return; }
+    for (side = 0; side < 2; side++) {
+        O_WRK* op = &ch[who].obj[side];
+        ML_WORK* m = &op->mdl[0];
+        unsigned int msz = (unsigned)(pend - p) >= 8 ? rd32(p) : 0, t;
+        if (!msz || msz > HAND_MDL || msz > (unsigned)(pend - p) - 8) return;
+        memset(op, 0, sizeof(*op));
+        memcpy(ch[who].mdl[side], p + 4, msz);
+        p += 4 + msz;
+        t = rd32(p);
+        p += 4;
+        if (t & 0x80000000) { p = pack + ((p - pack + 63) & ~63); t &= ~0x80000000u; }
+        if (t > (unsigned)(pend - p)) return;
+        bhMlbBinRealize(ch[who].mdl[side], m);
+        if (!m->objP || m->obj_num > 4 || !m->texP || !t || d->tex_n >= (int)(sizeof(d->tex) / sizeof(d->tex[0])) || !tex_room("hands", 1)) {
+            host_log("actor: slot %d: hands of character %d not loaded\n", who, c);
+            return;
+        }
+        bhSetMemPvpTexture(m->texP, p, 0);
+        m->flg |= 0x200;
+        d->tex[d->tex_n++] = m->texP;
+        p += t;
+        m->owP = ch[who].ow[side];
+        memset(m->owP, 0, sizeof(ch[0].ow[0]));
+        op->mlwP = m;
+        op->flg = 0x81;
+        op->id = 1210;
+        op->mtx = (void*)op->mtxbuf;
+        op->lkwkp = (unsigned char*)&d->w;
+        op->lkono = d->rig.map[side ? 13 : 9];
+    }
+    ch[who].on = 1;
+    ch[who].chr = c;
+    host_log("actor: slot %d: the unarmed hands of character %d\n", who, c);
+}
+
+extern int tps_cam_active;
+static int piece_drawn(const O_WRK* w)
+{
+    if ((w->mdflg & 0x1) || (w->stflg & 0x1000000) || !w->mlwP || !w->mlwP->objP || (w->mlwP->objP[0].evalflags & 0x8)) return 0;
+    return !(w->flg & 0x40000000) || (sys->gm_flg & 0x40) || tps_cam_active || (cam.flg & 0x46) || cam.ncut == w->hide[0] || cam.ncut == w->hide[1]
+           || cam.ncut == w->hide[2] || cam.ncut == w->hide[3];
+}
+
+static void cast_hands_draw(int who, const BH_PWORK* ep)
+{
+    Disguise* d = &dg[who];
+    int side, o;
+    if (!ch[who].on || !d->mapped) return;
+    for (side = 0; side < 2; side++) {
+        O_WRK* op = &ch[who].obj[side];
+        int src = d->src_hand[side];
+        if (op->lkono < 0 || node_has_mesh(&d->w, op->lkono)) continue;
+        for (o = 0; o < 32 && src >= 0; o++) {
+            const O_WRK* w = &sys->obwp[o];
+            if ((w->flg & 0x81) == 0x81 && w->lkwkp == (const unsigned char*)ep && w->lkono == src && piece_drawn(w)) break;
+        }
+        if (src >= 0 && o < 32) continue;
+        bhCalcModel((BH_PWORK*)op);
+        bhPutModel((BH_PWORK*)op);
+    }
+}
+
+int actor_src_head(int who, int node)
+{
+    const Disguise* d = &dg[who];
+    return node >= 0 && d->model >= 0 && d->mapped && (node == d->src_head[0] || node == d->src_head[1]);
+}
+
 /* the source's hand node (9, 13) is at the model's hand (actor_pose) and the model has no hand
    there of its own (the story cast's models; zombies and creatures have theirs) */
 int actor_hand_free(int who, int node)
 {
     Disguise* d = &dg[who];
     int n = d->model >= 0 && d->mapped ? d->rig.map[node] : -1;
-    return n >= 0 && !node_has_mesh(&d->w, n);
+    return n >= 0 && !d->skin && !node_has_mesh(&d->w, n);
 }
 
 int actor_head_node(int who) { return dg[who].model >= 0 && dg[who].rig.ok ? dg[who].rig.map[5] : -1; }

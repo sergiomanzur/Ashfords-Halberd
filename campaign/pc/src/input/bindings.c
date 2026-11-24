@@ -29,6 +29,7 @@ const BindRow bind_rows[B_COUNT] = {
     [B_QUICKTURN] = { "quickturn", "Quick turn (back, then run)", BG_GAME, 1 },
     [B_QUICKKNIFE] = { "quickknife", "Quick knife (hold)", BG_GAME, 1 },
     [B_RELOAD] = { "reload", "Reload", BG_GAME, 1 },
+    [B_FREEAIM] = { "freeaim", "Aim (no auto-aim)", BG_GAME, 1 },
     [B_TPS_FWD] = { "tps_forward", "Forward", BG_TPS, 0 },   [B_TPS_BACK] = { "tps_back", "Back", BG_TPS, 0 },
     [B_TPS_LEFT] = { "tps_left", "Turn left", BG_TPS, 0 },   [B_TPS_RIGHT] = { "tps_right", "Turn right", BG_TPS, 0 },
     [B_TPS_RUN] = { "tps_run", "Run", BG_TPS, 1 },           [B_TPS_ACTION] = { "tps_action", "Action / confirm", BG_TPS, 1 },
@@ -55,16 +56,17 @@ const BindRow bind_rows[B_COUNT] = {
     [B_QUICKSAVE] = { "quicksave", "Quicksave", BG_HOTKEY, 1 },
     [B_QUICKLOAD] = { "quickload", "Quickload", BG_HOTKEY, 1 },
     [B_FPS_TOGGLE] = { "fps_toggle", "First-person camera on/off", BG_HOTKEY, 1 },
+    [B_SPOILER] = { "spoiler", "BioRand spoiler log", BG_HOTKEY, 0 },
 };
 
 const int bind_order[B_COUNT] = {
     B_UP, B_DOWN, B_LEFT, B_RIGHT, B_CROSS, B_SQUARE, B_CIRCLE, B_TRIANGLE, B_R1, B_L1, B_R2, B_L2,
-    B_START, B_SELECT, B_R3, B_L3, B_QUICKTURN, B_QUICKKNIFE, B_RELOAD,
+    B_START, B_SELECT, B_R3, B_L3, B_FREEAIM, B_QUICKTURN, B_QUICKKNIFE, B_RELOAD,
     B_TPS_FWD, B_TPS_BACK, B_TPS_LEFT, B_TPS_RIGHT, B_TPS_RUN, B_TPS_ACTION, B_TPS_CANCEL, B_TPS_STATUS,
     B_TPS_MAP, B_TPS_AIM, B_TPS_FIRE, B_TPS_RELOAD, B_TPS_QUICKTURN, B_TPS_KNIFE, B_TPS_OPTIONS, B_TPS_RECENTER,
     B_TPS_TOGGLE, B_SETTINGS, B_CHEATS, B_FULLSCREEN, B_NOCLIP_UP, B_NOCLIP_DOWN, B_FMV_SKIP,
     B_WEAPON_PREV, B_WEAPON_NEXT, B_WEAPON_1, B_WEAPON_2, B_WEAPON_3, B_WEAPON_4,
-    B_QUICKSAVE, B_QUICKLOAD, B_FPS_TOGGLE,
+    B_QUICKSAVE, B_QUICKLOAD, B_FPS_TOGGLE, B_SPOILER,
 };
 
 static const int defaults[2][B_COUNT][BIND_SLOTS] = {
@@ -78,6 +80,7 @@ static const int defaults[2][B_COUNT][BIND_SLOTS] = {
         [B_TPS_STATUS] = { SC(TAB) }, [B_TPS_MAP] = { SC(M) }, [B_TPS_AIM] = { MB(SDL_BUTTON_RIGHT) },
         [B_TPS_FIRE] = { MB(SDL_BUTTON_LEFT) }, [B_TPS_RELOAD] = { SC(R) },
         [B_QUICKKNIFE] = { SC(SPACE) }, [B_RELOAD] = { SC(R) },   /* R: no game key in any key type */
+        [B_FREEAIM] = { SC(E) },   /* next to aim (W); E is third-person action, which takes it over there */
         [B_TPS_TOGGLE] = { SC(F5) }, [B_SETTINGS] = { SC(F1) }, [B_CHEATS] = { SC(F2) }, 
         [B_FULLSCREEN] = { SC(F11) }, [B_NOCLIP_UP] = { SC(PAGEUP) }, [B_NOCLIP_DOWN] = { SC(F), SC(PAGEDOWN) },
         [B_FMV_SKIP] = { SC(F8) },
@@ -86,6 +89,7 @@ static const int defaults[2][B_COUNT][BIND_SLOTS] = {
         [B_WEAPON_3] = { SC(F6) }, [B_WEAPON_4] = { SC(F7) },
         [B_QUICKSAVE] = { SC(F9) }, [B_QUICKLOAD] = { SC(F10) },
         [B_FPS_TOGGLE] = { SC(F12) },
+        [B_SPOILER] = { SC(L) },
     },
     [BIND_PAD] = {
         /* L3 is free in all native key types; use it as a weapon modifier. */
@@ -97,7 +101,9 @@ static const int defaults[2][B_COUNT][BIND_SLOTS] = {
         [B_WEAPON_3] = { BIND_L3 + GB(DPAD_DOWN) }, [B_WEAPON_4] = { BIND_L3 + GB(DPAD_LEFT) },
         [B_SELECT] = { GB(BACK) }, [B_R3] = { GB(RIGHT_STICK) }, [B_START] = { GB(START) },
         [B_UP] = { GB(DPAD_UP) }, [B_RIGHT] = { GB(DPAD_RIGHT) }, [B_DOWN] = { GB(DPAD_DOWN) }, [B_LEFT] = { GB(DPAD_LEFT) },
-        [B_L2] = { GA(LEFT_TRIGGER, 0) },   /* R2 is no game action in any key type: the right trigger is the quick knife */
+        /* L2 is no game action in key types A-C (OPTION in D), R2 in none: the left trigger aims without auto-aim, the
+           right trigger is the quick knife */
+        [B_FREEAIM] = { GA(LEFT_TRIGGER, 0) },
         [B_L1] = { GB(LEFT_SHOULDER) }, [B_R1] = { GB(RIGHT_SHOULDER) },
         [B_TRIANGLE] = { GB(NORTH) }, [B_CIRCLE] = { GB(EAST) }, [B_CROSS] = { GB(SOUTH) }, [B_SQUARE] = { GB(WEST) },
         [B_QUICKKNIFE] = { GA(RIGHT_TRIGGER, 0) },
@@ -252,10 +258,48 @@ static int ini_code(int dev, const char* s)
     return -1;
 }
 
+/* The open gamepad belongs to the game thread (pad.c opens, reads and closes it). Other threads
+   (the main thread's events and F1) get a copy of what they show: its id, type and name. */
 static SDL_Gamepad* gamepad;
+static struct { SDL_JoystickID id; SDL_GamepadType type; char name[96]; } pad_info = { 0, SDL_GAMEPAD_TYPE_STANDARD, "" };
+static SDL_SpinLock pad_info_lock;
 static unsigned char hotkey_owned[BIND_L3];
 void* bind_gamepad(void) { return gamepad; }
-void bind_set_gamepad(void* g) { if (gamepad != g) memset(hotkey_owned, 0, sizeof(hotkey_owned)); gamepad = (SDL_Gamepad*)g; }
+void bind_set_gamepad(void* g)
+{
+    SDL_JoystickID id = g ? SDL_GetGamepadID((SDL_Gamepad*)g) : 0;
+    SDL_GamepadType t = g ? SDL_GetGamepadType((SDL_Gamepad*)g) : SDL_GAMEPAD_TYPE_STANDARD;
+    const char* nm = g ? SDL_GetGamepadName((SDL_Gamepad*)g) : NULL;
+    char name[96];
+    SDL_snprintf(name, sizeof(name), "%s", nm ? nm : "Gamepad");
+    if (gamepad != g) memset(hotkey_owned, 0, sizeof(hotkey_owned));
+    gamepad = (SDL_Gamepad*)g;
+    SDL_LockSpinlock(&pad_info_lock);
+    pad_info.id = id; pad_info.type = t;
+    memcpy(pad_info.name, name, sizeof(name));
+    SDL_UnlockSpinlock(&pad_info_lock);
+}
+/* any thread: the open gamepad's id (0: none), type, and name in name (n bytes) if not NULL */
+static SDL_JoystickID pad_info_get(SDL_GamepadType* type, char* name, int n)
+{
+    SDL_JoystickID id;
+    SDL_LockSpinlock(&pad_info_lock);
+    id = pad_info.id;
+    if (type) *type = pad_info.type;
+    if (name) SDL_strlcpy(name, pad_info.name, n);
+    SDL_UnlockSpinlock(&pad_info_lock);
+    return id;
+}
+static SDL_GamepadType pad_type(void) { SDL_GamepadType t; pad_info_get(&t, NULL, 0); return t; }
+int g_button_icons;
+int bind_pad_style(void)
+{
+    SDL_GamepadType t = pad_type();
+    if (g_button_icons >= BI_XBOX && g_button_icons <= BI_SWITCH) return g_button_icons - BI_XBOX + BPS_XBOX;
+    if (t == SDL_GAMEPAD_TYPE_PS3 || t == SDL_GAMEPAD_TYPE_PS4 || t == SDL_GAMEPAD_TYPE_PS5) return BPS_PS;
+    if (t >= SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO && t <= SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR) return BPS_SWITCH;
+    return BPS_XBOX;
+}
 
 /* ---------------------------------------------------------------- input source */
 int g_input_source, g_input_pad;
@@ -304,7 +348,7 @@ void bind_apply_source(void)
 /* what the player reads on the pad: by the connected pad's family */
 const char* bind_code_name(int dev, int code, char* buf, int n)
 {
-    SDL_GamepadType t = gamepad ? SDL_GetGamepadType(gamepad) : SDL_GAMEPAD_TYPE_STANDARD;
+    SDL_GamepadType t = pad_type();
     int ps = t == SDL_GAMEPAD_TYPE_PS3 || t == SDL_GAMEPAD_TYPE_PS4 || t == SDL_GAMEPAD_TYPE_PS5;
     int xb = t == SDL_GAMEPAD_TYPE_XBOX360 || t == SDL_GAMEPAD_TYPE_XBOXONE;
     int nin = t >= SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO && t <= SDL_GAMEPAD_TYPE_GAMECUBE;
@@ -361,14 +405,12 @@ const char* bind_code_name(int dev, int code, char* buf, int n)
     return buf;
 }
 
-const char* bind_pad_desc(void)
+const char* bind_pad_desc(char* d, int n)
 {
-    static char d[96];
     if (g_input_source == INPUT_KBM) return "Gamepads ignored (input source: keyboard/mouse only)";
-    if (!gamepad && g_input_pad) { snprintf(d, sizeof(d), "Gamepad %d not connected", g_input_pad); return d; }
-    if (!gamepad) return "No gamepad connected";
-    snprintf(d, sizeof(d), "%s", SDL_GetGamepadName(gamepad) ? SDL_GetGamepadName(gamepad) : "Gamepad");
-    return d;
+    if (pad_info_get(NULL, d, n)) return d;
+    if (g_input_pad) { snprintf(d, n, "Gamepad %d not connected", g_input_pad); return d; }
+    return "No gamepad connected";
 }
 
 /* game rows: what the DS2 button does under the game's key type (pad.c bhSetPad's virtual
@@ -394,15 +436,17 @@ const char* bind_row_label(int row, char* buf, int n)
 /* ---------------------------------------------------------------- recvx.ini */
 int bind_ini_line(const char* key, const char* value)
 {
-    static int knife_seen, reload_seen, combo_seen, weapon_pad_seen;
+    static int knife_seen, reload_seen, combo_seen, version;
     int dev, slot = 0, code, row = -1;
     char k[64];
     /* a file from before the reload combination (no bindings_version line, written first): the reload rows' "none",
        their default then, gets today's defaults (R, Aim + Triangle) */
-    if (!strcmp(key, "bindings_version")) { combo_seen = 1; weapon_pad_seen = atoi(value) >= 3; return 1; }
+    if (!strcmp(key, "bindings_version")) { combo_seen = 1; version = atoi(value); return 1; }
+    /* a file from before free aim (bindings_version < 4): the left trigger, L2's default then, is free aim's now */
+    if (version < 4 && !strcmp(key, "pad_l2") && !SDL_strcasecmp(value, "+lefttrigger")) return 1;
     /* Upgrade the preceding build's empty controller slots and L3-only next
-       default. Keep custom assignments; version 3 preserves explicit unbinding. */
-    if (!weapon_pad_seen && !strncmp(key, "pad_weapon_", 11) &&
+       default. Keep custom assignments; version 3+ preserves explicit unbinding. */
+    if (version < 3 && !strncmp(key, "pad_weapon_", 11) &&
         ((!strcmp(key, "pad_weapon_next") && !SDL_strcasecmp(value, "leftstick")) ||
          ((!strcmp(key, "pad_weapon_previous") || !strcmp(key, "pad_weapon_1") ||
            !strcmp(key, "pad_weapon_2") || !strcmp(key, "pad_weapon_3") || !strcmp(key, "pad_weapon_4")) && !SDL_strcasecmp(value, "none")))) return 1;
@@ -436,6 +480,9 @@ int bind_ini_line(const char* key, const char* value)
     if (code < 0) { host_log("recvx.ini: %s: unknown %s \"%s\"\n", key, dev ? "gamepad input" : "key", value); return 1; }
     init();
     put(row, dev, slot, code);
+    /* (and a key such a file gave another row keeps it: free aim's default gives way) */
+    if (version < 4 && code && row != B_FREEAIM && same_context(row, B_FREEAIM) && !may_share(row, B_FREEAIM) && bind_get(B_FREEAIM, dev, 0) == code)
+        put(B_FREEAIM, dev, 0, 0);
     return 1;
 }
 
@@ -450,7 +497,7 @@ void bind_ini_write(void* fp)
                "# +lefttrigger, -lefty (left stick up). A second binding: <name>_2. none = unbound.\n"
                "# reload may share a button with a game row (third person: a third-person row): Aim + that button.\n"
                "# Gamepad combinations: leftstick+dpup, leftstick+rightshoulder, etc.\n"
-               "bindings_version = 3\n");
+               "bindings_version = 4\n");
     for (int dev = 0; dev < 2; dev++)
         for (int i = 0; i < B_COUNT; i++) {
             int r = bind_order[i];
@@ -496,8 +543,8 @@ static void parse_keys(void)
                 snprintf(name, sizeof(name), "%.*s", n, p);
                 for (char* c = name; *c; c++) if (*c == '_') *c = ' ';
                 if (strcmp(name, "-")) {
-                    SDL_Scancode sc = SDL_GetScancodeFromName(name);
-                    if (sc != SDL_SCANCODE_UNKNOWN && st->n < 8) st->keys[st->n++] = (short)sc;
+                    int sc = SDL_strncasecmp(name, "Mouse ", 6) ? (int)SDL_GetScancodeFromName(name) : ini_code(BIND_KB, name);   /* Mouse_Right: held */
+                    if (sc > 0 && st->n < 8) st->keys[st->n++] = (short)sc;
                     else host_log("RECVX_KEYS: unknown key \"%s\"\n", name);
                 }
                 p += n + (p[n] == '+');
@@ -527,7 +574,7 @@ const bool* bind_keys(void)
     if (!nsteps) return k;
     memcpy(merged, k, sizeof(merged));
     if ((st = key_step(gs_frame_count())))
-        for (int i = 0; i < st->n; i++) merged[st->keys[i]] = 1;
+        for (int i = 0; i < st->n; i++) if (st->keys[i] < SDL_SCANCODE_COUNT) merged[st->keys[i]] = 1;
     return merged;
 }
 
@@ -556,8 +603,8 @@ void bind_latch_event(const void* e)
     const SDL_Event* ev = (const SDL_Event*)e;
     if ((ev->type == SDL_EVENT_KEY_DOWN || ev->type == SDL_EVENT_KEY_UP) && !ev->key.repeat && ev->key.scancode < SDL_SCANCODE_COUNT)
         latch_push(0, ev->key.scancode, ev->type == SDL_EVENT_KEY_DOWN);
-    else if ((ev->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || ev->type == SDL_EVENT_GAMEPAD_BUTTON_UP) && gamepad &&
-             ev->gbutton.which == SDL_GetGamepadID(gamepad) && ev->gbutton.button < SDL_GAMEPAD_BUTTON_COUNT)
+    else if ((ev->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || ev->type == SDL_EVENT_GAMEPAD_BUTTON_UP) &&
+             ev->gbutton.which == pad_info_get(NULL, NULL, 0) && ev->gbutton.which && ev->gbutton.button < SDL_GAMEPAD_BUTTON_COUNT)
         latch_push(1, ev->gbutton.button, ev->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN);
 }
 
@@ -671,8 +718,8 @@ static int raw_held(int row, int dev, const bool* keys, int mouse)
    A reload binding that another row of its group also has (bind_combo) reloads only as Aim + that button:
    a press while aim is held, in play (reload_glue.c), belongs to the reload until it is let go, and no
    other row sees it (no one-frame fire, map, knife...), also when aim is let go first. A press without
-   aim is the other row's until let go. Aim: the game rows the key type has aim on (R1), or in third
-   person the third-person aim. Game thread: bind_combo_frame each pad report (pad.c), before the rows
+   aim is the other row's until let go. Aim: the game rows the key type has aim on (R1) and free aim (fixed
+   cameras), or in third person the third-person aim. Game thread: bind_combo_frame each pad report (pad.c), before the rows
    are read. */
 int reload_combo_ok(void);   /* reload_glue.c: our player in normal play */
 static unsigned char combo_mode[2][2][BIND_SLOTS];   /* [B_TPS_RELOAD?][dev][slot]: 0 up, 1 the other row's, 2 the reload's */
@@ -680,6 +727,7 @@ static unsigned char combo_mode[2][2][BIND_SLOTS];   /* [B_TPS_RELOAD?][dev][slo
 static int aim_row(int row, int dev)
 {
     int m = pc_keytype_mask(4);
+    if (row == B_FREEAIM) return !g_tps.on;
     return row < 16 ? m > 0 && (m & (1 << row)) : row == B_TPS_AIM && (dev == BIND_PAD || g_tps.on);
 }
 
@@ -775,11 +823,18 @@ static int cap_l3;
 static Uint64 cap_start;
 static bool cap_held[SDL_SCANCODE_COUNT], cap_held_pad[SDL_GAMEPAD_BUTTON_COUNT];   /* down when it started: not this */
 
+static int pad_l3_down(void)
+{
+    SDL_JoystickID id = pad_info_get(NULL, NULL, 0);
+    return id && SDL_GetGamepadButton(SDL_GetGamepadFromID(id), SDL_GAMEPAD_BUTTON_LEFT_STICK);
+}
+
 void bind_capture_start(int dev)
 {
     const bool* k = bind_keys();
     for (int i = 0; i < SDL_SCANCODE_COUNT; i++) cap_held[i] = k[i];
-    for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++) cap_held_pad[b] = gamepad && SDL_GetGamepadButton(gamepad, (SDL_GamepadButton)b);
+    SDL_JoystickID id = pad_info_get(NULL, NULL, 0);   /* (any thread: SDL looks it up by id, under its lock) */
+    for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++) cap_held_pad[b] = id && SDL_GetGamepadButton(SDL_GetGamepadFromID(id), (SDL_GamepadButton)b);
     cap_start = SDL_GetTicks();
     cap_result = -1;
     cap_l3 = 0;
@@ -828,12 +883,12 @@ int bind_event(const void* e)
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
         if (dev == BIND_PAD && ev->gbutton.button < SDL_GAMEPAD_BUTTON_COUNT && !cap_held_pad[ev->gbutton.button]) {
             if (ev->gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_STICK) cap_l3 = 1;
-            else done(1 + ev->gbutton.button + ((cap_l3 || (gamepad && SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_STICK))) ? BIND_L3 : 0));
+            else done(1 + ev->gbutton.button + ((cap_l3 || pad_l3_down()) ? BIND_L3 : 0));
         }
         return 1;
     case SDL_EVENT_GAMEPAD_AXIS_MOTION:
         if (dev == BIND_PAD && (ev->gaxis.value > 20000 || (ev->gaxis.value < -20000 && ev->gaxis.axis < SDL_GAMEPAD_AXIS_LEFT_TRIGGER)))
-            done(BIND_AXIS + ev->gaxis.axis * 2 + (ev->gaxis.value < 0) + ((cap_l3 || (gamepad && SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_STICK))) ? BIND_L3 : 0));
+            done(BIND_AXIS + ev->gaxis.axis * 2 + (ev->gaxis.value < 0) + ((cap_l3 || pad_l3_down()) ? BIND_L3 : 0));
         return 1;
     }
     return 0;
@@ -841,11 +896,13 @@ int bind_event(const void* e)
 
 /* ---------------------------------------------------------------- test aids (main thread)
    RECVX_KEYS="<frame>:<key>+<key>,<frame>:-,<frame>:@<x>:<y>": hold keyboard keys (SDL names,
-   '_' for a space) from that presented frame on, as key state and key events; @x:y clicks the
-   left mouse button at window pixel x/y (as events: the overlay), @x:y:r the right one.
+   '_' for a space; Mouse_Left .. Mouse_X2 a mouse button, as events) from that presented frame on,
+   as key state and key events; @x:y clicks the left mouse button at window pixel x/y (as events:
+   the overlay), @x:y:r the right one.
    RECVX_VPAD="<frame>:<input>+<input>,...": a virtual SDL gamepad (RECVX_VPAD_TYPE xbox, ps5 or
    generic; default xbox) holding gamepad inputs in the ini spelling (south, dpup, +lefttrigger),
-   or an axis at a value from -1 to 1 (leftx=0.5, lefty=-1: the left stick half right, all up). */
+   or an axis at a value from -1 to 1 (leftx=0.5, lefty=-1: the left stick half right, all up);
+   "unplug" disconnects it, "plug" connects it again (hotplug tests). */
 static void push_key(int sc, int down)
 {
     SDL_Event e;
@@ -891,7 +948,7 @@ static const char* script_entry(const char* p, uint64_t now, const char** body)
 /* the same steps as key events (captures, hotkeys, the overlay) and clicks */
 static void keys_frame(uint64_t now)
 {
-    static bool down[SDL_SCANCODE_COUNT];
+    static bool down[BIND_MOUSE + 6];   /* keys, then mouse buttons */
     static int next, click_up;
     static float cx, cy;
     const KeyStep* st;
@@ -901,10 +958,10 @@ static void keys_frame(uint64_t now)
         if (steps[next].click) { cx = steps[next].x; cy = steps[next].y; push_click(cx, cy, 1, steps[next].click); click_up = steps[next].click; }
     if (!nsteps) return;
     st = key_step(now);
-    for (int i = 0; i < SDL_SCANCODE_COUNT; i++) {
+    for (int i = 0; i < BIND_MOUSE + 6; i++) {
         bool want = 0;
         for (int k = 0; st && k < st->n; k++) want |= st->keys[k] == i;
-        if (want != down[i]) { down[i] = want; push_key(i, want); }
+        if (want != down[i]) { down[i] = want; if (i < BIND_MOUSE) push_key(i, want); else push_click(cx, cy, want, i - BIND_MOUSE); }
     }
 }
 
@@ -916,33 +973,43 @@ static bool SDLCALL vpad_rumble(void* ud, Uint16 lo, Uint16 hi)
     return true;
 }
 
+static SDL_Joystick* vpad_plug(void)
+{
+    const char* t = SDL_getenv("RECVX_VPAD_TYPE");
+    SDL_VirtualJoystickDesc d;
+    SDL_Joystick* joy;
+    SDL_INIT_INTERFACE(&d);
+    d.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+    d.naxes = SDL_GAMEPAD_AXIS_COUNT;
+    d.nbuttons = SDL_GAMEPAD_BUTTON_MISC1;   /* the standard ones */
+    d.button_mask = (1u << SDL_GAMEPAD_BUTTON_MISC1) - 1;
+    d.axis_mask = (1u << SDL_GAMEPAD_AXIS_COUNT) - 1;
+    d.Rumble = vpad_rumble;
+    if (t && !strcmp(t, "ps5")) { d.vendor_id = 0x054c; d.product_id = 0x0ce6; d.name = "Virtual DualSense"; }
+    else if (t && !strcmp(t, "generic")) d.name = "Virtual gamepad";
+    else { d.vendor_id = 0x045e; d.product_id = 0x02ea; d.name = "Virtual Xbox One"; }
+    joy = SDL_OpenJoystick(SDL_AttachVirtualJoystick(&d));
+    host_log("test: virtual gamepad %s\n", joy ? d.name : SDL_GetError());
+    if (joy) SDL_SetJoystickVirtualAxis(joy, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, -32768),
+             SDL_SetJoystickVirtualAxis(joy, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, -32768);
+    return joy;
+}
+
 static void vpad_frame(uint64_t now)
 {
     static const char* p; static int chk;
     static SDL_Joystick* joy;
     const char* body;
     const char* end;
-    if (!chk++) {
-        const char* t = SDL_getenv("RECVX_VPAD_TYPE");
-        SDL_VirtualJoystickDesc d;
-        p = SDL_getenv("RECVX_VPAD");
-        if (!p) return;
-        SDL_INIT_INTERFACE(&d);
-        d.type = SDL_JOYSTICK_TYPE_GAMEPAD;
-        d.naxes = SDL_GAMEPAD_AXIS_COUNT;
-        d.nbuttons = SDL_GAMEPAD_BUTTON_MISC1;   /* the standard ones */
-        d.button_mask = (1u << SDL_GAMEPAD_BUTTON_MISC1) - 1;
-        d.axis_mask = (1u << SDL_GAMEPAD_AXIS_COUNT) - 1;
-        d.Rumble = vpad_rumble;
-        if (t && !strcmp(t, "ps5")) { d.vendor_id = 0x054c; d.product_id = 0x0ce6; d.name = "Virtual DualSense"; }
-        else if (t && !strcmp(t, "generic")) d.name = "Virtual gamepad";
-        else { d.vendor_id = 0x045e; d.product_id = 0x02ea; d.name = "Virtual Xbox One"; }
-        joy = SDL_OpenJoystick(SDL_AttachVirtualJoystick(&d));
-        host_log("test: virtual gamepad %s\n", joy ? d.name : SDL_GetError());
-        if (joy) SDL_SetJoystickVirtualAxis(joy, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, -32768),
-                 SDL_SetJoystickVirtualAxis(joy, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, -32768);
-    }
-    while (joy && p && *p && (end = script_entry(p, now, &body))) {
+    if (!chk++ && (p = SDL_getenv("RECVX_VPAD"))) joy = vpad_plug();
+    while (p && *p && (end = script_entry(p, now, &body))) {
+        if (!strncmp(body, "unplug", 6) || !strncmp(body, "plug", 4)) {
+            if (joy) { SDL_JoystickID id = SDL_GetJoystickID(joy); SDL_CloseJoystick(joy); SDL_DetachVirtualJoystick(id); joy = NULL; host_log("test: virtual gamepad unplugged\n"); }
+            if (*body == 'p') joy = vpad_plug();
+            p = *end ? end + 1 : end;
+            continue;
+        }
+        if (!joy) { p = *end ? end + 1 : end; continue; }
         for (int b = 0; b < SDL_GAMEPAD_BUTTON_MISC1; b++) SDL_SetJoystickVirtualButton(joy, b, false);
         for (int a = 0; a < SDL_GAMEPAD_AXIS_COUNT; a++) SDL_SetJoystickVirtualAxis(joy, a, a >= SDL_GAMEPAD_AXIS_LEFT_TRIGGER ? -32768 : 0);
         while (body < end) {
@@ -997,7 +1064,9 @@ int bind_any_down(void)
 {
     const bool* k = bind_keys();
     for (int i = 1; i < SDL_SCANCODE_COUNT; i++) if (k[i]) return 1;
-    if (gamepad)
+    if (gamepad) {
         for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++) if (SDL_GetGamepadButton(gamepad, (SDL_GamepadButton)b)) return 1;
+        for (int c = BIND_AXIS; c < BIND_AXIS + 2 * SDL_GAMEPAD_AXIS_COUNT; c++) if (pad_down(c)) return 1;   /* triggers and sticks too: a trigger just bound is still held */
+    }
     return 0;
 }

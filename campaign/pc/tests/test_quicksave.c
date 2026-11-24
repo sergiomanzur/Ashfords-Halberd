@@ -9,11 +9,11 @@
 
 static SYS_WORK state;
 SYS_WORK* sys = &state;
-BH_PWORK ply, ene[128];
+BH_PWORK ply, ene[PC_ENE_SLOTS];
 BH_PWORK* plp = &ply;
 static unsigned char checkpoint[sizeof(SAVEFILE)];
 unsigned char* freemem = checkpoint;
-typedef struct { SYS_WORK sys; BH_PWORK player, enemies[128]; } RoomImage;
+typedef struct { SYS_WORK sys; BH_PWORK player, enemies[PC_ENE_SLOTS]; } RoomImage;
 static RoomImage disk, golden;
 static unsigned held;
 static int reads, writes, pops, notice, knife, read_result, write_result, failures, checks;

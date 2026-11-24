@@ -8,12 +8,15 @@
 #include "presets.h"
 #include "room_snapshot.h"
 #include "actors.h"
+#include "cast.h"
 #include "tps.h"
 #include "cheat.h"
 #include "menu_mouse.h"
 #include "bindings.h"
 #include "modern.h"
 #include "enemies.h"
+#include "biorand.h"
+#include "lang.h"
 #include "savestore.h"
 #include "../audio/audio.h"
 #include <SDL3/SDL.h>
@@ -226,10 +229,28 @@ static const char* tenths(int v, char* b, int n) { snprintf(b, n, "%d.%d", v / 1
    while a SET_CALIB row is chosen: squares on a black and on a white strip, the faint ones at the ends */
 const unsigned char settings_calib[2][CALIB_STEPS] = { { 5, 10, 16, 24, 32 }, { 223, 231, 239, 245, 250 } };
 static void picture_reset(void) { g_config.brightness = 0; g_config.contrast = 100; g_config.gamma = 10; g_config.saturation = 100; settings_save_later(); }
-/* "You appear as": positions in the menus' list (actors.c, without event doubles) */
+/* "You appear as" & Per Character models (actors.c) */
+static const char* const model_modes[] = { "Same for both", "Per character" };
+static int per_off(void) { return !g_appear_per; }
+static int per_on(void) { return g_appear_per != 0; }
 static int chr_get(void) { return appear_pos(g_appear_chr); }
 static void chr_set(int v) { g_appear_chr = appear_at(v); }
+static int claire_get(void) { return appear_pos(g_appear_own[0] >= 0 ? g_appear_own[0] : g_appear_chr); }
+static void claire_set(int v) { g_appear_own[0] = appear_at(v); }
+static int chris_get(void) { return appear_pos(g_appear_own[1] >= 0 ? g_appear_own[1] : g_appear_chr); }
+static void chris_set(int v) { g_appear_own[1] = appear_at(v); }
 static const char* chr_name(int v, char* b, int n) { snprintf(b, n, "%s", appear_name(appear_at(v))); return b; }
+/* Cutscene cast & voice-line randomizers (cast.h) */
+static const char* const cast_pools[] = { "Cutscene models", "All models", "Custom" };
+static const char* const cast_assigns[] = { "Fixed per character", "Random per cutscene" };
+static const char* const cast_enemies[] = { "Same as cast", "All enemies", "Custom", "Off" };
+static int cast_on(void) { return g_enemy_opts.cast != 0; }
+static int cast_imports_shown(void) { return cast_on() && __atomic_load_n(&actor_import_n, __ATOMIC_ACQUIRE) > 0; }
+static int cast_off_shown(void) { return !g_enemy_opts.cast; }
+static int cast_enemy_shown(void) { return g_enemy_opts.cast || enemy_cast_alone(&g_enemy_opts); }
+static int cast_alone_get(void) { return enemy_cast_alone(&g_enemy_opts); }
+static void cast_alone_set(int v) { enemy_cast_alone_set(&g_enemy_opts, v); }
+static int voices_on(void) { return g_enemy_opts.voices != 0; }
 /* saves: the memory card's copied into the native folder (as the first native start does) */
 static void import_card(void)
 {
@@ -323,13 +344,43 @@ static const char* const aspects[] = { "4:3 (original)", "Stretch to window", "W
 static const char* const save_systems[] = { "Native files", "Memory card (original)" };
 static const char* const atmos_names[] = { "Per cut (original)", "Smooth" };
 static const char* const free_cam_names[] = { "B (behind character)", "A (free)" };
-static const char* const fixed_cam_names[] = { "Classic (tank)", "Modern (camera-relative)" };
+static const char* const fixed_cam_names[] = { "Classic (tank)", "Modern (camera-relative)", "Combined (d-pad tank)" };
 static const char* const tps_pad_names[] = { "Classic (tank, camera behind)", "Modern (twin-stick)" };
 static const char* const camera_mode_names[] = { "Original", "Third person", "First person" };
 static const char* const noclips[] = { "Off", "Through walls", "Walls + fly" };
 static const char* const sources[] = { "Auto", "Keyboard/mouse only", "Gamepad only" };
-static const char* const extras[] = { "Off", "Up to 1 per room", "Up to 2 per room", "Up to 3 per room" };
-static const char* const varieties[] = { "Mild", "Wild" };
+static const char* const extras[ENEMY_EXTRA_MAX + 1] = {
+    "Off", "Up to 1 per room", "Up to 2 per room", "Up to 3 per room", "Up to 4 per room",
+    "Up to 5 per room", "Up to 6 per room", "Up to 7 per room", "Up to 8 per room"
+};
+static const char* const varieties[] = { "Mild", "Wild", "Custom" };
+static const char* const types_names[ENEMY_TYPES_MAX + 1] = { "No limit", "1", "2", "3", "4", "5", "6", "7", "8" };
+static void variety_set(int v)
+{
+    if (v < 2) enemy_rate_preset(g_enemy_opts.rate, v);
+    g_enemy_opts.variety = v;
+}
+
+/* Language & cutscene subtitles (lang.h): English plus any installed disc-imported languages */
+int pc_in_game(void);
+static int lang_n(void) { int n = 0; for (int l = 0; l < LANG_COUNT; l++) n += lang_installed(l); return n; }
+static int lang_any(void) { return lang_n() > 1; }
+static int voices_any(void) { for (int l = 1; l < LANG_COUNT; l++) if (lang_has_voices(l)) return 1; return 0; }
+static int lang_at(int v) { for (int l = 0; l < LANG_COUNT; l++) if (lang_installed(l) && v-- == 0) return l; return LANG_EN; }
+static int lang_get(void) { int v = 0; for (int l = 0; l < g_lang && l < LANG_COUNT; l++) v += lang_installed(l); return lang_installed(g_lang) ? v : 0; }
+static void lang_set(int v) { g_lang = lang_at(v); }
+static const char* lang_name(int v, char* b, int n) { snprintf(b, n, "%s", lang_names[lang_at(v)]); return b; }
+static const char* lang_locked(void)
+{
+    if (lang_n() < 2) return "No other language is installed.";
+    return pc_in_game() ? "Change it on the title screen." : NULL;
+}
+static int subs_n(void) { int n = 1; for (int l = 0; l < LANG_COUNT; l++) n += lang_has_subtitles(l); return n; }
+static int subs_at(int v) { for (int l = 0; l < LANG_COUNT; l++) if (lang_has_subtitles(l) && --v == 0) return l; return -1; }
+static int subs_get(void) { int v = 1, s = lang_sub(); for (int l = 0; l < s; l++) v += lang_has_subtitles(l); return s < 0 ? 0 : v; }
+static void subs_set(int v) { g_subtitles = subs_at(v) < 0 ? 0 : 2 + subs_at(v); }
+static const char* subs_name(int v, char* b, int n) { snprintf(b, n, "%s", subs_at(v) < 0 ? "Off" : lang_names[subs_at(v)]); return b; }
+static const char* subs_locked(void) { return subs_n() < 2 ? "No language with subtitles is installed." : NULL; }
 
 #define V(x) ((int*)&(x))
 const Setting g_settings[] = {
@@ -342,13 +393,14 @@ const Setting g_settings[] = {
     { SP_DISPLAY, "Window size", NULL, 0, 5, 1, .get = size_get, .set = size_set, .name = size_name, .locked = fullscreen_on, .apply = settings_apply_window },
     { SP_DISPLAY, "VSync", V(g_config.vsync), 0, 1, 1, .apply = apply_vsync },
     { SP_DISPLAY, "Frame rate limit", V(g_config.fps_limit), 0, 5, 1, fps_limits, .help = "Caps the images shown per second (enhanced in-between frames included) below the display rate, e.g. 60 on a 175 Hz monitor. The game itself always runs at 30." },
-    { SP_DISPLAY, "Show frame rate", V(g_config.show_fps), 0, 1, 1 },
+    { SP_DISPLAY, "Frame rate HUD", V(g_config.show_fps), 0, 2, 1, (const char* const[]){ "Off", "FPS", "FPS + Graph" },
+      .help = "Off: hidden. FPS: current frame rate in the top-right corner. FPS + Graph: adds a live frame-time sparkline and averages." },
     { SP_DISPLAY, "Aspect ratio", V(g_config.aspect), 0, 2, 1, aspects, .help = "Widescreen: 3D fills the window, 2D and menus stay 4:3 in the middle.", .group = "PICTURE" },
     { SP_DISPLAY, "Internal resolution", V(g_config.scale), 0, 8, 1, .name = scale_name, .help = "The resolution the game is drawn at; Auto follows the window." },
     { SP_DISPLAY, "Anti-aliasing", V(g_config.antialias), 0, 2, 1, (const char* const[]){ "Off", "FXAA", "SMAA" },
-      .help = "Optional final-image edge smoothing, separate from internal resolution. SMAA keeps more detail than FXAA; Off preserves sharpness. The F1 overlay is drawn afterwards." },
+      .help = "Smooths jagged edges of the 3D scene while keeping text and menus sharp. SMAA preserves more fine detail than FXAA; Off disables edge smoothing." },
     { SP_DISPLAY, "Dithering", V(g_config.dithering), 0, 2, 1, (const char* const[]){ "Off", "On", "Deband" },
-      .help = "Smoothes the visible colour steps in dark fog and light gradients. Deband also smooths steps in textures; Off preserves the original banding." },
+      .help = "Smooths visible colour steps in dark fog and lighting gradients without affecting text or menus. Deband also softens steps baked into textures." },
     { SP_DISPLAY, "Display-rate frames", V(g_config.interpolate), 0, 1, 1, .help = "In-between frames blended from the last two game frames. The game still runs at 30 FPS; half a frame of latency." },
     { SP_DISPLAY, "Smooth menus", V(g_config.menu_smooth), 0, 1, 1, .locked = interp_off,
       .help = "Menus at the display rate too (windows slide, the cursor glides), a frame quicker to react, quick taps never missed. Off: 30 FPS menus." },
@@ -382,6 +434,8 @@ const Setting g_settings[] = {
     { SP_GAMEPLAY, "Experience preset", NULL, 0, 2, 1, (const char* const[]){ "Original", "Enhanced", "Custom" }, .get = preset_get, .set = preset_set, .group = "QUICK SETUP",
       .help = "The same preset as DISPLAY. Manual changes to its options show Custom. Every individual control remains available." },
     { SP_GAMEPLAY, "Skip intro", V(g_config.skip_intro), 0, 1, 1, .flags = SET_RESTART, .help = "Boot straight into the title menu: no warning screen, logos or intro movie. Off: any button skips each of them.", .group = "GENERAL" },
+    { SP_GAMEPLAY, "Pause menu", V(g_config.pause_menu), 0, 1, 1, (const char* const[]){ "Classic OPTION", "Ashford Pause" },
+      .help = "Ashford Pause: controller-friendly in-game pause menu with quick camera cycling, active campaign modifiers, and shortcuts to Enhanced Options, Appearance, Cheats, and Classic OPTION." },
     { SP_GAMEPLAY, "Skip door animations", V(g_config.skip_doors), 0, 2, 1, (const char* const[]){ "Off", "Instant", "Skippable" },
       .help = "Door, stairs and ladder animations. Off: always played. Instant: the game's load screen instead. Skippable: played, any key or button ends it." },
     { SP_GAMEPLAY, "Fast loading", V(g_config.fast_loading), 0, 1, 1,
@@ -399,14 +453,31 @@ const Setting g_settings[] = {
       .help = "Typewriters save without an ink ribbon and use none up." },
     { SP_GAMEPLAY, "Rifle ammo stacks", V(g_config.rifle_stack), 0, 1, 1, .apply = rifle_stack_apply,
       .help = "Rifle and assault-rifle bullets share one inventory slot like other ammunition. Off: each pickup takes its own slot, as in the original." },
-    { SP_GAMEPLAY, "Extra enemies", V(g_enemy_opts.extra), 0, 3, 1, extras, .help = "More enemies of the types a room already has. Next room.", .group = "ENEMIES" },
-    { SP_GAMEPLAY, "Rearranged enemies", V(g_enemy_opts.place), 0, 1, 1, .help = "Free-roaming enemies start elsewhere in their room (from the seed). Story, cutscene and boss enemies stay. Next room." },
-    { SP_GAMEPLAY, "Enemy randomizer", V(g_enemy_opts.rand), 0, 1, 1, .help = "Enemies become other types (from the seed), from anywhere in the game, within each room's limits. Bosses stay. Next room." },
-    { SP_GAMEPLAY, "Randomizer variety", V(g_enemy_opts.variety), 0, 1, 1, varieties,
-      .help = "Wild: every kind that fits the room, a different one for each enemy where possible, Tyrants and bats included. Mild: two common kinds per room. Next room." },
-    { SP_GAMEPLAY, "Randomize event enemies", V(g_enemy_opts.events), 0, 1, 1,
+    { SP_GAMEPLAY, "Extra item boxes and herbs", V(g_config.extra_objects), 0, 1, 1, .flags = SET_NEXT_ROOM,
+      .help = "Adds extra item boxes, blue herb planters, and an Antarctica typewriter to selected rooms. Useful with randomizers." },
+    { SP_GAMEPLAY, "BioRand randomizer pack", V(g_config.biorand), 0, 1, 1, .locked = biorand_locked, .group = "BIORAND",
+      .help = "Play a locally generated BioRand pack placed in mods/biorand (RM_*.RDX and log_pl0.txt). Change at the title screen; saves remember whether they belong to BioRand." },
+    { SP_GAMEPLAY, "Rescan BioRand folder", NULL, .flags = SET_ACTION | SET_NOW, .apply = biorand_scan,
+      .help = "Rescan mods/biorand for a locally generated BioRand pack and spoiler log." },
+    { SP_GAMEPLAY, "Extra enemies", V(g_enemy_opts.extra), 0, ENEMY_EXTRA_MAX, 1, extras, .flags = SET_NEXT_ROOM,
+      .help = "Adds extra enemies in walkable spots away from doors (persistent once killed). Uses randomized kinds when the randomizer is on. Next room.", .group = "ENEMIES" },
+    { SP_GAMEPLAY, "Rearranged enemies", V(g_enemy_opts.place), 0, 1, 1, .flags = SET_NEXT_ROOM, .help = "Free-roaming enemies start elsewhere in their room (from the seed), on validated ground. Story, cutscene and boss enemies stay. Next room." },
+    { SP_GAMEPLAY, "Enemy randomizer", V(g_enemy_opts.rand), 0, 1, 1, .flags = SET_NEXT_ROOM, .help = "Enemies become other types (from the seed), from anywhere in the game, within each room's limits. Bosses stay. Next room." },
+    { SP_GAMEPLAY, "Randomizer variety", V(g_enemy_opts.variety), 0, 2, 1, varieties, .set = variety_set, .flags = SET_NEXT_ROOM,
+      .help = "Wild: every kind that fits, Tyrants and fliers included. Mild: two common kinds per room. Custom: set individual spawn weights per enemy type. Next room." },
+    { SP_GAMEPLAY, "Types per room", V(g_enemy_opts.types), 0, ENEMY_TYPES_MAX, 1, types_names, .flags = SET_NEXT_ROOM,
+      .help = "Limits how many distinct enemy kinds appear in a randomized room (target in Wild/Custom, cap in Mild). No limit lets each record roll freely. Next room." },
+    { SP_GAMEPLAY, "Randomize event enemies", V(g_enemy_opts.events), 0, 1, 1, .flags = SET_NEXT_ROOM,
       .help = "Enemies that rooms show later or that events drive change too: the ones events animate get another look of their own kind, so the scenes still play. Next room." },
     { SP_GAMEPLAY, "Enemy seed", V(g_enemy_opts.seed), 0, 99999, 1, .fmt = "%d", .help = "Placements and randomizer: the same seed gives the same rooms." },
+    { SP_GAMEPLAY, "Language", NULL, 0, 0, 1, .get = lang_get, .set = lang_set, .name = lang_name, .count = lang_n, .locked = lang_locked, .shown = lang_any, .group = "LANGUAGE",
+      .help = "The game's text. Applies from the next screen. Import other editions in Field Dossier > Gameplay." },
+    { SP_GAMEPLAY, "Subtitles", NULL, 0, 0, 1, .get = subs_get, .set = subs_set, .name = subs_name, .count = subs_n, .locked = subs_locked, .shown = lang_any,
+      .help = "Cutscene subtitles in an installed language that includes them, even while playing in English or another language." },
+    { SP_GAMEPLAY, "Translated pictures", V(g_lang_pictures), 0, 1, 1, .shown = lang_any,
+      .help = "Pictures with writing in the selected language (menus, maps, labels). Off keeps the English ones for HD texture packs." },
+    { SP_GAMEPLAY, "Translated title call", V(g_lang_voices), 0, 1, 1, .shown = voices_any,
+      .help = "Voice recordings in the selected language where its disc includes them (the title screen call). Off plays the original." },
 
     { SP_CONTROLS, "Input source", V(g_input_source), 0, 2, 1, sources, .apply = bind_apply_source,
       .help = "Which devices play in this window. Auto: keyboard/mouse and gamepad, while the window has focus. Keyboard/mouse "
@@ -417,9 +488,12 @@ const Setting g_settings[] = {
     { SP_CONTROLS, "Vibration strength", V(g_config.rumble), 0, 100, 10, .fmt = "%d%%",
       .help = "How strongly the gamepad rumbles. Turn vibration on or off in the game's OPTION menu (VIBRATION), which a gamepad with rumble makes available." },
     { SP_CONTROLS, "Mouse in menus", V(g_menu_mouse.on), 0, 1, 1, .help = "Inventory, item box, map, files and these menus: point, left click selects, right click goes back." },
-    { SP_CONTROLS, "Fixed camera controls", V(g_modern_on), 0, 1, 1, fixed_cam_names,
+    { SP_CONTROLS, "Button icons", V(g_button_icons), 0, 4, 1, (const char* const[]){ "Automatic", "Xbox", "PlayStation", "Switch", "Keyboard and mouse" },
+      .help = "Controller or keyboard button prompts shown in native menus. Automatic matches the connected controller or last used device." },
+    { SP_CONTROLS, "Fixed camera controls", V(g_modern_on), 0, 2, 1, fixed_cam_names,
       .help = "Modern: the left stick or the d-pad (arrow keys) walks where it points on screen, pushed far or with run it runs; "
-              "aiming and the quick turn as Classic. Not in third person." },
+              "aiming and the quick turn as Classic. Combined: the stick and arrow keys as Modern, the gamepad's d-pad as Classic "
+              "(tank). Not in third or first person." },
 
     { SP_TPS, "Camera mode", V(g_tps.on), 0, 2, 1, camera_mode_names, .help = "Original, over-the-shoulder third person, or first person with free aim. Scripted events, doors and menus use the original camera.", .group = "CAMERA" },
     { SP_TPS, "Mouse/keyboard camera", V(g_tps.free_cam), 0, 1, 1, free_cam_names,
@@ -448,11 +522,11 @@ const Setting g_settings[] = {
     { SP_TPS, "Move while aiming", V(g_tps.aim_walk), 0, 1, 1,
       .help = "Walk slowly while aiming, attacking or reloading instead of standing still." },
     { SP_TPS, "HUD", V(g_tps.hud), 0, 2, 1, (const char* const[]){ "Auto", "On", "Off" }, .group = "HUD",
-      .help = "Show health and loaded ammunition in a corner. Auto shows them only with the over-the-shoulder or first-person camera." },
+      .help = "Show health, equipped weapon icon, loaded rounds and spare reload ammo in a corner. Auto shows the HUD with over-the-shoulder or first-person camera." },
     { SP_TPS, "HUD position", V(g_tps.hud_side), 0, 2, 1, (const char* const[]){ "Follow shoulder", "Left", "Right" },
-      .help = "Follow shoulder places the HUD on the camera's shoulder side, or on the right with fixed cameras." },
+      .help = "Follow shoulder places the HUD on the over-the-shoulder camera's shoulder side, or on the right with fixed cameras and first person." },
     { SP_TPS, "HUD style", V(g_tps.hud_style), 0, 1, 1, (const char* const[]){ "Weapon circle", "Minimal" },
-      .help = "Weapon circle and Minimal use the same brass frame; Minimal keeps the text and the bar compact." },
+      .help = "Weapon circle shows a brass-rimmed disc with weapon icon, loaded count, health arc and spare ammo beside it; Minimal shows a compact health bar with icon and loaded/spare counts." },
     { SP_TPS, "Gamepad controls", V(g_tps.pad_modern), 0, 1, 1, tps_pad_names, .group = "GAMEPAD",
       .help = "Modern: the left stick walks where it points seen from the camera, the right stick turns the camera and aims; "
               "own bindings (CONTROLS, gamepad, Third person). Classic: tank controls through the game's buttons, the camera behind." },
@@ -466,10 +540,32 @@ const Setting g_settings[] = {
     { SP_AUDIO, "Music and voice", V(g_config.music_volume), 0, 100, 5, .fmt = "%d%%", .apply = apply_volume },
     { SP_AUDIO, "Sound effects", V(g_config.sfx_volume), 0, 100, 5, .fmt = "%d%%", .apply = apply_volume },
 
-    { SP_APPEAR, "You appear as", NULL, 0, 0, 1, .get = chr_get, .set = chr_set, .name = chr_name, .count = appear_count, .help = "Your model during gameplay and cutscenes." },
+    { SP_APPEAR, "Character models", V(g_appear_per), 0, 1, 1, model_modes, .group = "PLAYER MODEL",
+      .help = "Same for both: one model for whoever you play. Per character: separate models for Claire and Chris (Steve and Wesker stay themselves)." },
+    { SP_APPEAR, "You appear as", NULL, 0, 0, 1, .get = chr_get, .set = chr_set, .name = chr_name, .count = appear_count, .shown = per_off, .help = "Your model during gameplay and cutscenes." },
+    { SP_APPEAR, "Claire's model", NULL, 0, 0, 1, .get = claire_get, .set = claire_set, .name = chr_name, .count = appear_count, .shown = per_on,
+      .help = "Claire's model during her gameplay and cutscenes (and when she appears in Chris's cutscenes)." },
+    { SP_APPEAR, "Chris's model", NULL, 0, 0, 1, .get = chris_get, .set = chris_set, .name = chr_name, .count = appear_count, .shown = per_on,
+      .help = "Chris's model during his gameplay and cutscenes (and when he appears in Claire's cutscenes)." },
     { SP_APPEAR, "Use gender-matched animations", V(g_appear_anim), 0, 1, 1, .help = "A man shown while you play Claire walks, aims and fights with Chris's motions; a woman shown while you play a man, with Claire's." },
     { SP_APPEAR, "Swapped model in cutscenes", V(g_appear_cutscene), 0, 1, 1, .help = "Off: cutscenes show the real Claire or Chris, with their own hands, faces and voice; the swapped model is back when you are in control again." },
-    { SP_APPEAR, "Talking faces in cutscenes (experimental)", V(g_appear_face), 0, 1, 1, .help = "The swapped model moves its mouth with the lines, with the story cast's own faces (a player file shown there becomes the same character's cutscene model). From the next room with a cutscene on." },
+    { SP_APPEAR, "Talking faces in cutscenes (experimental)", V(g_appear_face), 0, 1, 1, .flags = SET_NEXT_ROOM, .help = "The swapped model moves its mouth with the lines, with the story cast's own faces (a player file shown there becomes the same character's cutscene model). From the next room with a cutscene on." },
+    { SP_APPEAR, "Randomize cutscene cast", V(g_enemy_opts.cast), 0, 1, 1, .flags = SET_NEXT_ROOM, .group = "CUTSCENE CAST",
+      .help = "Swap story characters in cutscenes using the Enemy seed (GAMEPLAY). Applies next room." },
+    { SP_APPEAR, "Cast model pool", V(g_enemy_opts.cast_all), 0, 2, 1, cast_pools, .shown = cast_on, .flags = SET_NEXT_ROOM,
+      .help = "Cutscene models have animated faces. All models includes creatures and zombies. Custom uses only the models you check." },
+    { SP_APPEAR, "Cast assignment", V(g_enemy_opts.cast_assign), 0, 1, 1, cast_assigns, .shown = cast_on, .flags = SET_NEXT_ROOM,
+      .help = "Keep one model per story character across the campaign, or re-roll for each cutscene room using the Enemy seed." },
+    { SP_APPEAR, "Include imported models", V(g_enemy_opts.cast_imports), 0, 1, 1, .shown = cast_imports_shown, .flags = SET_NEXT_ROOM,
+      .help = "Include characters imported from Resident Evil Outbreak File #2 in the cutscene cast pool." },
+    { SP_APPEAR, "Randomize cutscene monsters", NULL, 0, 1, 1, .get = cast_alone_get, .set = cast_alone_set, .shown = cast_off_shown, .flags = SET_NEXT_ROOM,
+      .help = "Randomize monsters seen only in cutscenes (e.g. Nosferatu, Tyrant, scene zombies) even while story characters stay themselves." },
+    { SP_APPEAR, "Cutscene enemy models", V(g_enemy_opts.cast_enemy), 0, 3, 1, cast_enemies, .shown = cast_enemy_shown, .flags = SET_NEXT_ROOM,
+      .help = "What monsters seen only in cutscenes become. All enemies and Custom pick from monsters, Same as cast uses the Cast model pool, Off keeps them as they are." },
+    { SP_APPEAR, "Randomize voice lines", V(g_enemy_opts.voices), 0, 1, 1, .flags = SET_NEXT_ROOM, .group = "CUTSCENE VOICES",
+      .help = "Characters shown as another story character say deterministic random lines from that character with synced lips; enemy models make their own creature sounds." },
+    { SP_APPEAR, "Talking mouths", V(g_voice_mouths), 0, 1, 1, .shown = voices_on, .flags = SET_NEXT_ROOM,
+      .help = "With Randomize voice lines on, also animate the speaker's mouth on lines where the original script did not set lips when the speaker is certain." },
 
     { SP_CHEATS, "Battle Game unlocked", V(g_config.battle_unlocked), 0, 1, 1,
       .group = "TITLE UNLOCKS", .help = "The title menu offers BATTLE GAME without a finished playthrough, with all five characters. Normally unlocked by finishing the campaign. Applies on entering the title menu. Saves and records stay as they are; off: as the original." },

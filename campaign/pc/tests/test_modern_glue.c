@@ -1,6 +1,8 @@
 /* Exercise the real fixed-camera input hook with game state, without a renderer. */
 #include <ps2/veronica/prog/types.h>
 #include <ps2/veronica/prog/main.h>
+#include <ps2/veronica/prog/player.h>
+#include <ps2/veronica/prog/playpch.h>
 #include "../src/host/modern.h"
 #include <stdio.h>
 #include <string.h>
@@ -11,12 +13,14 @@ BH_PWORK ply;
 BH_PWORK* plp = &ply;
 static SYS_WORK state;
 SYS_WORK* sys = &state;
+const WPN_TAB WpnTab[23] = { [1] = { .flg = 0x800 } };
 int tps_on;
 static float move_x, move_y;
-static int analog, available = 1;
+static int analog, dpad, free_aim, available = 1;
 static uint64_t frame = 100;
-int pad_move_dir(float* x, float* y) { *x = move_x; *y = move_y; return analog; }
+int pad_move_dir(float* x, float* y, int* dp) { *x = move_x; *y = move_y; *dp = dpad; return analog; }
 int pad_quickturn_held(void) { return 0; }
+int pad_free_aim(void) { return free_aim; }
 uint64_t gs_frame_count(void) { return frame; }
 int pc_in_play(const BH_PWORK* p, int scope) { (void)p; (void)scope; return available; }
 unsigned int modern_pad(unsigned int pad);
@@ -33,7 +37,8 @@ static void reset(void)
     cam.mtx = &camera_matrix;
     plp = &ply; ply.mode0 = 1; sys->sp_flg = 0x41;
     ((float*)cam.mtx)[0] = 1;
-    available = 1; analog = 0; move_x = move_y = 0;
+    available = 1; analog = 0; dpad = 0; free_aim = 0; move_x = move_y = 0;
+    g_modern_on = MODERN_COMBINED;
     modern_pad(0); /* release the previous direction */
     frame += 100;
 }
@@ -78,6 +83,25 @@ int main(void)
     frame++; ply.mode2 = 0; modern_pad(0x1); modern_player(); CHECK(ply.ay != 0);
     frame++; cam.ncut = 2; ((float*)cam.mtx)[0] = 1; ply.ay = 0;
     modern_pad(0x1); modern_player(); CHECK(ply.ay == 0);
+
+    /* Combined (default): gamepad d-pad keeps Classic tank controls; stick and arrow keys stay modern. */
+    reset(); move_x = 1; dpad = 1;
+    CHECK(modern_pad(0x8) == 0x8);
+    modern_player(); CHECK(ply.ay == 0);
+    g_modern_on = 1;
+    CHECK(modern_pad(0x8) == 0x1);
+    modern_player(); CHECK(ply.ay < 0);
+
+    /* Free aim drops the lock-on turn (and resets dual-weapon aim offsets) in aiming mode. */
+    reset();
+    {
+        PP_WORK exp = { .arm_dl = 123, .arm_dr = -456 };
+        ply.mode1 = 1; ply.flg = 0x100000; ply.stflg = 0x800; ply.wpnr_no = 1; ply.exp2 = (unsigned char*)&exp;
+        free_aim = 1;
+        modern_player();
+        CHECK((ply.flg & 0x100000) == 0 && (ply.stflg & 0x800) == 0);
+        CHECK(exp.arm_dl == 0 && exp.arm_dr == 0);
+    }
 
     printf("modern glue: %d failures\n", fails);
     return fails != 0;

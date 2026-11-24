@@ -17,6 +17,8 @@
 #include <ps2/veronica/prog/ps2_SystemLoadScreen.h>
 #include <ps2/veronica/prog/ps2_SystemSaveScreen.h>
 #include "../src/host/savestore.h"
+#include "../src/host/biorand.h"
+#include "../src/host/lang.h"
 #include "../src/host/fileio.h"
 #include "../src/host/save_paths.h"
 
@@ -31,10 +33,108 @@ static SaveEntry* saves;    /* the files of its rows; a row past them is a new s
 static int saves_n, rows_n;
 static SELECTFILEINFO* rows;
 
+/* A placed typewriter's location text ("Extra item boxes and herbs"): a save made there has it in its
+   data (savestore.h SAVE_TEXT_ITM); the rows show it in place of the room's name, typed in as a name
+   is after a save. Kept by row of the row array it was noted for (native rows or memory card window). */
+static const SELECTFILEINFO* txt_rows;
+static char (*txt)[SAVE_TEXT_BYTES];
+static int txt_n;
+
+static void txt_reset(const SELECTFILEINFO* r, int n)
+{
+    txt_rows = r;
+    txt_n = 0;
+    free(txt);
+    if ((txt = calloc(n > 0 ? n : 1, sizeof(*txt)))) txt_n = n;
+}
+
+void pc_save_row_note(SELECTFILEWINDOW* win, int row, const SAVEFILE* f)
+{
+    if (win->pRecordTop != txt_rows || win->lRecordMax > txt_n) txt_reset(win->pRecordTop, win->lRecordMax);
+    if (row >= 0 && row < txt_n) savestore_text(txt[row], (const unsigned char*)f);
+}
+
+static const char* row_text(const SELECTFILEINFO* p)
+{
+    uintptr_t i = ((uintptr_t)p - (uintptr_t)txt_rows) / sizeof(*p);
+    return txt && i < (uintptr_t)txt_n && txt[i][0] ? txt[i] : NULL;
+}
+
+/* UTF-8 -> the game font's codes (lang.h pc_glyph_next: a letter the font lacks as the plain letter or '?'), 0xFFFF end */
+static int glyphs(const char* s, unsigned short* mes, int max)
+{
+    int i = 0, c;
+    while (i < max - 1 && (c = pc_glyph_next(&s)) >= 0) mes[i++] = c ? c : 0xFF01;
+    mes[i] = 0xFFFF;
+    return i;
+}
+
 int pc_saves_native(int state)
 {
     if (state == 0) native = save_native();
     return native;
+}
+
+/* A placed typewriter's location text, or a room the save menu has no name for (e.g. F2 Save Now
+   outside a named save room): count its letters instead of letting retail read Type_Space[-1]. */
+int pc_save_text_len(const SELECTFILEINFO* p)
+{
+    unsigned short mes[SAVE_TEXT_BYTES];
+    const unsigned short* d;
+    const char* s;
+    int n = 0;
+    if (!p) return -1;
+    if ((s = row_text(p))) return glyphs(s, mes, SAVE_TEXT_BYTES);
+    if (p->saveroom || !sys || !sys->mes_sp) return -1;
+    for (d = (const unsigned short*)((const char*)sys->mes_sp + sys->mes_sp[216]); *d != 0xFFFF; d++) {
+        if (*d == 0xFF02 || *d == 0xFF03) d++;
+        else if (*d == 0xFF01 || *d < 0xFE00) n++;
+    }
+    return n;
+}
+
+int pc_save_text_draw(const SELECTFILEINFO* p, float y, unsigned int col, int count)
+{
+    unsigned short buf[SAVE_TEXT_BYTES], *mes = buf;
+    const char* s = p ? row_text(p) : NULL;
+    void* keep = sys->mes_tp;
+    float sx = FontScaleX, w;
+    if (!p || !sys || !sys->mes_sp) return 0;
+    if (s) glyphs(s, buf, SAVE_TEXT_BYTES);
+    else mes = (unsigned short*)((char*)sys->mes_sp + sys->mes_sp[p->saveroom + 215 + 1]);
+    if ((w = bhMesLen(mes)) > 256.0f) FontScaleX = sx * 256.0f / w;
+    sys->mes_tp = mes;
+    bhDispMessageEx(352.0f, y, -1.0f, 2, 0, col, count);
+    sys->mes_tp = keep;
+    FontScaleX = sx;
+    return 1;
+}
+
+/* The memory card screens' messages (DispMessageSelect, DispLoadMessageSelect) are placed for the US words; a longer
+   translation's line (a question at x 240, a slot label at 423) ran past the screen's right side. Such a message is
+   moved left until its widest line (its letters, not trailing spaces) ends at keep_in: 610, where the US text's
+   furthest ends, so no English line moves. */
+static float keep_in;
+void pc_mes_keep_in(float right) { keep_in = right; }
+float pc_mes_fit_x(float x, const unsigned short* dp)
+{
+    float w = 0, ink = 0, widest = 0;
+    if (keep_in <= 0) return x;
+    for (;; dp++) {
+        unsigned short c = *dp;
+        if (c == 0xFFFF || c == 0xFF00) {
+            if (ink > widest) widest = ink;
+            if (c == 0xFFFF) break;
+            w = ink = 0;
+        }
+        else if (c == 0xFF02 || c == 0xFF03) dp++;   /* (its operand) */
+        else if (c == 0xFF01) w += pc_font_space();
+        else if (c == 0xFF04) w += 28.0f;
+        else if (c < 0xFE00) ink = w += bhGetFontSize(c);
+    }
+    w = keep_in - widest * FontScaleX;
+    if (w < 16.0f) w = 16.0f;   /* (wider than the screen: from its left) */
+    return w < x ? w : x;
 }
 
 /* the rows in save number order, a new save last when saving; the cursor on the new save
@@ -58,6 +158,8 @@ void pc_save_list(SELECTFILEWINDOW* win, MEMORYCARDSTATE* mc, int saving)
         rows[i].saveroom = RoomNameSwitch(e->rom_no + e->stg_no * 100);   /* as mcGetPortSelectDirInfo */
         if (e->written >= saves[cur].written) cur = i;
     }
+    txt_reset(rows, n);
+    for (i = 0; i < saves_n && txt; i++) memcpy(txt[i], saves[i].text, SAVE_TEXT_BYTES);
     if (n > saves_n) rows[saves_n].FileNumber = savestore_next(dir);
     if (saving) cur = n - 1;
     win->pRecordTop = rows;
@@ -72,15 +174,15 @@ void pc_save_list(SELECTFILEWINDOW* win, MEMORYCARDSTATE* mc, int saving)
 
 /* mcDisplayFileSelectWindow's header (MEMORY CARD and the slot, messages 463 and 464 + port, at
    y 32): with native saves "Load Game" / "Save Game" instead, as a message in the game's font
-   (codes: ASCII - 32, 0xFF01 a space) drawn by bhDispMessage the same way, centred above the list */
+   (codes: lang.h pc_glyph_next, 0xFF01 a space) drawn by bhDispMessage the same way, centred above the list */
 int pc_save_header(void)
 {
-    const char* s = listing_save ? "Save Game" : "Load Game";
-    unsigned short mes[16];
+    const char* s = tr(listing_save ? "Save Game" : "Load Game");
+    unsigned short mes[48];
     void* keep = sys->mes_tp;
-    int i;
+    int i = 0, c;
     if (!native) return 0;
-    for (i = 0; s[i]; i++) mes[i] = s[i] == ' ' ? 0xFF01 : s[i] - 32;
+    while (i < 47 && (c = pc_glyph_next(&s)) >= 0) mes[i++] = c ? c : 0xFF01;
     mes[i] = 0xFFFF;
     sys->mes_tp = mes;
     bhDispMessage(320.0f - bhMesLen(mes) / 2, 32.0f, 0, 2, 0, 0, 0);
@@ -111,6 +213,7 @@ int pc_save_card(MEMORYCARDSTATE* mc)
         snprintf(path, sizeof(path), "%s/%s", save_native_dir(), i >= 0 && i < saves_n ? saves[i].file : "");
         if (i >= 0 && i < saves_n && mc->ulFileSize == SAVE_DATA_BYTES && savestore_read(path, d)) {
             memcpy(mc->vpAddr, d, SAVE_DATA_BYTES);
+            pc_biorand_save_apply(d);
             mc->ulState = 9;
             host_log("saves: loaded %s\n", saves[i].file);
         } else {
@@ -125,6 +228,7 @@ int pc_save_card(MEMORYCARDSTATE* mc)
         if (num) {
             mc->ulState = 10;
             rows[i].FileNumber = num;
+            if (txt && i >= 0 && i < txt_n) savestore_text(txt[i], (const unsigned char*)mc->vpAddr);
             host_log("saves: wrote save %03d%s\n", num, old ? " (overwritten)" : "");
         } else {
             mc->ulState = 0;

@@ -40,9 +40,9 @@ extern int enemy_room_gen;              /* enemyopt_glue.c */
 #define VSETS 4                         /* variants with their own motion set in one room */
 
 int pc_variant_n;                       /* variant enemies in this room */
-static unsigned short slot_var[128];    /* slot -> variant id (the variant's body) */
-static float steps[128], dam_left[128];
-static int death_t[128];                /* ticks since it died (flg & 2), -1 alive */
+static unsigned short slot_var[PC_ENE_SLOTS];    /* slot -> variant id (the variant's body) */
+static float steps[PC_ENE_SLOTS], dam_left[PC_ENE_SLOTS];
+static int death_t[PC_ENE_SLOTS];                /* ticks since it died (flg & 2), -1 alive */
 static short vmodel[VSLOTS] = { -1, -1 };   /* catalogue model shown in variant display slot k */
 static struct { unsigned short id; MN_WORK set[512]; } mset[VSETS];
 static struct { unsigned short id; signed char bank; } vbank[VARIANT_MAX];
@@ -53,7 +53,7 @@ static BH_PWORK* pre_pl;
 static BH_PWORK* root(BH_PWORK* ep)
 {
     int k;
-    for (k = 0; k < 3 && ep->lkwkp && (BH_PWORK*)ep->lkwkp >= ene && (BH_PWORK*)ep->lkwkp < ene + 128; k++) ep = (BH_PWORK*)ep->lkwkp;
+    for (k = 0; k < 3 && ep->lkwkp && (BH_PWORK*)ep->lkwkp >= ene && (BH_PWORK*)ep->lkwkp < ene + PC_ENE_SLOTS; k++) ep = (BH_PWORK*)ep->lkwkp;
     return ep;
 }
 
@@ -62,7 +62,7 @@ static const EnemyVariant* of(BH_PWORK* ep)
 {
     const EnemyVariant* v;
     BH_PWORK* r;
-    if (ep < ene || ep >= ene + 128) return NULL;
+    if (ep < ene || ep >= ene + PC_ENE_SLOTS) return NULL;
     r = root(ep);
     if (!slot_var[r - ene] || !(r->flg & 0x1)) return NULL;   /* (a body keeps its slot until the room is left) */
     v = variant_by_id(slot_var[r - ene]);
@@ -377,9 +377,9 @@ static void head_show(void)
 static int headless(BH_PWORK* r)
 {
     BH_PWORK* part;
-    if (!pc_head_blowoff_on() || r < ene || r >= ene + 128 || r->id != 1 || (r->flg & 0x80) || !r->exp0 || *(int*)(r->exp0 + 0x78) != -1) return 0;
+    if (!pc_head_blowoff_on() || r < ene || r >= ene + PC_ENE_SLOTS || r->id != 1 || (r->flg & 0x80) || !r->exp0 || *(int*)(r->exp0 + 0x78) != -1) return 0;
     part = *(BH_PWORK**)(r->exp0 + 0x10);
-    return !(part >= ene && part < ene + 128 && part->mode0 == 3);
+    return !(part >= ene && part < ene + PC_ENE_SLOTS && part->mode0 == 3);
 }
 
 /* MdlPut.c bhPutModel, around drawing ep: hide 1 = its head hidden for the draw (1 returned: the draw is
@@ -387,7 +387,7 @@ static int headless(BH_PWORK* r)
 int pc_zombie_head(BH_PWORK* ep, int hide)
 {
     if (!hide) { head_show(); return 0; }
-    if (ep < ene || ep >= ene + 128 || ep->id != 1 || !headless((ep->flg & 0x80) ? (BH_PWORK*)ep->lkwkp : ep) ||
+    if (ep < ene || ep >= ene + PC_ENE_SLOTS || ep->id != 1 || !headless((ep->flg & 0x80) ? (BH_PWORK*)ep->lkwkp : ep) ||
         !ep->mlwP || ep->mlwP->obj_num <= 11)
         return 0;
     head_hide(ep->mlwP, 11);
@@ -430,7 +430,7 @@ int pc_variant_sound(int enemy_no, int se, signed char* bank)
     static int trace = -1;
     const EnemyVariant* v;
     int k, i;
-    if (enemy_no < 0 || enemy_no >= 127 || !(v = of(&ene[enemy_no]))) return se;
+    if (enemy_no < 0 || enemy_no >= PC_ENE_SLOTS || !(v = of(&ene[enemy_no]))) return se;   /* (PC_ENE_SLOTS: an effect's request) */
     if (trace < 0) trace = getenv("RECVX_TRACE_SND") != NULL;
     if (trace)   /* for sound_map: which of its base's programs it plays when (RECVX_TRACE_SND) */
         host_log("variant: slot %d (%s) motion %d frame %d requests sound %#x (program %d)\n", enemy_no, v->name, ene[enemy_no].mtn_no,
@@ -456,4 +456,4 @@ const ActorModel* variant_base(const EnemyVariant* v)
     return NULL;
 }
 
-int variant_of_slot(int slot) { return slot >= 0 && slot < 128 && (ene[slot].flg & 0x1) ? slot_var[slot] : 0; }
+int variant_of_slot(int slot) { return slot >= 0 && slot < PC_ENE_SLOTS && (ene[slot].flg & 0x1) ? slot_var[slot] : 0; }

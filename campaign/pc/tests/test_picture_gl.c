@@ -156,6 +156,41 @@ static void crop(void)
     CHECK(memcmp(reference,pixels,sizeof(reference))==0,"AA uses physical texels and respects cropped edges");
 }
 
+static void dithering(GLuint vs)
+{
+    float data[N * N * 4];
+    GLuint dith_prog = glCreateProgram(), dfs = shader(GL_FRAGMENT_SHADER, present_fs_dith);
+    GLint linked = 0;
+    glAttachShader(dith_prog, vs); glAttachShader(dith_prog, dfs); glLinkProgram(dith_prog);
+    glGetProgramiv(dith_prog, GL_LINK_STATUS, &linked);
+    CHECK(linked, "dithering presentation shader links");
+    if (linked) {
+        GLuint saved = program;
+        int n10 = 0, n11 = 0;
+        program = dith_prog;
+        /* Pure black and white stay exact under IGN rounding. */
+        fill(data, N, 0.f, 0.f, 0.f);
+        render(data, N, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1);
+        for (int i = 0; i < N * N; ++i)
+            CHECK(pixels[4*i] == 0 && pixels[4*i+1] == 0 && pixels[4*i+2] == 0, "dither preserves pure black");
+        fill(data, N, 1.f, 1.f, 1.f);
+        render(data, N, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1);
+        for (int i = 0; i < N * N; ++i)
+            CHECK(pixels[4*i] == 255 && pixels[4*i+1] == 255 && pixels[4*i+2] == 255, "dither preserves pure white");
+        /* A half-step gray (10.5/255) distributes across 10 and 11 instead of quantizing uniformly. */
+        fill(data, N, 10.5f / 255.f, 10.5f / 255.f, 10.5f / 255.f);
+        render(data, N, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1);
+        for (int i = 0; i < N * N; ++i) {
+            if (pixels[4*i] == 10) ++n10;
+            else if (pixels[4*i] == 11) ++n11;
+            else CHECK(0, "dithered half-step stays within adjacent 8-bit codes");
+        }
+        CHECK(n10 > N * N / 4 && n11 > N * N / 4, "dither spreads fractional gray across both neighboring codes");
+        program = saved;
+    }
+    glDeleteShader(dfs);
+}
+
 int main(void)
 {
     SDL_Window *window;
@@ -187,7 +222,7 @@ int main(void)
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
-        colors(); diagonal(); crop();
+        colors(); diagonal(); crop(); dithering(vs);
         glDeleteTextures(1,&input_tex); glDeleteTextures(1,&output_tex);
         glDeleteFramebuffers(1,&fbo);
     }

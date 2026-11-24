@@ -38,18 +38,24 @@ void tps_camera_hotkeys(void)
 static int mouse_x, mouse_y;   /* 1/64 pixel, atomic */
 static int buttons;            /* SDL button mask, atomic */
 static int relative;
+static int fixed_play;         /* fixed cameras: the player has control, no menu or overlay, focused */
+static Uint64 focus_ns;        /* when the window got focus: the click that focused it is no game press */
 
 void tps_input_event(const void* e)
 {
     const SDL_Event* ev = (const SDL_Event*)e;
-    if (!relative) return;
     switch (ev->type) {
+    case SDL_EVENT_WINDOW_FOCUS_GAINED:
+        focus_ns = ev->common.timestamp;
+        break;
     case SDL_EVENT_MOUSE_MOTION:
+        if (!relative) break;
         __atomic_add_fetch(&mouse_x, (int)(ev->motion.xrel * 64.0f), __ATOMIC_RELAXED);
         __atomic_add_fetch(&mouse_y, (int)(ev->motion.yrel * 64.0f), __ATOMIC_RELAXED);
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
-        __atomic_or_fetch(&buttons, SDL_BUTTON_MASK(ev->button.button), __ATOMIC_RELAXED);
+        /* a press made in a menu (or the one that closes it) stays the menu's until let go */
+        if (relative || (fixed_play && ev->common.timestamp - focus_ns > 300000000)) __atomic_or_fetch(&buttons, SDL_BUTTON_MASK(ev->button.button), __ATOMIC_RELAXED);
         break;
     case SDL_EVENT_MOUSE_BUTTON_UP:
         __atomic_and_fetch(&buttons, ~SDL_BUTTON_MASK(ev->button.button), __ATOMIC_RELAXED);
@@ -58,11 +64,16 @@ void tps_input_event(const void* e)
 }
 
 /* the cursor is captured while the window has focus, third person is on, the mouse plays (not
-   "Gamepad only") and no overlay window or menu with mouse support (menu_mouse.c) is open */
+   "Gamepad only") and no overlay window or menu with mouse support (menu_mouse.c) is open.
+   Fixed cameras: the buttons play the keyboard set's mouse bindings (pad.c) when pressed while the
+   player has control; a menu screen, an overlay or focus loss lets go of them. */
 void tps_update_mouse_mode(void* window, int overlay_open)
 {
-    int want = g_tps.on && !overlay_open && !menu_mouse_cursor() && g_input_source != INPUT_PAD
-               && (SDL_GetWindowFlags((SDL_Window*)window) & SDL_WINDOW_INPUT_FOCUS);   /* alt-tab releases */
+    int free = !overlay_open && g_input_source != INPUT_PAD && (SDL_GetWindowFlags((SDL_Window*)window) & SDL_WINDOW_INPUT_FOCUS);   /* alt-tab releases */
+    int want = g_tps.on && free && !menu_mouse_cursor();
+    int menu = g_menu_mouse.active && !g_menu_mouse.play;   /* also with "Mouse in menus" off */
+    fixed_play = free && !menu && g_menu_mouse.play;
+    if (!want && (!free || menu)) __atomic_store_n(&buttons, 0, __ATOMIC_RELAXED);
     if (want == relative) return;
     relative = want;
     SDL_SetWindowRelativeMouseMode((SDL_Window*)window, want);
@@ -157,5 +168,5 @@ int tps_kbm_touched(void)
     return 0;
 }
 
-/* mouse buttons held while the mouse is captured (bindings to mouse buttons) */
+/* mouse buttons held while the mouse is captured, or pressed in fixed-camera play (bindings to mouse buttons) */
 int tps_mouse_buttons(void) { return __atomic_load_n(&buttons, __ATOMIC_RELAXED); }

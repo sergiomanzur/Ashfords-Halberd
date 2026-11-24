@@ -11,6 +11,10 @@ static int busy;
 static int hash_state;
 static unsigned char build_hash[32];
 void pad_snapshot_reset(void);
+void placer_textures_released(void);
+void actor_snapshot_before_restore(void);
+void actor_snapshot_after_restore(void);
+void lang_snapshot_after_restore(void);
 int room_snapshot_busy(void) { return __atomic_load_n(&busy, __ATOMIC_ACQUIRE); }
 int room_snapshot_available(void)
 {
@@ -66,11 +70,15 @@ int room_snapshot_restore(const char* path)
     audio = snapshot_audio_prepare(part(&image, SNAP_AUDIO));
     if (!audio || !snapshot_render_restore(part(&image, SNAP_RENDER))) { result = SNAP_IO_ERROR; goto done; }
     /* These routines cannot allocate/fail after successful validation. */
+    actor_snapshot_before_restore();
     if (!snapshot_platform_restore(part(&image, SNAP_PLATFORM)) || !snapshot_core_restore(part(&image, SNAP_CORE)) ||
         !snapshot_preferences_restore(part(&image, SNAP_GLUE))) {
         result = SNAP_INVALID; goto done;
     }
+    actor_snapshot_after_restore();
+    lang_snapshot_after_restore();
     snapshot_audio_commit(audio); audio = NULL;
+    placer_textures_released();
     pad_snapshot_reset();
     result = SNAP_OK;
 done:

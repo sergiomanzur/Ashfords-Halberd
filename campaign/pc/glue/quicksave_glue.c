@@ -22,7 +22,7 @@ static int blocked(void)
         (sys->st_flg & 0x200) || (sys->cb_flg & 0x600000) || plp->mode1 != 0 ||
         !((plp->mode2 <= 11 && !(plp->flg & 0x10000)) || plp->mode2 == 13)) return QS_BLOCKED;
     if (sys->ply_id < 0 || sys->ply_id >= 4 || sys->gm_mode < 0 || sys->gm_mode > 2 ||
-        sys->stg_no < 0 || sys->stg_no > 9 || sys->ewk_n < 0 || sys->ewk_n > 128 ||
+        sys->stg_no < 0 || sys->stg_no > 9 || sys->ewk_n < 0 || sys->ewk_n > PC_ENE_SLOTS ||
         sys->rom_no < 0 || sys->rcase < 0 || sys->rcase > 15 || sys->pos_no < 0 ||
         sys->save_ct < 0 || sys->save_ct > 99 || sys->retry_ct < 0 || sys->retry_ct > 99 ||
         plp->wpnr_no < 0 || plp->wpnr_no >= 23 || !(fabsf(plp->px) < 1000000) ||

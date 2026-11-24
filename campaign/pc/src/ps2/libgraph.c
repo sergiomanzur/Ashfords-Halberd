@@ -8,6 +8,9 @@
 #include "../host/prof.h"
 #include "../host/cheat.h"
 #include "../host/actors.h"
+#include "../host/cast.h"
+#include "../host/biorand.h"
+#include "../host/lang.h"
 #include "../host/tps.h"
 
 #include <string.h>
@@ -88,6 +91,9 @@ int sceGsSwapDBuffDc(sceGsDBuffDc* db, int id)
     prof_frame_end();
     cheat_frame();
     appear_frame();
+    voices_frame();
+    biorand_frame();
+    lang_frame();
     tps_frame();
     stream_submit();
     /* then the draw environment for the next frame (+ optional clear) */

@@ -174,7 +174,15 @@ static inline void coop_fx_particle(struct BH_PWORK* p, int l, const void* o, co
 int pc_no_ink_ribbon(void);
 static inline int pc_detector_skipped(void) { return 0; }
 static inline void pc_detector_scd1(void) {}
-static inline void pc_quick_start(void) {}
+void  pc_quick_start(void);   /* system.c case 5: activate/stamp BioRand for new games (biorand_glue.c) */
+int   pc_biorand_box_any(void);          /* sub1.c ItemBoxChange: allow key item boxing/unboxing under BioRand */
+int   pc_biorand_arms_skip(int w);       /* event.c bhArmsItemChange: skip unfound weapon under BioRand */
+void  pc_cast_shot_event(int level, const unsigned char* p);   /* event.c Event_init: scene cast shot arms bank */
+int   pc_cast_shot_se(int w);            /* event.c bhWeaponSeCall 1: scene cast shot weapon SE */
+int   pc_spoiler_want(void);             /* system.c bhSysCallEvent: open spoiler log pause screen */
+int   pc_spoiler_up(void);               /* system.c bhSysCallEvent: spoiler log pause screen active */
+int   pc_spoiler_done(void);             /* system.c bhSysCallEvent: spoiler log pause screen closed */
+int   pc_spoiler_frame(void);            /* system.c bhSysCallScreenSaver case 10: draw spoiler log */
 int pc_battle_unlocked(void);
 int pc_difficulty_select(void);
 void appear_control(void);
@@ -185,6 +193,12 @@ void appear_textures_released(void);
 extern int actor_on, appear_on;
 int   actor_put_player(void);                 /* 1 = drawn */
 int   actor_put_enemy(struct BH_PWORK* ep);   /* 1 = drawn */
+extern int cast_n;                            /* the cutscene cast (pc/glue/cast_glue.c): records drawn as other models in this room */
+int   cast_draw(struct BH_PWORK* ep);         /* eneset.c bhDrawEnemy, a morphing record (Nosferatu's face, 6040): 1 = drawn as its model */
+int   pc_voice_on(int vid, int kind, int rec, const unsigned char* next, int* ptid);   /* event.c bhVoiceOn: file to play (*ptid partition), -1 none */
+void  pc_voice_lip(struct BH_PWORK* pp, int rec);   /* event.c bhLipSet, after bhSetLip: inserted line's lips */
+int   pc_voice_playing(int flag);             /* sdfunc.c CheckPlayEndAdx(1): AdxPlayFlag[1] as the script sees it */
+void  pc_voice_stop(void);                    /* sdfunc.c StopVoice */
 /* enemy variants (pc/glue/variant_glue.c, docs/ENEMIES.md "Enemy variants"): pc_variant_n variant enemies in
    this room (0: none of these is called) */
 extern int pc_variant_n;
@@ -205,9 +219,11 @@ void  actor_hands_back(void);                 /* game.c, before bhControlPlayer:
    bottom keep their offsets, so vanilla rooms are laid out as before and only the packed room
    file is read higher up. Costs address space only (bss, pages never touched stay free), but
    inside the PS2 address window: the whole image must end below 0x40000000 (ps2/memory.c). */
-/* The Ashford campaign keeps the PS2's 128 enemy slots; the upstream 0.8.0 enemy expansion
-   (255 slots) is outside this update's scope. */
-#define PC_ENE_SLOTS 128
+/* Enemy slots (ene[], 128 on the PS2; docs/ENEMIES.md "Budgets on the PC"): slots 0..254, so a slot
+   still fits the byte-sized fields that keep one (ETTY_WORK.wrk_no, ATR_WORK.prm3), 255 being "none".
+   bhSetEnemy takes the first free one, so vanilla rooms use the same slots. Enemy sound requests of an
+   effect (zonzon1.c, 127 on the PS2) use index PC_ENE_SLOTS. */
+#define PC_ENE_SLOTS 255
 #define PC_ARENA_EXTRA (64 << 20)
 /* The vertex work buffer above it (vwbmemp, njInit3D: 64-byte entries, one per vertex of the node
    being drawn): 5120 entries fit on the PS2 although njInit3D is told 8192; the PC adds the rest. */
@@ -235,9 +251,14 @@ extern int pc_enemy_refused;       /* eneset.c: the enemy's code runs on a playe
 void  pc_enemy_mark_added(void);   /* eneset.c: sets it, the shared helper functions as they are then kept for the room's earlier children */
 void  enemy_room_finished(void);   /* room.c bhFinishRoom: enemy options (pc/glue/enemyopt_glue.c) */
 
-/* Single-player title menu pointer controls (pc/glue/options_glue.c). */
+/* Single-player title menu pointer controls and EXIT row (pc/glue/options_glue.c). */
+void  pc_title_menu_init(void);                  /* Adv_BioCvTitle mode 0: append EXIT row */
+void  pc_title_plates(int cursor, int n, float fade, int flag);   /* DisplayGameModePlate */
 void  pc_title_mouse(int level, int flag);       /* CheckButton: hover moves the cursor, a click confirms */
 void  pc_title_mouse_active(int on);             /* title menu cursor visibility */
+int   pc_title_quit_open(void);                  /* Adv_BioCvTitle mode 9: EXIT confirmation dialog is open */
+void  pc_title_quit_frame(void);                 /* Adv_BioCvTitle mode 9: run & draw EXIT confirmation dialog */
+void  give_list_textures_released(void);         /* njReleaseTextureAll: give_list.c item icon texlist invalidated */
 
 /* ENHANCED SETTINGS in the OPTION menu (pc/glue/options_glue.c): option level 4 */
 void  pc_options_frame(void);                    /* Adv_GameOptionScreen, every frame */
@@ -249,13 +270,40 @@ int   pc_options_quit_title(void);               /* bhSysCallOption: YES was cho
 void  pc_options_mouse0(int port);               /* DisplayOptionPlateLevel0: hover, click */
 void  pc_options_mouse_back(int port, int level);/* levels 1-3: right click goes back */
 int   pc_options_pc(int port, int flag);         /* DisplayOptionPlate level 4 */
+/* Ashford Pause menu (pc/glue/pause_glue.c) */
+int   pc_new_menu_on(void);                      /* Ashford Pause active in OPTION task */
+int   pc_new_menu_entry(void);                   /* initial OptLevel on entering OPTION */
+int   pc_pause(int port, int flag);              /* DisplayOptionPlateLevel0 in a game */
+int   pc_in_game(void);                          /* a game runs (options_glue.c) */
+int   pc_options_back_level(void);               /* levels 1-3 going back */
 
 /* native saves (pc/glue/save_glue.c, docs/ARCHITECTURE.md "Save system"): the save and load
    screens list save files instead of memory card slots and skip the card screens */
 struct SELECTFILEWINDOW;
+struct SELECTFILEINFO;
+struct SAVEFILE;
 struct MEMORYCARDSTATE;
 struct SYSLOAD_SCREEN;
 struct SYSSAVE_SCREEN;
+void  pc_save_row_note(struct SELECTFILEWINDOW* win, int row, const struct SAVEFILE* f);   /* placed typewriter's location text */
+int   pc_save_text_len(const struct SELECTFILEINFO* p);   /* placed typewriter text or unnamed room: length instead of Type_Space */
+int   pc_save_text_draw(const struct SELECTFILEINFO* p, float y, unsigned int col, int count);   /* draw save location text */
+float pc_mes_fit_x(float x, const unsigned short* dp);   /* bhDispMessage: memory card screens' x moved left to end inside screen */
+void  pc_mes_keep_in(float right);                       /* right edge pc_mes_fit_x keeps to (0: none) */
+
+/* languages & subtitles (pc/glue/lang_glue.c): language font widths/cells/space, room & system messages,
+   European title picture layouts, Japanese file page pictures, and executable short texts */
+float pc_font_width(unsigned short code);
+float pc_font_space(void);
+int   pc_font_glyph(int code, void** texlist, float* dx);
+const unsigned short* pc_lang_mes(int which, const unsigned short* us);
+float pc_lang_mes_x(int which, float us);
+int   pc_lang_file_page(float x, float y, int file, int page);
+int   pc_lang_page_end(int us);
+unsigned int* pc_lang_room_mes(unsigned int* mesp);
+unsigned int* pc_lang_sys_mes(unsigned int* sp);
+int   lang_picture(int adv);
+int   lang_eu_picture(int adv);
 int   pc_saves_native(int state);                /* the open save/load screen uses native saves; its state 0 takes the setting, -1 asks */
 int   pc_save_card(struct MEMORYCARDSTATE* mc);  /* native, instead of ExecuteMemoryCard: its queued read or write done with the save files; 100 */
 void  pc_save_list(struct SELECTFILEWINDOW* win, struct MEMORYCARDSTATE* mc, int saving);   /* the window's rows: the saves (+ a new one) */

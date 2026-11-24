@@ -12,13 +12,22 @@
 #include <ps2/veronica/prog/padman.h>
 #include <ps2/veronica/prog/vibman.h>
 #include <ps2/veronica/prog/sdfunc.h>
+#include <ps2/veronica/prog/effect.h>
+#include <ps2/veronica/prog/ps2_texture.h>
+#include <ps2/veronica/prog/ps2_NaTextureFunction.h>
 #include <ps2/veronica/prog/ps2_NaDraw.h>
 #include "../src/host/settings.h"
 #include "../src/host/bindings.h"
 #include "../src/host/menu_mouse.h"
 #include "../src/host/tps.h"
 #include "../src/host/cheat.h"
+#include "../src/host/enemies.h"
+#include "../src/host/cast.h"
+#include "../src/host/biorand.h"
+#include "glyphs.h"
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 extern ADV_WORK AdvWork;
@@ -26,12 +35,32 @@ extern QUAD Qtex[16];
 extern unsigned int* pad_type[4];
 extern OPTION OptionDef[];
 void host_log(const char* fmt, ...);
+void host_quit(void);
+uint64_t SDL_GetTicks(void);
+Sint32 ADXF_ReadNw32(ADXF adxf, Sint32 nsct, void* buf);
 void pc_ui_text(float x, float y, const char* s, float sc, unsigned int argb);
 float pc_ui_text_w(const char* s, float sc);
 int pc_ui_text_wrap(float x, float y, float w, const char* s, float sc, unsigned int argb, int max_lines);
 void pc_ui_rect(float x0, float y0, float x1, float y1, unsigned int argb, float z);
 void pc_ui_arrow(float x, float y, int dir, unsigned int argb);
 int bind_any_down(void);
+void pc_pause_closed(void);
+void rate_list_open(float x0, float x1, float y0, float h, float sc, int rows);
+int rate_list_input(const MouseTake* m, unsigned int press, unsigned int rept, unsigned int ok, unsigned int cancel);
+void rate_list_draw(void);
+const char* rate_list_help(void);
+const char* rate_list_summary(const unsigned char* rate, char* buf, int n);
+void cast_list_open(int list, float x0, float x1, float y0, float h, float sc, int rows);
+int  cast_list_input(const MouseTake* m, unsigned int press, unsigned int rept, unsigned int ok, unsigned int cancel);
+void cast_list_draw(void);
+const char* cast_list_help(void);
+const char* cast_list_summary(int list, const unsigned char* off_bits, int imports_n, char* buf, int n);
+int  cast_list_kind(void);
+void give_list_open(float x0, float x1, float y0, float h, int rows);
+int  give_list_input(const MouseTake* m, unsigned int press, unsigned int rept, unsigned int ok, unsigned int cancel);
+void give_list_draw(void);
+const char* give_list_help(void);
+void give_list_release(void);
 
 enum { P_UP = 0x1000, P_RIGHT = 0x2000, P_DOWN = 0x4000, P_LEFT = 0x8000, P_START = 0x800, P_SELECT = 0x100, P_L1 = 0x4, P_R1 = 0x8 };   /* Pad[] bits */
 
@@ -61,19 +90,188 @@ void pc_options_frame(void) { g_menu_mouse.active = 1; options_up = 1; }
 /* tps_frame, once per game frame: the option screen ran in this frame (taken, so nothing is left over when it ends) */
 int pc_options_up(void) { int r = options_up; options_up = 0; return r; }
 void pc_tex_keep_original(int texno);   /* texture_glue.c: our entries are cut from the option textures */
+#include "../src/host/lang.h"
 
-/* Offline title pointer support, matching the original three/four-row title layout. */
+/* Offline title menu: original rows plus EXIT with confirmation dialog. */
+#define TITLE_EXIT 6
+static const struct { short u, v, w; } title_exit_letters[4] = {
+    { 46, 384, 18 }, { 65, 384, 21 }, { 268, 128, 12 }, { 86, 384, 19 }
+};
+static struct { int open, sel, going, esc_prev, font_state; unsigned char *font_alloc, *font_buf; } title_quit;
+
+static void title_font_load(void)
+{
+    ADXF h;
+    int sct, bytes, ok;
+    if ((sys->ss_flg & 0x40) || title_quit.font_state) return;
+    h = ADXF_OpenAfs(sys->sys_partid, 1);
+    if (!h) return;
+    sct = ADXF_GetFsizeSct(h);
+    bytes = sct * 2048;
+    if (bytes <= 0 || bytes > (3 << 20)) { ADXF_Close(h); return; }
+    title_quit.font_alloc = malloc((size_t)bytes + 64);
+    if (!title_quit.font_alloc) { ADXF_Close(h); return; }
+    title_quit.font_buf = (unsigned char*)(((uintptr_t)title_quit.font_alloc + 63) & ~(uintptr_t)63);
+    ADXF_ReadNw32(h, sct, title_quit.font_buf);
+    ok = ADXF_GetStat(h) == 3;
+    ADXF_Close(h);
+    if (ok) {
+        bhSetFontTexture(title_quit.font_buf);
+        title_quit.font_state = 2;
+    } else {
+        free(title_quit.font_alloc);
+        title_quit.font_alloc = NULL;
+        title_quit.font_buf = NULL;
+    }
+}
+
+static void title_font_ready(void)
+{
+    if (!(sys->ss_flg & 0x40) && !title_quit.font_state) title_font_load();
+}
+
+static void title_font_release(void)
+{
+    if (title_quit.font_state == 2 && (sys->ss_flg & 0x40)) {
+        njReleaseTexture(&sys->ef_tlist);
+        bhGarbageTexture(NULL, 0);
+        sys->ss_flg &= ~0x40;
+    }
+    free(title_quit.font_alloc);
+    title_quit.font_alloc = NULL;
+    title_quit.font_buf = NULL;
+    title_quit.font_state = 0;
+}
+
+static float title_row_y(int i, int n) { return n >= 5 ? 234.0f + 30.0f * i : 256.0f + 32.0f * i; }
+static float title_row_h(int n) { return n >= 5 ? 30.0f : 32.0f; }
+
+void pc_title_menu_init(void)
+{
+    ADV_WORK* ap = &AdvWork;
+    int n = 0;
+    biorand_game(0);
+    biorand_scan();
+    title_font_release();
+    title_quit.open = 0;
+    title_quit.going = 0;
+    title_quit.sel = 1;
+    title_quit.esc_prev = 1;
+    ap->ModeCommandId[n++] = 0;   /* LOAD GAME */
+    ap->ModeCommandId[n++] = 1;   /* NEW GAME */
+    ap->ModeCommandId[n++] = 2;   /* OPTION */
+    if (ap->ExtraFlag) ap->ModeCommandId[n++] = 3;   /* BATTLE GAME */
+    ap->ModeCommandId[n++] = TITLE_EXIT;             /* EXIT */
+    for (int i = 0; i < n; i++) ap->CursorFlag[0][i] = 1;
+    ap->CursorMax[0] = n;
+    if (ap->FromTitle == 2) ap->Cursor[0] = 2;
+    if (ap->FromTitle == 3 && ap->ExtraFlag) ap->Cursor[0] = 3;
+}
+
+void pc_title_plates(int cursor, int n, float fade, int flag)
+{
+    static const float v[4] = { 64.0f, 96.0f, 128.0f, 224.0f };
+    ADV_WORK* ap = &AdvWork;
+    pc_tex_keep_original(1);
+    for (int i = 0; i < n; i++) {
+        unsigned int alpha = (unsigned int)fade, col = 0x7F7F7Fu;
+        int id = ap->ModeCommandId[i];
+        float y = title_row_y(i, n);
+        if (i == cursor) { alpha += (unsigned int)ap->FlushCount2; col = ap->FontBaseColor; }
+        alpha <<= 24;
+        if (flag == 0) alpha = 0xFF000000u;
+        if (id == TITLE_EXIT) {
+            float w = 0, x;
+            QUAD q;
+            int us = lang_us_plates(2), tex = us ? 0 : 1;
+            for (int k = 0; k < 4; k++) w += title_exit_letters[k].w + 1;
+            x = 320.0f - w / 2;
+            for (int k = 0; k < 4; k++) {
+                SetQuadPos(x, y, title_exit_letters[k].w, 33.0f, &q);
+                SetQuadUv2(title_exit_letters[k].u, title_exit_letters[k].v, title_exit_letters[k].w, 33.0f, 1, &q);
+                AdvEasyDrawTextureS(tex, alpha | col, &q, 0.49f, 1, (unsigned int)fade);
+                x += title_exit_letters[k].w + 1;
+            }
+            if (us) AdvEasySetTextureList(0);
+        } else {
+            QUAD q;
+            SetQuadPos(64.0f, y, 513.0f, 33.0f, &q);
+            SetQuadUv2(0, v[id & 3], 513.0f, 33.0f, 1, &q);
+            AdvEasyDrawTextureS(1, alpha | col, &q, 0.5f, 1, (unsigned int)fade);
+        }
+    }
+    FlushPlate();
+    DisplayTitleBg();
+}
+
+int pc_title_quit_open(void) { return title_quit.open; }
+
+void pc_title_quit_frame(void)
+{
+    ADV_WORK* ap = &AdvWork;
+    static MouseTake qm;
+    unsigned int press = Pad[ap->PortId].press, rept = Pad[ap->PortId].Rept;
+    const bool* keys = bind_keys();
+    int esc_down = keys && keys[41], esc = esc_down && !title_quit.esc_prev;
+    float y0 = 186.0f, y1 = 304.0f, by = y1 - 44.0f;
+    float yw = pc_ui_text_w("YES", 0.90f), nw = pc_ui_text_w("NO", 0.90f);
+    float yx = 320.0f - 54.0f - yw, nx = 320.0f + 54.0f;
+    int hit = -1;
+    title_font_ready();
+    title_quit.esc_prev = esc_down;
+    menu_mouse_take(&qm);
+    if (press || rept || qm.left || qm.right || qm.moved) StopAdvScreenSaver(0);
+    if (qm.y >= by - 6 && qm.y < by + 34) {
+        if (qm.x >= yx - 14 && qm.x < yx + yw + 14) hit = 0;
+        else if (qm.x >= nx - 14 && qm.x < nx + nw + 14) hit = 1;
+    }
+    if (!title_quit.going) {
+        if (hit >= 0 && (qm.moved || qm.left) && hit != title_quit.sel) { title_quit.sel = hit; CallSystemSe(0, 2); }
+        else if (rept & (P_LEFT | P_RIGHT)) { title_quit.sel ^= 1; CallSystemSe(0, 2); }
+        else if ((qm.left && hit >= 0) || (press & (P_START | AdvGetOkButton()))) {
+            CallSystemSe(0, title_quit.sel ? 0 : 3);
+            if (title_quit.sel) { title_quit.open = 0; title_font_release(); }
+            else { title_quit.going = 1; host_log("title: EXIT, closing game\n"); host_quit(); }
+        } else if (qm.right || esc || (press & AdvGetCancelButton())) {
+            CallSystemSe(0, 0);
+            title_quit.open = 0;
+            title_font_release();
+        }
+    }
+    AdvEasySetTextureList(0);
+    DisplayTitleBg();
+    pc_ui_rect(0, 0, 640, 480, 0xB80A090Cu, 0.25f);
+    pc_ui_rect(120, y0, 520, y1, 0xEE100E13u, 0.30f);
+    pc_ui_rect(120, y0, 520, y0 + 2, 0xFFD6B668u, 0.31f);
+    pc_ui_rect(120, y1 - 2, 520, y1, 0xFFD6B668u, 0.31f);
+    pc_ui_rect(120, y0, 122, y1, 0x90D6B668u, 0.31f);
+    pc_ui_rect(518, y0, 520, y1, 0x90D6B668u, 0.31f);
+    {
+        const char* q = "Quit the game?";
+        unsigned int hi = ((unsigned int)ap->FlushCount2 + 255) << 24 | 0xFFFFFFu;
+        pc_ui_text(320.0f - pc_ui_text_w(q, 0.72f) / 2, y0 + 22, q, 0.72f, 0xFFE8E0C0u);
+        pc_ui_text(yx, by, "YES", 0.90f, title_quit.sel == 0 ? hi : 0x7FAFAFAFu);
+        pc_ui_text(nx, by, "NO",  0.90f, title_quit.sel == 1 ? hi : 0x7FAFAFAFu);
+    }
+    FlushPlate();
+    AdvEasySetTextureList(0);
+}
+
 void pc_title_mouse_active(int on) { g_menu_mouse.active = on; }
 void pc_title_mouse(int level, int flag)
 {
     static MouseTake title_mouse;
     ADV_WORK* ap = &AdvWork;
-    int hit = -1;
+    int hit = -1, n = ap->CursorMax[level];
     menu_mouse_take(&title_mouse);
     if (level == 0) {
-        float y0 = ap->ExtraFlag ? 272.0f : 288.0f;
-        if (title_mouse.x >= 64 && title_mouse.x < 577 && title_mouse.y >= y0 && title_mouse.y < y0 + 32 * ap->CursorMax[0])
-            hit = (int)(title_mouse.y - y0) / 32;
+        for (int i = 0; i < n; i++) {
+            float y0 = title_row_y(i, n);
+            if (title_mouse.x >= 64 && title_mouse.x < 577 && title_mouse.y >= y0 && title_mouse.y < y0 + title_row_h(n)) {
+                hit = i;
+                break;
+            }
+        }
         if (hit == 0 && !flag) hit = -1;   /* LOAD GAME disabled when no save exists */
     } else if (level == 1) {
         if (title_mouse.x >= 224 && title_mouse.x < 417 && title_mouse.y >= 304 && title_mouse.y < 400)
@@ -90,6 +288,16 @@ void pc_title_mouse(int level, int flag)
         if (title_mouse.left) Pad[ap->PortId].press |= AdvGetOkButton();
     }
     if (title_mouse.right) Pad[ap->PortId].press |= AdvGetCancelButton();
+    if (level == 0 && ap->ModeCommandId[(int)ap->Cursor[0]] == TITLE_EXIT &&
+        (Pad[ap->PortId].press & (P_START | AdvGetOkButton()))) {
+        Pad[ap->PortId].press &= ~(P_START | AdvGetOkButton());
+        title_quit.open = 1;
+        title_quit.sel = 1;
+        title_quit.going = 0;
+        title_quit.esc_prev = 1;
+        title_font_load();
+        CallSystemSe(0, 3);
+    }
 }
 
 /* ---------------------------------------------------------------- level 0: ENHANCED OPTIONS, RETURN TO TITLE
@@ -135,6 +343,7 @@ static float word_w(const Glyph* g, int n)
 static void word(const Glyph* g, int n, float x, float y, unsigned int col, float z)
 {
     QUAD* q = &Qtex[15];
+    int us = lang_us_plates(4);
     pc_tex_keep_original(0);
     for (int i = 0; i < n; i++) {
         if (g[i].u >= 0) {
@@ -144,6 +353,7 @@ static void word(const Glyph* g, int n, float x, float y, unsigned int col, floa
         }
         x += g[i].dw + 1;
     }
+    if (us) AdvEasySetTextureList(0);
 }
 
 static unsigned int pulse(void) { return ((unsigned int)AdvWork.FlushCount2 + 255) << 24 | 0xFFFFFF; }
@@ -199,6 +409,8 @@ static void quit_draw(void)
     pc_ui_text(320 - pc_ui_text_w(l2, sc2) / 2, Q_Y0 + 54, l2, sc2, 0xFFC0C0C0);
     AdvEasySetTextureList(0);   /* the option screen's textures again (the font set its own) */
 }
+void pc_options_quit_draw(void) { if (quit.open) quit_draw(); }
+int pc_options_quit_up(void) { return quit.open; }
 
 /* DisplayOptionPlateLevel0, with the other rows: drawn as they are (dim, or pulsing when selected) */
 void pc_options_rows0(void)
@@ -209,7 +421,9 @@ void pc_options_rows0(void)
 }
 
 /* DisplayOptionPlateLevel0 before it reads the pad: hovering a row selects it, a click confirms
-   it (on STEREO/MONO, ON/OFF: picks that value), a right click leaves the option screen */
+   it (on STEREO/MONO, ON/OFF: picks that value), a right click leaves the option screen. Start's
+   key on the keyboard (Enter) confirms as well, as in RETURN TO TITLE's question and ENHANCED
+   OPTIONS (the gamepad's Start does nothing here, as on the PS2) */
 static int opt_held = 1;   /* the Modern gamepad's options button (below) was down last frame; 1 when OPTION opens */
 void pc_options_mouse0(int port)
 {
@@ -219,6 +433,7 @@ void pc_options_mouse0(int port)
        leaves it, as View / Back opens and leaves it with the game's buttons */
     if (opt && !opt_held && g_tps.on && g_tps.pad_modern && pc_in_game()) Pad[port].press |= P_SELECT;
     opt_held = opt;
+    if ((Pad[port].press & P_START) && pad_kb_start()) Pad[port].press |= ok_button();
     menu_mouse_take(&mt);
     if (mt.x >= 32 && mt.x < 608 && mt.y >= 160 && mt.y < 384) {   /* rows 32 px apart, their values on the right */
         hit = (int)(mt.y - 160) / 32;
@@ -245,10 +460,10 @@ void pc_options_mouse_back(int port, int level)
 }
 
 /* ---------------------------------------------------------------- the pages */
-enum { K_PAGE, K_SET, K_DEVICE, K_BIND, K_HEAD, K_GROUP, K_RESET, K_BACK };   /* K_HEAD, K_GROUP: headings */
+enum { K_PAGE, K_SET, K_RATES, K_CUSTOM, K_GIVE, K_DEVICE, K_BIND, K_HEAD, K_GROUP, K_RESET, K_BACK };   /* K_HEAD, K_GROUP: headings */
 typedef struct Row { int kind, idx; } Row;
 
-#define MAX_ROWS 80
+#define MAX_ROWS 96
 #define VISIBLE 9                         /* rows shown below the page row; more scroll */
 #define X_LABEL 44.0f
 #define X_VALUE 360.0f
@@ -260,11 +475,15 @@ typedef struct Row { int kind, idx; } Row;
 #define SC_ROW 0.55f
 #define Z_PANEL 0.02f
 #define Z_HI 0.3f
+#define KEEP_MS 10000
 
 static struct {
     int page, sel, top, dev, slot;
+    int sub;                     /* 0: pages, 1: custom enemy rates, 2: custom cast/enemies, 3: visual give item */
     int capture;                 /* waiting for a key: the bind row + 1 */
     int wait_release;            /* after a capture: no input until everything is let go */
+    int keep, keep_old, keep_sel;/* 10-second display-change keep/revert dialog: setting idx + 1 */
+    uint64_t keep_t;
     char msg[96];
     int msg_t;
     unsigned char pending[256];  /* actions to run when the menu closes */
@@ -276,13 +495,32 @@ static int nrows;
 
 static const char* const heads[] = { "", "THIRD PERSON (KEYBOARD AND MOUSE)", "HOTKEYS" };
 
+/* Pause menu shortcut: open Enhanced Options directly on a specific page */
+void pc_options_open_page(int page)
+{
+    st.page = (page % SP_COUNT + SP_COUNT) % SP_COUNT;
+    st.sel = 0;
+    st.top = 0;
+    st.sub = 0;
+    st.capture = 0;
+    st.keep = 0;
+}
+
 /* every row of the page that is shown now (what F1 shows of a page, this shows too), headings first */
 static void page_rows(void)
 {
-    for (int i = 0; i < g_settings_n && nrows < MAX_ROWS - 3; i++)
+    for (int i = 0; i < g_settings_n && nrows < MAX_ROWS - 5; i++)
         if (g_settings[i].page == st.page && (!g_settings[i].shown || g_settings[i].shown())) {
             if (g_settings[i].group) rows[nrows++] = (Row){ K_GROUP, i };
+            if (g_settings[i].page == SP_CHEATS && g_settings[i].group && !strcmp(g_settings[i].group, "ITEMS"))
+                rows[nrows++] = (Row){ K_GIVE, 0 };
             rows[nrows++] = (Row){ K_SET, i };
+            if (g_settings[i].val == &g_enemy_opts.variety && g_enemy_opts.variety == 2)
+                rows[nrows++] = (Row){ K_RATES, 0 };
+            if (g_settings[i].val == &g_enemy_opts.cast_all && g_enemy_opts.cast_all == 2)
+                rows[nrows++] = (Row){ K_CUSTOM, 0 };
+            if (g_settings[i].val == &g_enemy_opts.cast_enemy && g_enemy_opts.cast_enemy == CAST_ENEMY_CUSTOM)
+                rows[nrows++] = (Row){ K_CUSTOM, 2 };
         }
 }
 
@@ -318,6 +556,43 @@ static const char* page_keys(char* buf, int n)
 }
 
 static void say(const char* m) { snprintf(st.msg, sizeof(st.msg), "%s", m); st.msg_t = 120; }
+void options_say(const char* m) { say(m); }
+
+static int is_display_setting(const Setting* s)
+{
+    return s && (!strcmp(s->label, "Display mode") || !strcmp(s->label, "Fullscreen resolution"));
+}
+
+static int keep_left(void)
+{
+    int64_t l = KEEP_MS - (int64_t)(SDL_GetTicks() - st.keep_t);
+    return l <= 0 ? 0 : (int)((l + 999) / 1000);
+}
+
+static void keep_end(int keep)
+{
+    if (!st.keep) return;
+    const Setting* s = &g_settings[st.keep - 1];
+    if (!keep) settings_set(s, st.keep_old);
+    settings_save_later();
+    host_log("options: %s %s\n", s->label, keep ? "kept" : "reverted");
+    say(keep ? "New display settings kept." : "Display settings reverted.");
+    st.keep = 0;
+}
+
+static void step_setting(const Row* r, int dir)
+{
+    const Setting* s = &g_settings[r->idx];
+    int old = settings_get(s);
+    settings_step(s, dir);
+    if (is_display_setting(s) && settings_get(s) != old) {
+        st.keep = r->idx + 1;
+        st.keep_old = old;
+        st.keep_sel = 1;   /* REVERT preselected */
+        st.keep_t = SDL_GetTicks();
+        host_log("options: %s changed, awaiting keep/revert\n", s->label);
+    }
+}
 
 static void move_sel(int dir)
 {
@@ -348,7 +623,7 @@ static void change(const Row* r, int dir)
     case K_SET:
         if (s->flags & SET_ACTION) return;
         if (settings_locked(s)) { CallSystemSe(0, 1); say(settings_locked(s)); return; }
-        settings_step(s, dir);
+        step_setting(r, dir);
         CallSystemSe(0, 2);
         return;
     }
@@ -361,12 +636,27 @@ static void capture_begin(int bind_row)
     CallSystemSe(0, 3);
 }
 
-/* 0 stay, 1 back to the option screen */
+/* 0 stay, 1 back to the option/pause screen */
 static int activate(const Row* r)
 {
     const Setting* s = row_set(r);
     switch (r->kind) {
     case K_PAGE: set_page(st.page + 1); return 0;
+    case K_RATES:
+        rate_list_open(X_LABEL, 600.0f, Y_ROW0, ROW_H, SC_ROW, VISIBLE - 1);
+        st.sub = 1;
+        return 0;
+    case K_CUSTOM:
+        cast_list_open(r->idx, X_LABEL, 600.0f, Y_ROW0, ROW_H, SC_ROW, VISIBLE - 2);
+        st.sub = 2;
+        return 0;
+    case K_GIVE:
+        if (!pc_in_game()) { CallSystemSe(0, 1); say("In game only."); return 0; }
+        if (!g_cheat.names[1][0]) { CallSystemSe(0, 1); say("Item names load after entering a game."); return 0; }
+        give_list_open(X_LABEL, 600.0f, 182.0f, 20.0f, 8);
+        st.sub = 3;
+        CallSystemSe(0, 3);
+        return 0;
     case K_DEVICE: change(r, 1); return 0;
     case K_BIND: capture_begin(r->idx); return 0;
     case K_RESET:
@@ -384,7 +674,7 @@ static int activate(const Row* r)
             CallSystemSe(0, 3);
             return 0;
         }
-        if (settings_is_bool(s) || s->names || s->name) { settings_step(s, 1); CallSystemSe(0, 2); }
+        if (settings_is_bool(s) || s->names || s->name) { step_setting(r, 1); CallSystemSe(0, 2); }
         else CallSystemSe(0, 1);   /* numbers: left/right */
         return 0;
     }
@@ -443,7 +733,9 @@ static void draw_row(int i, int sel)
     float y = i ? row_y(i) : 152.0f;
     unsigned int dim = 0xFFA0A0A0, col = sel ? pulse() : dim;
     char label[128], val[128];
+    val[0] = 0;
     const char* lock = s ? settings_locked(s) : NULL;
+    if (r->kind == K_GIVE && (!pc_in_game() || !g_cheat.names[1][0])) lock = "In game only.";
     if (lock) col = sel ? 0xFF909090 : 0xFF686868;
     if (sel) pc_ui_rect(36, y - 3, 604, y + ROW_H - 4, st.capture ? 0x50FFC040 : 0x40FFFFFF, Z_HI);
     switch (r->kind) {
@@ -474,6 +766,25 @@ static void draw_row(int i, int sel)
         break;
     case K_RESET: pc_ui_text(X_LABEL, y, "RESET TO DEFAULTS", SC_ROW, col); return;
     case K_BACK: pc_ui_text(X_LABEL, y, "BACK", SC_ROW, col); return;
+    case K_RATES: {
+        char sum[32];
+        pc_ui_text(X_LABEL, y, "Edit custom enemy rates...", SC_ROW, col);
+        rate_list_summary(g_enemy_opts.rate, sum, sizeof(sum));
+        text_fit(X_VALUE + 6, y, sum, SC_ROW, 210, col);
+        return;
+    }
+    case K_CUSTOM: {
+        char sum[32];
+        int imp = r->idx == 0 && g_enemy_opts.cast_imports ? __atomic_load_n(&actor_import_n, __ATOMIC_ACQUIRE) : 0;
+        pc_ui_text(X_LABEL, y, r->idx == 2 ? "Choose custom enemies..." : "Choose custom models...", SC_ROW, col);
+        cast_list_summary(r->idx, r->idx == 2 ? g_enemy_opts.cast_enemy_off : cast_off, imp, sum, sizeof(sum));
+        text_fit(X_VALUE + 6, y, sum, SC_ROW, 210, col);
+        return;
+    }
+    case K_GIVE:
+        pc_ui_text(X_LABEL, y, "Visual item picker...", SC_ROW, col);
+        pc_ui_text(X_VALUE + 6, y, lock ? "(in game)" : "Browse icons and add", SC_ROW, lock ? col : 0xFFD6B668u);
+        return;
     case K_BIND: {
         int conflict = bind_conflict(r->idx, st.dev);
         text_fit(X_LABEL, y, bind_row_label(r->idx, label, sizeof(label)), SC_ROW, 300, col);
@@ -488,15 +799,17 @@ static void draw_row(int i, int sel)
         }
         return;
     }
-    case K_SET:
-        snprintf(label, sizeof(label), "%s%s", s->label, (s->flags & SET_RESTART) ? " (next start)" : "");
-        text_fit(X_LABEL, y, label, SC_ROW, 296, col);
+    case K_SET: {
+        int mark = (s->flags & SET_RESTART) ? 1 : (s->flags & SET_NEXT_ROOM) ? 2 : 0;
+        text_fit(X_LABEL, y, s->label, SC_ROW, mark ? 280 : 296, col);
+        if (mark) ui_glyph_mark(X_VALUE - 28, y + 1, mark);
         if (s->flags & SET_ACTION) {
             if (st.pending[r->idx]) pc_ui_text(X_VALUE, y, "(when you leave)", 0.5f, 0xFFE0C080);
             return;
         }
         settings_value(s, val, sizeof(val));
         break;
+    }
     }
     {   /* a value between arrows */
         float w = pc_ui_text_w(val, SC_ROW);
@@ -530,9 +843,13 @@ static void draw_help(void)
     else switch (r->kind) {
     case K_PAGE: snprintf(t, sizeof(t), "Left/right or %s change the page, up/down choose a setting. Preferences save automatically; cheat toggles last this session. F1 shows the same settings.",
                           page_keys(nm, sizeof(nm))); break;
-    case K_DEVICE: snprintf(t, sizeof(t), "%s", st.dev ? bind_pad_desc() : "The game's buttons, third-person keys and hotkeys."); break;
+    case K_DEVICE: snprintf(t, sizeof(t), "%s", st.dev ? bind_pad_desc(nm, sizeof(nm)) : "The game's buttons, third-person keys and hotkeys. Mouse buttons can be bound too, e.g. right mouse on Aim, left on Fire."); break;
     case K_RESET: snprintf(t, sizeof(t), "All %s bindings back to the defaults.", st.dev ? "gamepad" : "keyboard and mouse"); break;
-    case K_BACK: snprintf(t, sizeof(t), "Back to the OPTION screen (also cancel or a right click)."); break;
+    case K_RATES: snprintf(t, sizeof(t), "Open the per-type enemy weight sliders (Off, 1-10) for Custom variety."); break;
+    case K_CUSTOM: snprintf(t, sizeof(t), "%s", r->idx == 2 ? "Choose which monster and character models can replace cutscene monsters." : "Choose which models can appear in the Cutscene Cast randomizer."); break;
+    case K_GIVE: snprintf(t, sizeof(t), "%s", !pc_in_game() ? "In game only. Browse items with real icons, pick quantities, and add directly to inventory or item box."
+                                                          : "Browse items grouped by category with real inventory icons. Adds immediately without closing the menu."); break;
+    case K_BACK: snprintf(t, sizeof(t), "Back to the previous menu (also cancel or a right click)."); break;
     case K_BIND: {
         int c = bind_conflict(r->idx, st.dev);
         if (c) { snprintf(t, sizeof(t), "Also bound to: %s. Bind one of them to something else.", bind_rows[c - 1].name); col = 0xFFFF8080; }
@@ -545,7 +862,10 @@ static void draw_help(void)
     }
     case K_SET: {
         const char* lock = settings_locked(s);
-        snprintf(t, sizeof(t), "%s%s%s%s", lock ? lock : "", lock ? " " : "", (s->flags & SET_RESTART) ? "Takes effect at the next start. " : "", s->help ? s->help : "");
+        const char* tag = (s->flags & SET_RESTART) ? "Takes effect at the next start. "
+                        : ((s->flags & SET_NEXT_ROOM) && (!s->help || (!strstr(s->help, "next room") && !strstr(s->help, "Next room"))))
+                          ? "Applies from the next room. " : "";
+        snprintf(t, sizeof(t), "%s%s%s%s", lock ? lock : "", lock ? " " : "", tag, s->help ? s->help : "");
         if (lock) col = 0xFFFFC060;
         if (s->flags & SET_ACTION && !lock && !(s->flags & SET_NOW)) snprintf(t + strlen(t), sizeof(t) - strlen(t), "%sRuns when you leave the menu.", s->help ? " " : "");
         break;
@@ -556,6 +876,43 @@ static void draw_help(void)
     pc_ui_text_wrap(X_LABEL - 4, y, 560, t, 0.45f, col, HELP_LINES);
 }
 
+static void draw_keep_dialog(void)
+{
+    float y0 = 186.0f, y1 = 318.0f, by = y1 - 44.0f;
+    float kw = pc_ui_text_w("KEEP", 0.85f);
+    float kx = 320.0f - 48.0f - kw, rx = 320.0f + 48.0f;
+    char l2[64];
+    const char* l1 = "Keep these display settings?";
+    snprintf(l2, sizeof(l2), "Reverting in %d s.", keep_left());
+    pc_ui_rect(108, y0, 532, y1, 0xF0100E13u, 0.40f);
+    pc_ui_rect(108, y0, 532, y0 + 2, 0xFFD6B668u, 0.41f);
+    pc_ui_rect(108, y1 - 2, 532, y1, 0xFFD6B668u, 0.41f);
+    pc_ui_rect(108, y0, 110, y1, 0x90D6B668u, 0.41f);
+    pc_ui_rect(530, y0, 532, y1, 0x90D6B668u, 0.41f);
+    pc_ui_text(320.0f - pc_ui_text_w(l1, 0.68f) / 2, y0 + 20, l1, 0.68f, 0xFFE8E0C0u);
+    pc_ui_text(320.0f - pc_ui_text_w(l2, 0.54f) / 2, y0 + 50, l2, 0.54f, 0xFFC8C2B4u);
+    pc_ui_text(kx, by, "KEEP",   0.85f, st.keep_sel == 0 ? pulse() : 0x7FAFAFAFu);
+    pc_ui_text(rx, by, "REVERT", 0.85f, st.keep_sel == 1 ? pulse() : 0x7FAFAFAFu);
+}
+
+static void draw_footer(void)
+{
+    if (st.capture || st.keep) return;
+    if (st.sub == 3) {
+        int a[4] = { UG_OK, UG_BACK, UG_CHANGE, UG_CAT };
+        const char* w[4] = { "Add", "Back", "Amount", "Category" };
+        ui_glyph_bar(36, Y_BOTTOM + 10, a, w, 4);
+    } else if (st.sub == 1 || st.sub == 2) {
+        int a[2] = { UG_OK, UG_BACK };
+        const char* w[2] = { "Select", "Back" };
+        ui_glyph_bar(36, Y_BOTTOM + 10, a, w, 2);
+    } else {
+        int a[4] = { UG_OK, UG_BACK, UG_CHANGE, UG_CAT };
+        const char* w[4] = { "Select", "Back", "Change", "Page" };
+        ui_glyph_bar(36, Y_BOTTOM + 10, a, w, 4);
+    }
+}
+
 static void draw(void)
 {
     QUAD* q = &Qtex[1];
@@ -564,9 +921,31 @@ static void draw(void)
     pc_tex_keep_original(1);
     AdvEasyDrawTexture(1, -1, q, 0.05f, 1);
     FlushPlate();
-    pc_ui_rect(28, 146, 612, Y_BOTTOM, 0xA0000000, Z_PANEL);
-    pc_ui_rect(36, 176, 604, 177, 0x60FFFFFF, Z_PANEL + 0.001f);
-    pc_ui_rect(36, Y_HELP - 4, 604, Y_HELP - 3, 0x60FFFFFF, Z_PANEL + 0.001f);
+    pc_ui_rect(28, 146, 612, Y_BOTTOM, 0xB80E0D10u, Z_PANEL);
+    pc_ui_rect(36, 176, 604, 177, 0x60D6B668u, Z_PANEL + 0.001f);
+    pc_ui_rect(36, Y_HELP - 4, 604, Y_HELP - 3, 0x60D6B668u, Z_PANEL + 0.001f);
+    if (st.keep) {
+        draw_keep_dialog();
+        AdvEasySetTextureList(0);
+        return;
+    }
+    if (st.sub == 1 || st.sub == 2 || st.sub == 3) {
+        const char* title = st.sub == 1 ? "CUSTOM ENEMY RATES"
+                          : st.sub == 2 ? (cast_list_kind() == 2 ? "CUSTOM CUTSCENE ENEMIES" : "CUSTOM CAST MODELS")
+                          : "GIVE ITEM";
+        float w = pc_ui_text_w(title, 0.72f);
+        pc_ui_text(320 - w / 2, 150.0f, title, 0.72f, 0xFFE8E0C0);
+        if (st.sub == 1) rate_list_draw();
+        else if (st.sub == 2) cast_list_draw();
+        else give_list_draw();
+        if (st.msg_t > 0) { st.msg_t--; pc_ui_text_wrap(X_LABEL - 4, Y_HELP, 560, st.msg, 0.45f, 0xFFFFE080, HELP_LINES); }
+        else pc_ui_text_wrap(X_LABEL - 4, Y_HELP, 560,
+                             st.sub == 1 ? rate_list_help() : st.sub == 2 ? cast_list_help() : give_list_help(),
+                             0.45f, 0xFFC0C0C0, HELP_LINES);
+        draw_footer();
+        AdvEasySetTextureList(0);
+        return;
+    }
     draw_row(0, st.sel == 0);
     for (int i = st.top; i < nrows && i < st.top + VISIBLE; i++) draw_row(i, i == st.sel);
     if (st.top > 1) {   /* more above / below */
@@ -578,6 +957,7 @@ static void draw(void)
         njDrawPolygon(v, 3, 1);
     }
     draw_help();
+    draw_footer();
     AdvEasySetTextureList(0);   /* the option screen's textures again (the font set its own) */
 }
 
@@ -588,13 +968,42 @@ static int input(int port)
     unsigned int ok = ok_button() | P_START, cancel = cancel_button() | P_SELECT;
     int hit;
     menu_mouse_take(&mt);
+    ui_glyph_device(press, mt.moved || mt.left || mt.right || mt.wheel);
+    if (st.keep) {
+        float by = 318.0f - 44.0f;
+        float kw = pc_ui_text_w("KEEP", 0.85f), rw = pc_ui_text_w("REVERT", 0.85f);
+        float kx = 320.0f - 48.0f - kw, rx = 320.0f + 48.0f;
+        int khit = -1;
+        if (mt.y >= by - 6 && mt.y < by + 34) {
+            if (mt.x >= kx - 14 && mt.x < kx + kw + 14) khit = 0;
+            else if (mt.x >= rx - 14 && mt.x < rx + rw + 14) khit = 1;
+        }
+        if (khit >= 0 && (mt.moved || mt.left) && khit != st.keep_sel) { st.keep_sel = khit; CallSystemSe(0, 2); }
+        if (press & (P_LEFT | P_RIGHT)) { st.keep_sel ^= 1; CallSystemSe(0, 2); }
+        else if ((mt.left && khit >= 0) || (press & ok)) { CallSystemSe(0, st.keep_sel ? 0 : 3); keep_end(st.keep_sel == 0); }
+        else if (mt.right || (press & cancel)) { CallSystemSe(0, 0); keep_end(0); }
+        return 0;
+    }
+    if (st.sub == 1) {
+        if (rate_list_input(&mt, press, rept, ok, cancel)) st.sub = 0;
+        return 0;
+    }
+    if (st.sub == 2) {
+        if (cast_list_input(&mt, press, rept, ok, cancel)) st.sub = 0;
+        return 0;
+    }
+    if (st.sub == 3) {
+        if (give_list_input(&mt, press, rept, ok, cancel)) st.sub = 0;
+        return 0;
+    }
     if (st.capture) {
         int c = bind_capture_poll();
         if (c != -1) capture_end(c);
         return 0;
     }
     if (st.wait_release) {
-        if (bind_any_down() || g_menu_mouse.held) return 0;
+        /* also the pad report this frame's Rept came from: a stick let go after it was read would repeat once more */
+        if (bind_any_down() || pad_report_bits() || g_menu_mouse.held) return 0;
         st.wait_release = 0;
     }
     hit = row_at(mt.x, mt.y);
@@ -626,12 +1035,13 @@ static int input(int port)
 int pc_options_pc(int port, int flag)
 {
     int back = 0;
+    if (st.keep && keep_left() <= 0) keep_end(0);
     build_rows();
     if (flag) back = input(port);
     build_rows();
     scroll_to_sel();
     draw();
-    if (back) { st.capture = 0; st.wait_release = 0; }
+    if (back) { st.capture = 0; st.wait_release = 0; st.sub = 0; }
     return back ? 0 : 4;
 }
 
@@ -639,8 +1049,12 @@ int pc_options_pc(int port, int flag)
    cursor goes */
 void pc_options_close(void)
 {
+    if (st.keep) keep_end(0);
     quit.open = 0;
     opt_held = 1;
+    st.sub = 0;
+    give_list_release();
+    pc_pause_closed();
     if (st.any_pending)
         for (int i = 0; i < g_settings_n && i < (int)sizeof(st.pending); i++)
             if (st.pending[i]) { st.pending[i] = 0; settings_act(&g_settings[i]); }

@@ -1,0 +1,386 @@
+/* The cutscene cast randomizer's choices (cast.h; docs/ACTORS.md "Cutscene cast"). */
+#include "cast.h"
+#include "actors.h"
+#include <stdio.h>
+#include <string.h>
+
+/* the characters' cutscene models (a face mask: their faces move with the lip sync), in character order */
+static const signed char cine[CAST_CHARACTERS] = { 0, 1, 3, 5, 8, 12, 13 };
+
+int cast_character(int id, int ver)
+{
+    (void)ver;
+    switch (id) {
+    case 91: return 0;                       /* Claire */
+    case 92: case 42: return 1;              /* Chris */
+    case 93: case 43: return 2;              /* Steve */
+    case 97: case 49: case 47: return 3;     /* Wesker */
+    case 94: case 96: case 44: return 4;     /* Alfred (16, his boss type, is not cast) */
+    case 95: return 5;                       /* Alexia (12..14, her forms, are not) */
+    case 98: return 6;                       /* Rodrigo */
+    default: return -1;
+    }
+}
+
+/* The creatures shown only in cutscenes: records no fight uses (a scripted actor without AI, or an enemy type in a room
+   that is only a cutscene), so their looks change nothing in play. Not cast: every creature that is fought in the room,
+   or whose scene leads straight into its fight (Nosferatu in 6100, the Tyrant in 1122 and on the plane, 5010, Alexia's
+   forms, Monster Steve, ...), and the ones not shaped like a person (the Gulp Worm eating Rodrigo, 7220: no humanoid
+   skeleton to pose a model from). */
+static const struct { short room; unsigned char rec, id, c; } creatures[] = {
+    { 3000, 2, 51, 10 },   /* Steve's father, a zombie (a scripted actor) */
+    { 3230, 1, 19, 8 },    /* the Tyrant Alfred releases (a cutscene room; the Tyrant is fought in 1122 and 5010, other records) */
+    { 6040, 4, 52, 7 },    /* Nosferatu breaking out of his restraints (a scripted actor; fought in 6100) */
+    { 8030, 2, 5, 9 },     /* the Hunter Wesker sends out (a cutscene room) */
+};
+
+int cast_creature(int room, int rec, int id)
+{
+    for (int i = 0; i < (int)(sizeof(creatures) / sizeof(creatures[0])); i++)
+        if (creatures[i].room == room && creatures[i].rec == rec && creatures[i].id == id) return creatures[i].c;
+    return -1;
+}
+
+/* The zombies only cutscenes show (docs/ACTORS.md "Scene zombies"): records of type 1 without a kill flag that only a
+   scene's events move (LoadWork, its motions by CommonCtr 34) and hide, in a room no fight uses. Not the zombies a scene
+   wakes or that walk on into play (they are fought). A bit per record. */
+static const struct { short room; unsigned short recs; } crowds[] = {
+    { 50, 0x0004 },     /* record 2: the zombie crawling at the courtyard fence (hidden after its scene; the dogs are other records) */
+    { 9340, 0x000E },   /* records 1..3: the zombies around Chris (a cutscene room: it plays on entry and leaves for 9350) */
+};
+
+int cast_scene_zombie(int room, int rec, int id)
+{
+    for (int i = 0; i < (int)(sizeof(crowds) / sizeof(crowds[0])); i++)
+        if (crowds[i].room == room && id == 1 && rec >= 0 && rec < 16 && ((crowds[i].recs >> rec) & 1)) return 1;
+    return 0;
+}
+
+const char* cast_name(int c)
+{
+    static const char* const name[CAST_ALL + 1] = { "Claire", "Chris", "Steve", "Wesker", "Alfred", "Alexia", "Rodrigo", "Nosferatu", "Tyrant", "Hunter", "Steve's father", "Zombie" };
+    return c >= 0 && c <= CAST_CROWD ? name[c] : "?";
+}
+
+int cast_role(int c, int ply, int pending, int partner)
+{
+    if (c == CAST_CROWD) return CAST_PICK;
+    if (c < 0 || c >= CAST_ALL) return CAST_OWN;
+    if (c < 2) return c == ply ? CAST_OWN : CAST_LOOK;
+    return c < 4 && (c == ply || c == pending || c == partner) ? CAST_OWN : CAST_PICK;
+}
+
+static int listed(void) { return __atomic_load_n(&actor_import_n, __ATOMIC_ACQUIRE); }   /* (the main thread appends) */
+static int imports_n(int imports) { return imports > 0 && imports <= listed() ? imports : 0; }
+
+/* a zombie look (the zombies' 27 looks, the scripted ones too; not the anatomist): in "All models" they are one entry,
+   else they were most of the pool and most characters became zombies */
+static int zombie(int i) { return actor_models[i].id == 1 || actor_models[i].id == 51 || actor_models[i].id == 52; }
+
+int cast_zombie_look(unsigned seed, unsigned scene, int c)
+{
+    unsigned h = (seed * 2654435761u) ^ (scene * 40503u + (unsigned)c * 0x9E3779B9u + 0x7F4A7C15u);
+    int i, n = 0, k;
+    h ^= h >> 15; h *= 0x2C1B3C6Du; h ^= h >> 12; h *= 0x297A2D39u; h ^= h >> 15;
+    for (i = 0; i < ACTOR_MODELS; i++) n += zombie(i);
+    k = n ? (int)(h % (unsigned)n) : -1;
+    for (i = 0; i < ACTOR_MODELS && k >= 0; i++)
+        if (zombie(i) && k-- == 0) return i;
+    return -1;
+}
+
+/* Claire's and Chris's looks (their cutscene models, their player files, Claire's second costume): they are never cast
+   themselves (their look is "You appear as"'s), but every pool has them for the others (the user's choice, 2026-11-08;
+   before, only "Custom" listed them: Steve at the end of Claire's part shown as Chris's cutscene model can read as
+   Chris's part starting). builtins_of lists them after the rest (custom > 0), the files with a twin as that twin. */
+static int protagonist(int m) { return m == cine[0] || m == cine[1] || m == ACTOR_PART + 0 || m == ACTOR_PART + 1 || m == ACTOR_PART + 4; }
+
+/* the talking twin of a look whose face stays still (-1 none): Claire's, Chris's, Steve's and Wesker's player files have no
+   face mask, the same character's cutscene model has one (its mouth moves with the lines). The cast lists only the
+   twin (the file would also double that character's chance); "Character Model" keeps the files (their hands, the
+   costume). Claire's second costume has no twin: one cutscene model per character, the costume is only in her file */
+static int twin_of(int m) { return m >= ACTOR_PART && m < ACTOR_PART + 4 ? cine[m - ACTOR_PART] : -1; }
+
+/* "All models" without the imports: every humanoid look the menus list, the player files too (but those with a talking
+   twin, above); not the wounded Alfred (a special state). "Custom" (custom 1) lists Claire's and Chris's looks too, after
+   these: there a player who checks them wants them. custom -1: the looks "Randomize Played as" picks from (the
+   player files with a twin too: the player's own look talks in cutscenes as "Cutscene doubles" have it) */
+static int builtins_of(int* out, int custom)
+{
+    int n = 0, i;
+    for (i = 0; i < 5; i++) if (!protagonist(ACTOR_PART + i) && (custom < 0 || twin_of(ACTOR_PART + i) < 0)) out[n++] = ACTOR_PART + i;
+    for (i = 0; i < ACTOR_MODELS; i++)
+        if (actor_models[i].anim != ANIM_IDLE && appear_canon(COOP_CHR_ACTOR + i) == COOP_CHR_ACTOR + i && i != 10 && i != 14 && !zombie(i) && !protagonist(i)) out[n++] = i;   /* (14 the man in the hazmat suit: no moving mouth) */
+    out[n++] = CAST_ZOMBIES;   /* the zombie looks: one entry (cast_model picks the look) */
+    if (custom > 0) {
+        for (i = 0; i < 5; i++) if (protagonist(ACTOR_PART + i) && twin_of(ACTOR_PART + i) < 0) out[n++] = ACTOR_PART + i;
+        for (i = 0; i < ACTOR_MODELS; i++)
+            if (protagonist(i) && actor_models[i].anim != ANIM_IDLE && appear_canon(COOP_CHR_ACTOR + i) == COOP_CHR_ACTOR + i) out[n++] = i;
+    }
+    return n;
+}
+#define BUILTIN_MAX (5 + ACTOR_MODELS + 1)   /* (with "Custom"'s: each look once) */
+static int crowd_pool(int all, int* out, const unsigned char* off);
+/* "Enemy Models"' list: the monsters of "All models" and the zombies' entry (a scene zombie's pool; *mon of them: "All
+   Enemies"'), then the characters of the cast's list (their cutscene models, Claire's second costume; "Custom" only,
+   unchecked at first: cast_enemy_default). No imports: its bits ride in EV_EOPTS (CAST_ENEMY_BYTES) */
+static int enemy_list(int* out, int* mon)
+{
+    int b[BUILTIN_MAX], nb = builtins_of(b, 1), m = crowd_pool(1, out, NULL), n = m, i, j;
+    for (i = 0; i < nb; i++) {
+        for (j = 0; j < m && out[j] != b[i]; j++);
+        if (j == m) out[n++] = b[i];
+    }
+    if (mon) *mon = m;
+    return n;
+}
+/* a "Custom" list's entries (its positions): 0 the cast's, 1 "Randomize Character Model"'s, 2 "Enemy Models"' */
+static int builtins(int* out, int list) { return list == 2 ? enemy_list(out, NULL) : builtins_of(out, list ? -1 : 1); }
+static int imps(int list, int imports) { return list == 2 ? 0 : imports_n(imports); }   /* (no imports in the enemies' list) */
+
+/* "Enemy Models"' pool: CAST_ENEMY_ALL its list's monsters, CAST_ENEMY_CUSTOM the checked ones of the whole list (eoff, by
+   their positions there; the monsters first, so with no character checked the picks are those of before them), CAST_ENEMY_OFF none */
+static int enemy_pool(int enemy, int* out, const unsigned char* eoff)
+{
+    int mon, n = enemy_list(out, &mon), i, k;
+    if (enemy != CAST_ENEMY_CUSTOM) return enemy == CAST_ENEMY_OFF ? 0 : mon;
+    for (i = k = 0; i < n; i++) if (!cast_off_at(eoff, i)) out[k++] = out[i];
+    return k;
+}
+
+int cast_pool(int all, int imports, int* out, int max, const unsigned char* off)
+{
+    int b[BUILTIN_MAX], n = 0, i, k;
+    if (!all) {
+        for (i = 0; i < CAST_CHARACTERS && n < max; i++) out[n++] = cine[i];   /* (Claire's and Chris's cutscene models too: others may be shown as them) */
+    } else
+        for (i = 0, k = builtins_of(b, 1); i < k && n < max; i++)   /* ("Custom"'s whole list: Claire's and Chris's looks too, not Claire's second costume */
+            if (all == 2 || b[i] != ACTOR_PART + 4) out[n++] = b[i];   /* (its face does not move) but where "Custom" checks it) */
+    for (i = 0; i < imports_n(imports) && n < max; i++) out[n++] = ACTOR_MODELS + i;
+    if (all == 2) {   /* "Custom": the checked ones (the positions are "All models"'s) */
+        for (i = k = 0; i < n; i++) if (!cast_off_at(off, i)) out[k++] = out[i];
+        n = k;
+    }
+    return n;
+}
+
+/* the story character or creature a model shows (a pick of the same one is no change), -1 */
+static int model_char(int m)
+{
+    static const signed char part[5] = { 0, 1, 2, 3, 0 };   /* player files: Claire, Chris, Steve, Wesker, Claire's second costume */
+    if (m >= ACTOR_PART && m < ACTOR_PART + 5) return part[m - ACTOR_PART];
+    switch (m) {   /* (catalogue entries) */
+    case 16: return 7;              /* Nosferatu */
+    case 17: case 18: return 8;     /* the Tyrant */
+    case 20: case 21: return 9;     /* the Hunter, the Sweeper */
+    case CAST_ZOMBIES: return 10;   /* Steve's father: no other zombie */
+    }
+    for (int c = 0; c < CAST_CHARACTERS; c++) if (cine[c] == m) return c;
+    return -1;
+}
+
+static unsigned rng;
+static unsigned rnd(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }   /* xorshift32, as the enemy randomizer's */
+
+#define POOL_MAX (ACTOR_MODELS + 5 + ACTOR_IMPORT_MAX)
+static int pool[POOL_MAX], pick[CAST_ALL];
+static unsigned char used[POOL_MAX];
+
+int cast_model(unsigned seed, unsigned scene, int c, int all, int imports, const unsigned char* off, int enemy, const unsigned char* eoff)
+{
+    /* "Enemy Models" other than "Same as Cast": the creatures (lo .. hi - 1) from its pool, on their own turn */
+    int sep = enemy != CAST_ENEMY_SAME, lo = sep && c >= CAST_CHARACTERS ? CAST_CHARACTERS : 2, hi = sep && c < CAST_CHARACTERS ? CAST_CHARACTERS : CAST_ALL, n, i, k, t;
+    if (c < 0 || c >= CAST_ALL) return -1;
+    n = lo == CAST_CHARACTERS ? enemy_pool(enemy, pool, eoff) : cast_pool(all, imports, pool, POOL_MAX, off);
+    if (n < 1) return -1;   /* ("Custom" with nothing checked, "Enemy Models" Off: nobody changes) */
+    rng = (seed * 2654435761u) ^ (scene * 4u + 0x9E3779B9u);
+    if (!rng) rng = 1;
+    rnd(); rnd();
+    for (i = n - 1; i > 0; i--) { k = (int)(rnd() % (unsigned)(i + 1)); t = pool[i]; pool[i] = pool[k]; pool[k] = t; }   /* Fisher-Yates */
+    memset(used, 0, (size_t)n);
+    /* every character but Claire and Chris (never cast: cast_role), then the creatures, in turn (all of them, so each answer is the
+       same whichever is asked; the creatures after the characters, so the characters' picks are those of before): the first model of the
+       shuffle not taken and not its own; when only its own are left, it trades with an earlier character whose model
+       is not its own and who may take one of those left; with the pool used up, the first not its own again */
+    for (i = 0; i < lo; i++) pick[i] = -1;
+    for (i = lo; i < hi; i++) {
+        pick[i] = -1;
+        for (k = 0; k < n && pick[i] < 0; k++) if (!used[k] && model_char(pool[k]) != i) pick[i] = k;
+        for (k = 0; k < n && pick[i] < 0; k++) {
+            if (used[k]) continue;   /* a model left (its own): to an earlier character it suits */
+            for (t = 0; t < i && pick[i] < 0; t++)
+                if (pick[t] >= 0 && model_char(pool[k]) != t && model_char(pool[pick[t]]) != i) { pick[i] = pick[t]; pick[t] = k; used[k] = 1; }
+        }
+        if (pick[i] < 0) {   /* the pool used up (more characters than models): a new round over it */
+            for (k = 0; k < n && used[k]; k++);
+            if (k == n) memset(used, 0, (size_t)n);
+            for (k = 0; k < n && pick[i] < 0; k++) if (!used[k] && model_char(pool[k]) != i) pick[i] = k;
+        }
+        for (k = 0; k < n && pick[i] < 0; k++) if (model_char(pool[k]) != i) pick[i] = k;
+        if (pick[i] >= 0) used[pick[i]] = 1;   /* (none: a "Custom" pool of only its own looks; it stays itself) */
+    }
+    if (pick[c] < 0) return -1;
+    return pool[pick[c]] == CAST_ZOMBIES ? cast_zombie_look(seed, scene, c) : pool[pick[c]];   /* (the zombie entry: which look, from the same seed and scene) */
+}
+
+/* a scene zombie's models: "All models"' creatures (no story character, no player file) and the zombie looks as one
+   entry; "Custom": the checked ones of those (by their positions there); never the imports */
+static int crowd_pool(int all, int* out, const unsigned char* off)
+{
+    int b[BUILTIN_MAX], k = builtins_of(b, all == 2), n = 0, i;
+    for (i = 0; i < k; i++)
+        if ((b[i] == CAST_ZOMBIES || (b[i] < ACTOR_MODELS && cast_character(actor_models[b[i]].id, 0) < 0)) && !(all == 2 && cast_off_at(off, i))) out[n++] = b[i];
+    return n;
+}
+
+int cast_crowd_model(unsigned seed, unsigned scene, int id, int ver, int all, const unsigned char* off, int enemy, const unsigned char* eoff)
+{
+    int n = enemy == CAST_ENEMY_SAME ? crowd_pool(all, pool, off) : enemy_pool(enemy, pool, eoff), i, k, t, look = -1, j = 0, z;
+    for (i = 0; i < ACTOR_MODELS && look < 0; i++)   /* the record's look and its kind: its place among the zombie looks */
+        if (zombie(i)) { if (actor_models[i].id == id && actor_models[i].mdlver == ver) look = i; else j++; }
+    if (look < 0 || n < 1) return -1;
+    rng = (seed * 2654435761u) ^ (scene * 4u + 0x5BD1E995u);
+    if (!rng) rng = 1;
+    rnd(); rnd();
+    for (i = n - 1; i > 0; i--) { k = (int)(rnd() % (unsigned)(i + 1)); t = pool[i]; pool[i] = pool[k]; pool[k] = t; }   /* Fisher-Yates */
+    t = pool[j % n];   /* (the kinds in turn over the shuffle: the looks of one scene differ while the pool has enough) */
+    if (t != CAST_ZOMBIES) return t;
+    z = cast_zombie_look(seed, scene, CAST_CROWD + j);   /* another zombie look: the next one after its own */
+    for (i = 1; z == look && i <= ACTOR_MODELS; i++) if (zombie((look + i) % ACTOR_MODELS)) z = (look + i) % ACTOR_MODELS;
+    return z == look ? -1 : z;
+}
+
+/* the "You appear as" chr of model m (a player file, a catalogue entry, an import; not CAST_ZOMBIES) */
+static int chr_of(int m)
+{
+    if (m >= ACTOR_PART) return 1 + m - ACTOR_PART;                         /* player file n: chr 1 + n */
+    if (m >= ACTOR_MODELS) return COOP_CHR_IMPORT + m - ACTOR_MODELS;
+    return appear_canon(COOP_CHR_ACTOR + m);
+}
+
+/* "Randomize Character Model"'s pool: all as cast_pool's (0 the cutscene models, 1 "All models" with the player files
+   that have a twin too, 2 those of 1 whose bit in off is clear), imports 0..imports-1 after them */
+static int appear_pool(int all, int imports, int* out, const unsigned char* off)
+{
+    int n = all ? builtins_of(out, -1) : cast_pool(0, 0, out, POOL_MAX, NULL), i, k;
+    if (!all) { for (i = k = 0; i < n; i++) if (!protagonist(out[i])) out[k++] = out[i]; n = k; }   /* (the played look: not Claire's or Chris's) */
+    for (i = 0; i < imports_n(imports); i++) out[n++] = ACTOR_MODELS + i;
+    if (all == 2) {
+        for (i = k = 0; i < n; i++) if (!cast_off_at(off, i)) out[k++] = out[i];
+        n = k;
+    }
+    return n;
+}
+
+int cast_appear_pick(unsigned seed, int all, int imports, const unsigned char* off, int c)
+{
+    int n = appear_pool(all, imports, pool, off), m, k, j, got[3];
+    if (c < 0 || c > 2 || n < 1) return 0;   /* ("Custom" with nothing checked: no pick) */
+    for (k = 0; k <= c; k++) {   /* Claire's, then Chris's, then Steve's: each the next entry not taken (k 0: the pick of one look before) */
+        unsigned h = seed * 0x9E3779B1u + 0x632BE5ABu + (unsigned)k * 0x2545F491u;
+        h ^= h >> 16; h *= 0x85EBCA6Bu; h ^= h >> 13; h *= 0xC2B2AE35u; h ^= h >> 16;
+        got[k] = (int)(h % (unsigned)n);
+        for (j = 0; j < k && k < n; j++) if (got[j] == got[k]) { got[k] = (got[k] + 1) % n; j = -1; }   /* (fewer entries than characters: repeats) */
+    }
+    m = pool[got[c]];
+    if (m == CAST_ZOMBIES) m = cast_zombie_look(seed, 0, CAST_CHARACTERS + c);   /* (as a character of its own) */
+    return chr_of(m);
+}
+
+/* ---------------------------------------------------------------- "Custom" */
+unsigned char cast_off[CAST_OFF_BYTES], cast_appear_off[CAST_OFF_BYTES];
+
+static int is_cine(int m) { for (int c = 0; c < 4; c++) if (cine[c] == m) return 1; return 0; }   /* Claire's, Chris's, Steve's or Wesker's cutscene model */
+
+int cast_custom_list(int list, int imports, short* pos, int* model, int max)
+{
+    int b[BUILTIN_MAX], nb = builtins(b, list), n = 0, zombies, i, j, k, m, pass, mon = 0;
+    if (list == 2) enemy_list(b, &mon);   /* (the same entries: their monsters' count) */
+    for (pass = 0; pass < 3; pass++)   /* the built-in ones in the list's order, but the four cutscene models (its last) first;
+                                          the enemies' list: its monsters before them */
+        for (i = zombies = 0; i < appear_count() && n < max; i++) {
+            int chr = appear_at(i);
+            if (chr >= COOP_CHR_IMPORT && chr != COOP_CHR_CINE) break;
+            m = chr >= 1 && chr <= 5 ? ACTOR_PART + chr - 1 : chr >= COOP_CHR_ACTOR && chr <= COOP_CHR_MAX ? chr - COOP_CHR_ACTOR : -1;
+            if (m >= 0 && m < ACTOR_MODELS && zombie(m)) { if (zombies++) continue; m = CAST_ZOMBIES; }   /* (at the first zombie look's place) */
+            for (j = 0; j < nb && b[j] != m; j++);
+            if (j == nb || (list == 2 && j < mon ? 0 : 2 - is_cine(m)) != pass) continue;
+            pos[n] = (short)j; model[n++] = m;
+        }
+    for (k = 0; k < imps(list, imports) && n < max; k++) { pos[n] = (short)(nb + k); model[n++] = ACTOR_MODELS + k; }
+    return n;
+}
+
+const char* cast_entry_name(int m) { return m == CAST_ZOMBIES ? "Zombies (Random Look)" : appear_name(chr_of(m)); }
+const char* cast_entry_group(int m) { return appear_group(m == CAST_ZOMBIES ? COOP_CHR_ACTOR + cast_zombie_look(0, 0, 0) : chr_of(m)); }
+
+const char* cast_entry_key(int m, char* buf, int n)
+{
+    if (m >= ACTOR_MODELS && m < ACTOR_PART) {   /* an import: its folder (names repeat; .../<id>/<id>.cvxm) */
+        const char* f = m - ACTOR_MODELS < listed() ? actor_import_file[m - ACTOR_MODELS] : NULL;
+        const char* s = f ? strrchr(f, '/') : NULL;
+        int l = s ? (int)strlen(s + 1) : 0;
+        if (l > 5 && !strcmp(s + 1 + l - 5, ".cvxm")) l -= 5;
+        snprintf(buf, (size_t)n, "import:%.*s", l, s ? s + 1 : "");
+        return buf;
+    }
+    snprintf(buf, (size_t)n, "%s", m == CAST_ZOMBIES ? "Zombies" : appear_name(chr_of(m)));
+    return buf;
+}
+
+int cast_off_key(int list, unsigned char* off, const char* key)
+{
+    int b[BUILTIN_MAX], nb = builtins(b, list), j, imp = !strncmp(key, "import:", 7), n = imp ? imps(list, listed()) : nb;
+    char k[128];
+    for (j = 0; j < n; j++)
+        if (!strcmp(cast_entry_key(imp ? ACTOR_MODELS + j : b[j], k, sizeof(k)), key)) { cast_off_put(off, imp ? nb + j : j, 1); return 1; }
+    return 0;
+}
+
+void cast_off_write(int list, const unsigned char* off, void (*line)(const char* key, void* ud), void* ud)
+{
+    int b[BUILTIN_MAX], nb = builtins(b, list), j;
+    char k[128];
+    for (j = 0; j < nb + imps(list, listed()); j++)
+        if (cast_off_at(off, j)) line(cast_entry_key(j < nb ? b[j] : ACTOR_MODELS + j - nb, k, sizeof(k)), ud);
+}
+
+void cast_off_default(void)
+{
+    int b[BUILTIN_MAX], nb = builtins(b, 0), j;
+    memset(cast_off, 0, sizeof(cast_off));
+    for (j = 0; j < nb + listed(); j++) {   /* voiced and with a moving mouth: not a player file (Claire's second costume has no face motion) */
+        int m = j < nb ? b[j] : ACTOR_MODELS + j - nb;
+        cast_off_put(cast_off, j, voice_model_chr(m) < 0 || m >= ACTOR_PART);
+    }
+}
+
+void cast_enemy_default(unsigned char* eoff)
+{
+    int b[BUILTIN_MAX], mon, n = enemy_list(b, &mon);
+    while (n > mon) cast_off_put(eoff, --n, 1);
+}
+
+int cast_custom_count(int list, const unsigned char* off, int imports, int* total)
+{
+    int b[BUILTIN_MAX], n = builtins(b, list) + imps(list, imports), j, on = 0;
+    for (j = 0; j < n; j++) on += !cast_off_at(off, j);
+    if (total) *total = n;
+    return on;
+}
+
+unsigned cast_import_id(void)
+{
+    static int last = -1;
+    static unsigned id;
+    unsigned h = 2166136261u;
+    int n = listed();
+    if (n == last) return id;   /* (append-only: the count names the list) */
+    last = n;
+    if (!n) return id = 0;
+    for (int k = 0; k < n; k++) {
+        for (const char* s = actor_imports[k].name; s && *s; s++) h = (h ^ (unsigned char)*s) * 16777619u;
+        h = (h ^ (0x100u | actor_import_group[k])) * 16777619u;
+    }
+    return id = h ? h : 1;
+}

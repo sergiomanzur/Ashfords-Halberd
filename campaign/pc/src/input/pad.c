@@ -5,6 +5,7 @@
 #include "../ps2_platform.h"
 #include "../host/tps.h"
 #include "../host/bindings.h"
+#include "../host/cheat.h"
 #include <SDL3/SDL.h>
 #include <string.h>
 #include <stdlib.h>
@@ -56,7 +57,11 @@ static uint32_t scripted_buttons(void)
 static int input_enabled = 1;
 static uint64_t quickturn_since[2];
 static float move_x, move_y;
-static int move_analog, quickturn_on;
+static int move_analog, move_dpad, quickturn_on, free_aim_on;
+/* Start's keyboard binding (Enter) is down in this report (OPTION takes it as confirm too, options_glue.c) */
+static int kb_start;
+/* the DS2 buttons of the last report (the game's Pad[].on also has stick directions, at rest too) */
+static uint32_t report_bits;
 
 void pad_set_game_input_enabled(int on) { input_enabled = on; }
 int pad_game_input_enabled(void) { return input_enabled; }
@@ -65,7 +70,8 @@ void pad_snapshot_reset(void)
     float x, y;
     bind_snapshot_reset(); tps_take_mouse(&x, &y);
     memset(quickturn_since, 0, sizeof(quickturn_since));
-    move_x = move_y = 0; move_analog = quickturn_on = 0;
+    move_x = move_y = 0; move_analog = move_dpad = quickturn_on = free_aim_on = kb_start = 0;
+    report_bits = 0;
 }
 
 /* the gamepad of the input source (bindings.c): with "any" the open one stays while connected,
@@ -121,19 +127,29 @@ static uint8_t axis8(Sint16 v) { int x = (v + 32768) >> 8; return (uint8_t)(x < 
 
 /* modern controls (pc/glue/modern_glue.c), game thread: this frame's direction on screen (x
    right, y up, length up to 1) from the left stick past its dead zone, else from the d-pad rows
-   (arrow keys); and whether the quick-turn row is held */
-int pad_move_dir(float* x, float* y) { *x = move_x; *y = move_y; return move_analog; }
+   (arrow keys); whether it is the gamepad's d-pad (or the script's), not the arrow keys (`kb`:
+   the rows held on the keyboard; Combined plays the d-pad as Classic); and whether the
+   quick-turn row is held */
+int pad_move_dir(float* x, float* y, int* dpad) { *x = move_x; *y = move_y; *dpad = move_dpad; return move_analog; }
 int pad_quickturn_held(void) { return quickturn_on; }
-static void set_move_dir(uint32_t b, Sint16 sx, Sint16 sy)
+int pad_free_aim(void) { return free_aim_on; }
+static int last_pad;
+int pad_kb_start(void) { return kb_start; }
+int pad_report_bits(void) { return (int)report_bits; }
+int pad_last_pad(void) { return last_pad; }
+int reload_combo_ok(void);   /* reload_glue.c: our player in normal play */
+static void set_move_dir(uint32_t b, uint32_t kb, Sint16 sx, Sint16 sy)
 {
     float x = sx / 32767.0f, y = -sy / 32767.0f, m = sqrtf(x * x + y * y);
     const float dead = 0.25f;
     move_analog = m > dead;
+    move_dpad = 0;
     if (move_analog) {   /* rescaled from the dead zone on */
         float k = ((m > 1 ? 1 : m) - dead) / (1 - dead) / m;
         move_x = x * k; move_y = y * k;
         return;
     }
+    move_dpad = !(kb & (PAD_UP | PAD_RIGHT | PAD_DOWN | PAD_LEFT));
     move_x = (float)(!!(b & PAD_RIGHT) - !!(b & PAD_LEFT));
     move_y = (float)(!!(b & PAD_UP) - !!(b & PAD_DOWN));
     if (move_x != 0 && move_y != 0) { move_x *= 0.70710678f; move_y *= 0.70710678f; }
@@ -141,25 +157,37 @@ static void set_move_dir(uint32_t b, Sint16 sx, Sint16 sy)
 
 static void build_report(unsigned char* r)
 {
-    uint32_t b = 0, qbits = 0;
+    uint32_t b = 0, kb = 0, qbits = 0;
     Sint16 slx = 0, sly = 0;
     uint8_t lx = 128, ly = 128, rx = 128, ry = 128;
     const bool* k;
 
     ensure_gamepad();
+    kb_start = 0;
+    free_aim_on = 0;
     k = bind_latch_frame(pc_menu_smooth(), bind_keys());   /* quick presses in menus (bindings.c) */
     bind_combo_frame(input_enabled, k, tps_mouse_buttons());   /* the reload combination first: it takes its presses from the rows */
     if (input_enabled) {
         int mouse = tps_mouse_buttons(), qt;
         /* keyboard and gamepad through the bindings (bindings.c; by default arrows = d-pad,
            Enter = Start, Backspace = Select, Z/X/A/S = Cross/Circle/Square/Triangle, Q/W = L1/R1,
-           1/2 = L2/R2, the gamepad as a DS2); the keyboard is none while the co-op lobby has a
-           text field open (it types there) */
-        static const bool none[SDL_SCANCODE_COUNT];
+           1/2 = L2/R2, the gamepad as a DS2) */
         for (int i = 0; i < 16; i++)
-            if (bind_held(i, BIND_KB, k, mouse) || (gamepad && bind_held(i, BIND_PAD, k, 0))) b |= 1u << i;
+            if (bind_held(i, BIND_KB, k, mouse)) kb |= 1u << i;
+            else if (gamepad && bind_held(i, BIND_PAD, k, 0)) b |= 1u << i;
+        if (kb) last_pad = 0;
+        else if (b) last_pad = 1;
+        b |= kb;
+        kb_start = bind_held(B_START, BIND_KB, k, mouse);
         qt = bind_quickturn(0, bind_held(B_QUICKTURN, BIND_KB, k, mouse) || (gamepad && bind_held(B_QUICKTURN, BIND_PAD, k, 0)));
         if (qt) qbits = PAD_DOWN | (qt > 1 ? run_bits() : 0);
+        /* free aim (fixed cameras, in play; not while flying, where it flies down): the key type's aim button, and
+           modern_player cancels the game's turn to a target */
+        if (!g_tps.on && g_cheat.noclip != 2 && (bind_held(B_FREEAIM, BIND_KB, k, mouse) || (gamepad && bind_held(B_FREEAIM, BIND_PAD, k, 0))) &&
+            pc_keytype_mask(4) > 0 && reload_combo_ok()) {
+            b |= (uint32_t)pc_keytype_mask(4);
+            free_aim_on = 1;
+        }
         if (gamepad) {
             slx = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX);
             sly = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY);
@@ -172,9 +200,10 @@ static void build_report(unsigned char* r)
 
     bind_latch_end();
     b |= scripted_buttons();
-    set_move_dir(b, slx, sly);
+    set_move_dir(b, kb, slx, sly);
     quickturn_on = qbits != 0;
     b |= qbits;
+    report_bits = b;
     {   /* RECVX_PAD_TRACE=1: log the DS2 buttons when they change */
         static int trace = -1; static uint32_t last;
         if (trace < 0) trace = SDL_getenv("RECVX_PAD_TRACE") != NULL;
@@ -279,9 +308,10 @@ unsigned pad_quicksave_actions(void)
 
 /* noclip cheat with free height (pc/glue/cheat_glue.c), game thread: +1 up, -1 down. Up: the
    "noclip fly up" hotkeys (R, Page Up) or the R2 button (key 2, right trigger); down: "noclip
-   fly down" (F, Page Down) or L2 (key 1, left trigger). R2 is unused by the game's key types,
+   fly down" (F, Page Down) or L2 (key 1). R2 is unused by the game's key types,
    L2 only by type D; the stick clicks are not free (R3 = status). The gamepad's right trigger is
-   the quick knife's by default, which is off while flying (knife_glue.c), so it flies up too. */
+   the quick knife's by default, which is off while flying (knife_glue.c), so it flies up too; the
+   left trigger, free aim's, likewise down. */
 int pad_noclip_vertical(void)
 {
     const bool* k = bind_keys();
@@ -290,7 +320,8 @@ int pad_noclip_vertical(void)
     if (input_enabled) {
         if (bind_held(B_NOCLIP_UP, BIND_KB, k, 0) || bind_held(B_R2, BIND_KB, k, 0) ||
             (gamepad && (bind_held(B_R2, BIND_PAD, k, 0) || bind_held(B_QUICKKNIFE, BIND_PAD, k, 0)))) b |= PAD_R2;
-        if (bind_held(B_NOCLIP_DOWN, BIND_KB, k, 0) || bind_held(B_L2, BIND_KB, k, 0) || (gamepad && bind_held(B_L2, BIND_PAD, k, 0))) b |= PAD_L2;
+        if (bind_held(B_NOCLIP_DOWN, BIND_KB, k, 0) || bind_held(B_L2, BIND_KB, k, 0) ||
+            (gamepad && (bind_held(B_L2, BIND_PAD, k, 0) || bind_held(B_FREEAIM, BIND_PAD, k, 0)))) b |= PAD_L2;
     }
     if (b & PAD_R2) v++;
     if (b & PAD_L2) v--;

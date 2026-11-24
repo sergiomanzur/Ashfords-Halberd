@@ -1,5 +1,131 @@
 # Ashford's Halberd changes
 
+## 0.9.3b Beta (2026-11-24)
+
+Complete offline single-player upstream sync through `recvx-enhanced-port` 0.8.0
+(`8a1b6f066f9aab03618a428c575e034c2769da55`) and decomp `f30668f6fccddaa53ba3540b222a28fa09935165`,
+delivered across three strictly single-player waves (zero online co-op, networking, auto-updater,
+or online downloaders).
+
+### Extra Item Boxes, Blue Herb Planters and Antarctica Typewriter
+
+- Ported `Extra item boxes and herbs` (`Gameplay > Extra item boxes and herbs`), adding
+  working item boxes, blue herb planters, and an Antarctica typewriter with custom save
+  location strings (`SAVE_TEXT_ITM`) and full unit coverage (`test_placer`).
+- Ported the `Ps2_PXLCONV` scratch buffer fix (`ps2_LoadTim2.c` / `ps2_dummy.c`) so dynamic
+  texture uploads for extra models never corrupt room file reads.
+
+### Offline BioRand support and In-Game Spoiler Log
+
+- Ported strictly offline BioRand randomizer pack support (`mods/biorand/RM_*.RDX` and
+  `log_pl0.txt`, zero online downloads or network code) with `Gameplay > BioRand randomizer
+  pack` and `Rescan BioRand folder`, save-pack ID stamping & mismatch prompt, Claire item-box
+  unblocking (`item.c`), cutscene cast shot audio fallback (`bhWeaponSeCall`), and BioRand
+  seed codec + unit tests (`test_biorand_opts`, `test_spoiler`).
+- Added the in-game BioRand Spoiler Log screen (default hotkey `L` via `B_SPOILER` or
+  `SPOILER LOG` in Ashford Pause) browsing `log_pl0.txt` by area, segment, or key items with
+  real TIM2 item icons and current-room jumping.
+
+### Offline Resident Evil Outbreak File #2 Character Import
+
+- Ported the offline Outbreak File #2 (SLUS-20984) disc importer (`src/import/import.c`,
+  `impmodel.c`, `ob2.c`) with `.cvxm` CPU skinning, eyelid blinking, voice/cutscene jaw
+  animation, two-handed grip alignment, Cutscene Cast integration (`Include imported models`),
+  quicksave/quickload snapshot safety (`actor_snapshot_before_restore` / `after_restore`),
+  and an interactive Field Dossier F1 importer (`Character > IMPORTED CHARACTERS`).
+
+### Offline Languages, Cutscene Subtitles and Movie Overrides
+
+- Ported offline multi-language disc extraction and runtime support (`lang_glue.c`, `glyphs.c`,
+  `tr.c` + `TR_TABLE` resource, `src/import/lang.c`) supporting regional and fan-translated
+  Code: Veronica X PS2 discs, independent cutscene subtitles (`Subtitles`), `Translated
+  pictures`, `Translated title call`, Arabic RTL shaping, CJK wrapping, Japanese file-page
+  pictures, memory-card text fitting (`pc_mes_fit_x`), US-plate preservation (`lang_us_plates`),
+  snapshot restore safety (`lang_snapshot_after_restore`), Field Dossier F1 `LANGUAGE DISC
+  IMPORT`, and unit tests (`test_import`, `test_lang`).
+- Ported `mods/MOVIE/<name>.PSS` override support in `movie_glue.c` and `player.c` alongside
+  checked AFS/mod file redirection in `adx.c` (preserving full audio snapshot fidelity).
+
+### Enemies, sound banks and randomizer overhaul
+
+- Expanded active enemy capacity from 32 to 255 slots with per-slot enemy sound banks,
+  preserving full room-snapshot compatibility (`.ahsnap`).
+- Overhauled the enemy randomizer with distinct Hunter and Sweeper types, `Types per room`
+  variety control, and custom per-type spawn weight sliders (`rate_list.c` in native OPTION
+  and `enemy_rates_imgui` in Field Dossier F1).
+- Upgraded `Extra enemies` (up to 8 per room) and `Rearranged enemies` with ground-height
+  validation, door-margin spacing, and persistent kill tracking across room visits.
+
+### Appearance, animations and cutscene fixes
+
+- Added per-character model selection (`Character models: Same for both / Per character`
+  with separate `Claire's model` and `Chris's model`, plus `Current Character (Cutscene)`).
+- Fixed the 9100 Spotter cutscene softlock (`event.c`), added double-node shoulder retargeting,
+  ankle/toe grounding, spinning-hand and unarmed-hand fixes, gender-matched leg sync for
+  Move While Aiming, and Wesker's afterimage trail (`trail_glue.c`).
+
+### Cutscene Cast and Voice-Line randomizers
+
+- Ported the offline Cutscene Cast randomizer (`Randomize cutscene cast`, `Cast model pool`,
+  `Cast assignment`, `Randomize cutscene monsters`, `Cutscene enemy models`) with custom model
+  and monster checklists (`cast_list.c` + Field Dossier F1).
+- Ported the deterministic Cutscene Voice-Line randomizer (`Randomize voice lines`, `Talking
+  mouths`) with background disc voice cataloguing + cache, ADX/synthesizer envelope-driven
+  lip sync, and unit coverage (`test_cast`).
+
+### Menus, visual item picker and UX polish
+
+- Added an Ashford-styled in-game Pause Menu (`Gameplay > Pause menu: Ashford Pause / Classic
+  OPTION`) with one-tap Camera cycling across Original, Third person, and First person,
+  active campaign modifiers summary, hotkey card, and direct access to Enhanced Options,
+  Appearance & Cast, Cheats & Tools, Classic OPTION, and Return to Title.
+- Added a Title Screen `EXIT` row with a confirmation dialog (`Quit the game?`).
+- Added a Visual Give Item picker with real `ITEM AFS` inventory icons, categories, quantity
+  stepping, and item-box overflow fallback in both native OPTION (`give_list.c`) and Field
+  Dossier F1 (`Cheats > ITEMS`).
+- Added procedural vector controller/keyboard button glyphs (`Controls > Button icons`),
+  10-second Keep-or-Revert confirmation for Display Mode and Fullscreen Resolution changes,
+  Restart and Next-Room badges, and a live Performance Graph HUD (`Display > Frame rate HUD:
+  Off / FPS / FPS + Graph`).
+
+### Renderer, anti-aliasing and performance
+
+- Completed 3D-only FXAA and SMAA (`gs_scene_aa`) keeping 2D menus, fonts and HUD sharp,
+  and added 16-bit floating-point render targets with IGN dithering and optional Deband
+  (`Dithering: Off / On / Deband`) while preserving Ashford's Saturation control.
+- Ported the 0.7.2/0.7.7 GS and interpolation optimizations: `TEX0` batch merging,
+  specialized GS fragment shader variants, block-by-block GS texture decode and CLUT loads
+  (including the GCC `-m32 -O3` `PSMT8`/`Z16` `gs_read_rect` fix), capture pool reuse and
+  GPU clears, bbox-culled interpolation matching, underwater smooth motion, slow-GPU
+  present fallback, and ini-only `dyn_res` support.
+
+### HUD, audio and engine fixes
+
+- Completed the Ashford HUD (Weapon Circle and Minimal layouts) with real spare-ammo
+  counting matching `bhSearchBullet` (including side pack and gas rounds), ammo-type
+  coloring, TIM2 weapon icons extracted offline from `ITEM AFS` file 145, and fixed
+  shoulder-follow placement for first-person and fixed cameras.
+- Added `snd_sysbank_load()` fallback so F2 Save Now / Load Game / Open Item Box play
+  menu sound effects outside save rooms.
+- Ported small engine/decomp fixes: widescreen B.O.W. gas effect framing (`bhDrawNtxEffect2D`),
+  Smooth Menus arrow-sliding fix, unnamed-room `Type_Space[-1]` bounds guard for F2 Save Now,
+  and ISO9660 directory record length validation.
+
+### Fixed-camera controls and input polish
+
+- Added Combined fixed-camera controls (`Fixed camera controls: Combined (d-pad tank)`,
+  default on first start and in the Enhanced preset, with `fixed_cam_version` migration).
+- Added rebindable fixed-camera `Aim (no auto-aim)` (`E` / Left Trigger, `bindings_version = 4`
+  migration preserving existing controller weapon shortcuts).
+- Enabled mouse buttons on fixed-camera game bindings, OPTION Enter confirmation, trigger/stick
+  release waiting after binding capture, 2-frame item-box wheel scrolling, and single-owner
+  thread-safe gamepad metadata (`bind_pad_desc`).
+
+### Tests
+
+- Added `gsmem` (`-O3`), `aa_tables` (SMAA LUT hashes), and offline `parsers` unit tests,
+  plus dithering shader, Combined/Free Aim, and OPTION Enter regression tests.
+
 ## 0.9.2b Beta – 2026-11-15
 
 ### Upstream sync (single-player subset of recvx-enhanced-port 0.6.9–0.8.0)

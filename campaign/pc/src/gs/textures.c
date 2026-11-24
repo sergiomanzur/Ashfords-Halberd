@@ -215,6 +215,12 @@ void ntex_define_capture(uint32_t id, unsigned int gl_tex, int w, int h)
     d->valid = 1;
 }
 
+unsigned int ntex_capture_tex(uint32_t id)
+{
+    const Def* d = def_find(id);
+    return d ? d->capture : 0;
+}
+
 /* run ops [a, b) of a definition on the current GS memory, transfers rebased from the
    definition's addresses to tbp/cbp */
 static void run_ops(const Def* d, int a, int b, uint32_t tbp, uint32_t cbp)
@@ -266,6 +272,13 @@ static void execute_pending(int i)
             run_ops(d, d->clut_end, d->nop, p->tbp, 0);
         }
     }
+}
+
+int ntex_pending(uint32_t page0, uint32_t page1)
+{
+    if (executing || gs_memp != gs_mem || gs_replaying) return 0;   /* (as ntex_before_access) */
+    for (int i = 0; i < npending; i++) if (overlaps(pending[i].page0, pending[i].page1, page0, page1)) return 1;
+    return 0;
 }
 
 void ntex_before_access(uint32_t page0, uint32_t page1)
@@ -408,6 +421,8 @@ static GLuint decode(const Def* d, uint64_t tex0, uint64_t texa, int* w, int* h)
     *w = (int)W; *h = (int)H;
     return t;
 }
+
+int ntex_count(void) { int n = 0; for (int i = 0; i < MAX_NTEX; i++) n += ntex[i].used != 0; return n; }
 
 int ntex_lookup(uint64_t tex0, uint64_t texa, unsigned int* out_tex, int* out_w, int* out_h)
 {

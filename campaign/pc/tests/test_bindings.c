@@ -3,6 +3,7 @@
    the gamepad set through SDL's gamepad layer with a virtual Xbox pad, the input source filter
    and the choice of gamepad (two virtual pads, one reconnecting). */
 #include "../src/host/bindings.h"
+#include "../src/host/menu_mouse.h"
 #include "../src/host/tps.h"
 #include <SDL3/SDL.h>
 #define CHECK(x) do { if (!(x)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #x); return 1; } } while (0)
@@ -10,6 +11,7 @@
 #include <string.h>
 
 TpsConfig g_tps = { .key = SDL_SCANCODE_F5 };
+MenuMouse g_menu_mouse;
 SDL_Window* g_window;
 uint64_t gs_frame_count(void) { return 0; }
 void host_log(const char* fmt, ...) { (void)fmt; }
@@ -140,6 +142,25 @@ int main(void)
     CHECK(held(B_TPS_RUN, SDL_SCANCODE_RSHIFT) && held(B_NOCLIP_UP, SDL_SCANCODE_PAGEUP));
     CHECK(bind_get(B_TPS_FIRE, BIND_KB, 0) == BIND_MOUSE + SDL_BUTTON_LEFT);
     for (int r = 0; r < B_COUNT; r++) CHECK(!bind_conflict(r, BIND_KB) && !bind_conflict(r, BIND_PAD));
+    /* free aim: E and the left trigger (L2's before); a file from before it (bindings_version < 4) drops L2's old left
+       trigger, and a key it gave another game row keeps it (free aim's default gives way) */
+    CHECK(held(B_FREEAIM, SDL_SCANCODE_E) && bind_get(B_FREEAIM, BIND_PAD, 0) == BIND_AXIS + SDL_GAMEPAD_AXIS_LEFT_TRIGGER * 2 && !bind_get(B_L2, BIND_PAD, 0));
+    CHECK(bind_ini_line("pad_l2", "+lefttrigger") && !bind_get(B_L2, BIND_PAD, 0) && !bind_conflict(B_FREEAIM, BIND_PAD));
+    CHECK(bind_ini_line("key_l3", "E") && held(B_L3, SDL_SCANCODE_E) && !bind_get(B_FREEAIM, BIND_KB, 0) && !bind_conflict(B_L3, BIND_KB));
+    CHECK(bind_ini_line("key_l3", "none"));
+    bind_set(B_FREEAIM, BIND_KB, 0, SDL_SCANCODE_E);
+    {   /* a mouse button captured for a game row (F1, ENHANCED OPTIONS) plays it (fixed cameras: pad.c passes the buttons) */
+        SDL_Event e = { 0 };
+        bind_capture_start(BIND_KB);
+        SDL_Delay(260);   /* not the click that started the capture */
+        e.type = SDL_EVENT_MOUSE_BUTTON_DOWN; e.button.button = SDL_BUTTON_RIGHT;
+        CHECK(bind_event(&e) && bind_capture_poll() == BIND_MOUSE + SDL_BUTTON_RIGHT);
+        bind_set(B_R1, BIND_KB, 1, BIND_MOUSE + SDL_BUTTON_RIGHT);
+        CHECK(!bind_conflict(B_R1, BIND_KB) && bind_get(B_TPS_AIM, BIND_KB, 0) == BIND_MOUSE + SDL_BUTTON_RIGHT);   /* shared with third person */
+        memset(keys, 0, sizeof(keys));
+        CHECK(bind_held(B_R1, BIND_KB, keys, SDL_BUTTON_RMASK) && !bind_held(B_R1, BIND_KB, keys, SDL_BUTTON_LMASK));
+        bind_set(B_R1, BIND_KB, 1, 0);
+    }
     /* third person on the gamepad (modern scheme): its own rows, which share buttons with the game rows on purpose */
     CHECK(bind_get(B_TPS_FIRE, BIND_PAD, 0) == BIND_AXIS + SDL_GAMEPAD_AXIS_RIGHT_TRIGGER * 2 && bind_get(B_TPS_AIM, BIND_PAD, 0) == BIND_AXIS + SDL_GAMEPAD_AXIS_LEFT_TRIGGER * 2);
     CHECK(bind_get(B_TPS_ACTION, BIND_PAD, 0) == 1 + SDL_GAMEPAD_BUTTON_SOUTH && bind_get(B_CROSS, BIND_PAD, 0) == 1 + SDL_GAMEPAD_BUTTON_SOUTH);
@@ -176,6 +197,9 @@ int main(void)
     CHECK(now(B_RELOAD) && !now(B_SQUARE));
     report(0, 0);
     report(SDL_SCANCODE_A, SDL_SCANCODE_W);          /* both at once: the reload's */
+    CHECK(now(B_RELOAD) && !now(B_SQUARE));
+    report(0, 0);
+    report(SDL_SCANCODE_A, SDL_SCANCODE_E);          /* free aim is aim too */
     CHECK(now(B_RELOAD) && !now(B_SQUARE));
     report(0, 0);
     playing = 0;                                     /* not in play (a menu, an event): Square's */
@@ -270,7 +294,7 @@ int main(void)
     }
     bind_set(B_TPS_RUN, BIND_PAD, 0, 1 + SDL_GAMEPAD_BUTTON_WEST);
     CHECK(bind_ini_line("pad_l2", "-lefty") && bind_get(B_L2, BIND_PAD, 0) == BIND_AXIS + SDL_GAMEPAD_AXIS_LEFTY * 2 + 1);
-    CHECK(bind_ini_line("pad_l2", "+lefttrigger") && bind_ini_line("pad_cross", "south") && !bind_ini_line("coop_port", "7140"));
+    CHECK(bind_ini_line("pad_l2", "none") && bind_ini_line("pad_cross", "south") && !bind_ini_line("coop_port", "7140"));
     /* input source (pure): keyboard/mouse in Auto and K/M only; a gamepad in Auto and Gamepad only, any or the chosen player */
     CHECK(input_accept(INPUT_AUTO, 0, BIND_KB, 0) && input_accept(INPUT_KBM, 0, BIND_KB, 0) && !input_accept(INPUT_PAD, 0, BIND_KB, 0));
     CHECK(input_accept(INPUT_AUTO, 0, BIND_PAD, 3) && !input_accept(INPUT_KBM, 0, BIND_PAD, 0) && input_accept(INPUT_PAD, 0, BIND_PAD, -1));
@@ -444,7 +468,8 @@ int main(void)
         SDL_UpdateGamepads();
         CHECK(!bind_held(B_WEAPON_NEXT, BIND_PAD, keys, 0));
         CHECK(!strcmp(bind_code_name(BIND_PAD, bind_get(B_CROSS, BIND_PAD, 0), buf, sizeof(buf)), "A"));
-        CHECK(!strcmp(bind_code_name(BIND_PAD, bind_get(B_L2, BIND_PAD, 0), buf, sizeof(buf)), "LT"));
+        CHECK(!strcmp(bind_code_name(BIND_PAD, bind_get(B_FREEAIM, BIND_PAD, 0), buf, sizeof(buf)), "LT"));
+        CHECK(!strcmp(bind_pad_desc(buf, sizeof(buf)), "test pad"));
         SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_SOUTH, true);
         SDL_UpdateGamepads();
         CHECK(bind_held(B_CROSS, BIND_PAD, keys, 0) && !bind_held(B_TRIANGLE, BIND_PAD, keys, 0));
@@ -453,8 +478,11 @@ int main(void)
         SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_SOUTH, false);
         SDL_SetJoystickVirtualAxis(j, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 32767);
         SDL_UpdateGamepads();
-        CHECK(bind_held(B_L2, BIND_PAD, keys, 0) && !bind_held(B_TRIANGLE, BIND_PAD, keys, 0));
+        CHECK(bind_held(B_FREEAIM, BIND_PAD, keys, 0) && !bind_held(B_L2, BIND_PAD, keys, 0) && !bind_held(B_TRIANGLE, BIND_PAD, keys, 0));
+        CHECK(bind_any_down());   /* held trigger counts as held after capture */
         SDL_SetJoystickVirtualAxis(j, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, -32768);
+        SDL_UpdateGamepads();
+        CHECK(!bind_any_down());
         /* third-person play with the modern scheme: the third-person rows play, the game rows lose their buttons */
         SDL_SetJoystickVirtualAxis(j, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, 32767);
         SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_DPAD_UP, true);

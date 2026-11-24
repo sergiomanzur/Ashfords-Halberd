@@ -23,13 +23,16 @@ void ntex_note_upload(const uint64_t* pages);   /* GS memory uploads: unbind ove
 /* GS memory pages page0..page1 are about to be read or written other than through
    ntex_lookup: bound slots there are written into GS memory first */
 void ntex_before_access(uint32_t page0, uint32_t page1);
+int ntex_pending(uint32_t page0, uint32_t page1);   /* ntex_before_access would write some */
 void ntex_forget(uint32_t id);   /* the game thread dropped a definition */
 /* definition id is a texture captured from a render target (gs_capture_rt, RGBA16F as the
    render targets); replaces an earlier capture of the same id */
 void ntex_define_capture(uint32_t id, unsigned int gl_tex, int w, int h);
+unsigned int ntex_capture_tex(uint32_t id);   /* the GL texture of capture id (0: none) */
 /* the slot bindings (replays of a frame start from its starting state) */
 #define NTEX_STATE_SIZE 12288
 void ntex_state_save(void* out);
 void ntex_state_restore(const void* in);
 /* a texture for TEX0 if its TBP is a bound slot (1; 2: a capture, alpha stored as A/128), else 0 */
 int  ntex_lookup(uint64_t tex0, uint64_t texa, unsigned int* tex, int* w, int* h);
+int  ntex_count(void);   /* native textures held (the frame dump log: a leak shows as growth) */

@@ -1,11 +1,14 @@
 /* User settings: <save_dir>/recvx.ini, "key = value" lines. */
 #include "../ps2_platform.h"
 #include "actors.h"
+#include "cast.h"
 #include "tps.h"
 #include "menu_mouse.h"
 #include "enemies.h"
 #include "bindings.h"
 #include "modern.h"
+#include "lang.h"
+#include "../import/import.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <string.h>
@@ -23,7 +26,9 @@ static const struct { const char* key; int* val; int lo, hi; } keys[] = {
     { "fps_limit", &g_config.fps_limit, 0, 5 },
     { "scale", &g_config.scale, 0, 8 },
     { "aspect", &g_config.aspect, 0, 2 },
-    { "show_fps", &g_config.show_fps, 0, 1 },
+    { "show_fps", &g_config.show_fps, 0, 2 },
+    { "pause_menu", &g_config.pause_menu, 0, 1 },
+    { "button_icons", &g_button_icons, 0, 4 },
     { "music_volume", &g_config.music_volume, 0, 100 },
     { "sfx_volume", &g_config.sfx_volume, 0, 100 },
     { "rumble_strength", &g_config.rumble, 0, 100 },
@@ -38,6 +43,7 @@ static const struct { const char* key; int* val; int lo, hi; } keys[] = {
     { "saturation", &g_config.saturation, 0, 200 },
     { "antialias", &g_config.antialias, 0, 2 },
     { "dithering", &g_config.dithering, 0, 2 },
+    { "dyn_res", &g_config.dyn_res, 0, 1 },
     { "settings_preset", &g_config.settings_preset, 0, 2 },
     { "skip_doors", &g_config.skip_doors, 0, 2 },     /* 0 off, 1 instant, 2 skippable */
     { "fast_loading", &g_config.fast_loading, 0, 1 },
@@ -49,7 +55,12 @@ static const struct { const char* key; int* val; int lo, hi; } keys[] = {
     { "skip_intro", &g_config.skip_intro, 0, 1 },
     { "battle_unlocked", &g_config.battle_unlocked, 0, 1 },
     { "difficulty_select", &g_config.difficulty_select, 0, 1 },
-    { "no_ink_ribbon", &g_config.no_ink_ribbon, 0, 1 },   /* typewriters save without an ink ribbon (co-op: the host's) */
+    { "no_ink_ribbon", &g_config.no_ink_ribbon, 0, 1 },   /* typewriters save without an ink ribbon */
+    { "extra_objects", &g_config.extra_objects, 0, 1 },   /* extra item boxes, blue herb planters and typewriter */
+    { "biorand", &g_config.biorand, 0, 1 },             /* locally generated BioRand pack in mods/biorand */
+    { "subtitles", &g_subtitles, 0, 1 + LANG_COUNT },   /* 0 off, 1 game's language (legacy), 2 + LANG_* */
+    { "translated_pictures", &g_lang_pictures, 0, 1 },  /* language pictures (0 English for HD packs) */
+    { "translated_voices", &g_lang_voices, 0, 1 },      /* language title call where its disc has one */
     { "save_system", &g_config.save_system, 0, 1 },     /* 0 native files, 1 memory card */
     { "native_3d", &g_config.native_3d, 0, 1 },
     { "native_tex", &g_config.native_tex, 0, 1 },
@@ -59,20 +70,31 @@ static const struct { const char* key; int* val; int lo, hi; } keys[] = {
     { "interpolate", &g_config.interpolate, 0, 1 },
     { "smooth_menus", &g_config.menu_smooth, 0, 1 },
     { "frame_blend", &g_config.frame_blend, -1, 1 },
-    { "appear_char", &g_appear_chr, 0, COOP_CHR_MAX },
+    { "appear_char", &g_appear_chr, 0, COOP_CHR_CINE },
+    { "appear_per_char", &g_appear_per, 0, 1 },
+    { "appear_claire", &g_appear_own[0], -1, COOP_CHR_CINE },
+    { "appear_chris", &g_appear_own[1], -1, COOP_CHR_CINE },
     { "appear_gender_anim", &g_appear_anim, 0, 1 },
     { "appear_cutscene_face", &g_appear_face, 0, 1 },
     { "appear_in_cutscenes", &g_appear_cutscene, 0, 1 },
     { "menu_mouse", (int*)&g_menu_mouse.on, 0, 1 },
     { "input_source", &g_input_source, 0, 2 },            /* INPUT_*: Auto, Keyboard/mouse only, Gamepad only */
     { "input_pad", &g_input_pad, 0, 4 },                  /* 0 any gamepad, n player n's (bindings.c) */
-    { "fixed_cam_controls", &g_modern_on, 0, 1 },        /* fixed cameras: 0 classic (tank), 1 modern (camera-relative) */
-    { "enemy_extra", &g_enemy_opts.extra, 0, 3 },        /* enemy options (docs/ENEMIES.md "Enemy options") */
+    { "fixed_cam_controls", &g_modern_on, 0, 2 },        /* fixed cameras: 0 classic (tank), 1 modern (camera-relative), 2 combined */
+    { "enemy_extra", &g_enemy_opts.extra, 0, ENEMY_EXTRA_MAX }, /* enemy options (docs/ENEMIES.md "Enemy options") */
     { "enemy_place", &g_enemy_opts.place, 0, 1 },
     { "enemy_random", &g_enemy_opts.rand, 0, 1 },
     { "enemy_seed", &g_enemy_opts.seed, 0, 0x7FFFFFFF },
-    { "enemy_variety", &g_enemy_opts.variety, 0, 1 },    /* 0 Mild, 1 Wild */
+    { "enemy_variety", &g_enemy_opts.variety, 0, 2 },    /* 0 Mild, 1 Wild, 2 Custom (enemy_rates line) */
+    { "enemy_types", &g_enemy_opts.types, 0, ENEMY_TYPES_MAX }, /* Types per room, 0 no limit */
     { "enemy_random_events", &g_enemy_opts.events, 0, 1 },
+    { "cast_random", &g_enemy_opts.cast, 0, 3 },         /* cutscene cast: 0/1 (legacy 2 off, 3 on) */
+    { "cast_models", &g_enemy_opts.cast_all, 0, 2 },     /* 0 cutscene models, 1 all models, 2 custom */
+    { "cast_assign", &g_enemy_opts.cast_assign, 0, 1 },  /* 0 fixed per character, 1 random per cutscene */
+    { "cast_imports", &g_enemy_opts.cast_imports, 0, 1 },/* 1 include imported models in cutscene cast */
+    { "cast_enemy_models", &g_enemy_opts.cast_enemy, 0, 3 }, /* 0 same as cast, 1 all enemies, 2 custom, 3 off */
+    { "voice_random", &g_enemy_opts.voices, 0, 1 },      /* randomize voice lines */
+    { "voice_mouths", &g_voice_mouths, 0, 1 },           /* talking mouths on inserted lines without LipSet */
     { "tps", (int*)&g_tps.on, 0, 2 },
     { "tps_fov", &g_tps.fov, 30, 130 },
     { "tps_aim_fov", &g_tps.aim_fov, 20, 130 },
@@ -114,6 +136,33 @@ static char* trim(char* s)
 }
 
 static char ini_hd_dir[1024];
+static int cast_custom_set, enemy_custom_set;
+
+/* "import_<key>_iso = <path>" (import.h): 1 if it is one */
+static int import_iso_line(const char* line)
+{
+    for (int s = 0; s < IMPORT_SOURCES; s++) {
+        size_t n = strlen(import_sources[s].key);
+        const char* v = line + 7 + n;
+        if (strncmp(line + 7, import_sources[s].key, n) || strncmp(v, "_iso", 4)) continue;
+        for (v += 4; *v == ' '; v++) {}
+        if (*v++ != '=') return 0;
+        while (*v == ' ') v++;
+        snprintf(g_import.iso[s], sizeof(g_import.iso[s]), "%.*s", (int)strcspn(v, "\r\n"), v);
+        return 1;
+    }
+    return 0;
+}
+
+static void cast_default(int had)
+{
+    if (!cast_custom_set && !had && g_enemy_opts.cast_all != 2) cast_off_default();
+    if (!enemy_custom_set) cast_enemy_default(g_enemy_opts.cast_enemy_off);
+    cast_custom_set = enemy_custom_set = 1;
+}
+
+static void off_line(const char* key, void* f) { fprintf((FILE*)f, "cast_custom_off = %s\n", key); }
+static void enemy_off_line(const char* key, void* f) { fprintf((FILE*)f, "enemy_custom_off = %s\n", key); }
 
 static void path(char* out, size_t n) { SDL_snprintf(out, n, "%s/recvx.ini", g_config.save_dir); }
 
@@ -121,26 +170,75 @@ void config_load(void)
 {
     char p[1100], line[1100], k[64], val[128];
     int v;
+    int combined_seen = 0, had_off = 0, migrate, enemy = g_enemy_opts.cast_enemy;
     FILE* f;
     path(p, sizeof(p));
-    if (!(f = pc_fopen(p, "r"))) return;
+    if (!(f = pc_fopen(p, "r"))) {
+        import_registry_load();
+        cast_default(0);
+        return;
+    }
+    g_enemy_opts.cast_enemy = -1;
     while (fgets(line, sizeof(line), f))
         if (sscanf(line, " iso = %1023[^\r\n]", g_config.iso_path) == 1) continue;
+        else if (sscanf(line, " fixed_cam_version = %d", &v) == 1) { combined_seen = 1; continue; }
+        else if (sscanf(line, " cast_custom_set = %d", &v) == 1) { cast_custom_set = v != 0; continue; }
+        else if (sscanf(line, " enemy_custom_set = %d", &v) == 1) { enemy_custom_set = v != 0; continue; }
+        else if (sscanf(line, " cast_monsters_alone = %d", &v) == 1) { enemy_cast_alone_set(&g_enemy_opts, v != 0); continue; }
         else if (sscanf(line, " hd_textures_dir = %1023[^\r\n]", ini_hd_dir) == 1) { SDL_strlcpy(g_config.hd_textures_dir, ini_hd_dir, sizeof(ini_hd_dir)); continue; }
+        else if (sscanf(line, " import_dir = %1023[^\r\n]", g_import.dir) == 1) continue;
+        else if (!strncmp(line, "import_", 7) && import_iso_line(line)) continue;
+        else if (sscanf(line, " language = %7s", k) == 1) {
+            for (int l = 0; l < LANG_COUNT; l++) if (!strcmp(k, lang_codes[l])) g_lang = l;
+            continue;
+        }
+        else if (!strncmp(line, "enemy_rates =", 13)) { line[strcspn(line, "\r\n")] = 0; enemy_rates_ini(line + 13 + strspn(line + 13, " ")); continue; }
+        else if (!strncmp(line, "cast_custom_off =", 17) || !strncmp(line, "enemy_custom_off =", 18)) continue;
         else if (sscanf(line, " %63[a-z_0-9] = %127[^\r\n]", k, val) == 2 && bind_ini_line(k, trim(val))) continue;
         else if (sscanf(line, " %63[a-z_0-9] = %d", k, &v) == 2)
             for (size_t i = 0; i < SDL_arraysize(keys); i++)
                 if (!strcmp(k, keys[i].key) && v >= keys[i].lo && v <= keys[i].hi) *keys[i].val = v;
+    import_registry_load();   /* imported player models must be registered before cast_off_key and appear_canon */
+    migrate = g_enemy_opts.cast_enemy < 0 && g_enemy_opts.cast_all == 2;
+    if (g_enemy_opts.cast_enemy < 0) g_enemy_opts.cast_enemy = migrate ? CAST_ENEMY_CUSTOM : enemy;
+    rewind(f);
+    while (fgets(line, sizeof(line), f)) {
+        int list = !strncmp(line, "enemy_custom_off =", 18) ? 2 : !strncmp(line, "cast_custom_off =", 17) ? 0 : -1;
+        char* s = line + (list == 2 ? 18 : 17);
+        if (list < 0) continue;
+        had_off |= !list;
+        s += strspn(s, " ");
+        s[strcspn(s, "\r\n")] = 0;
+        cast_off_key(list, list == 2 ? g_enemy_opts.cast_enemy_off : cast_off, trim(s));
+        if (!list && migrate) cast_off_key(2, g_enemy_opts.cast_enemy_off, s);
+    }
     fclose(f);
+    cast_default(had_off);
+    /* a file from before Combined (no fixed_cam_version line): Modern, the default then and always
+       written, becomes Combined; Classic, never the default since Modern, stays */
+    if (!combined_seen && g_modern_on == 1) g_modern_on = MODERN_COMBINED;
     g_appear_chr = appear_canon(g_appear_chr);
+    for (int i = 0; i < 2; i++) if (g_appear_own[i] >= 0) g_appear_own[i] = appear_canon(g_appear_own[i]);
+    g_enemy_opts.cast = g_enemy_opts.cast == 1 || g_enemy_opts.cast == 3;
 }
 
 static int write_ini(FILE* f, void* ud)
 {
     (void)ud;
     for (size_t i = 0; i < SDL_arraysize(keys); i++) fprintf(f, "%s = %d\n", keys[i].key, *keys[i].val);
+    fprintf(f, "fixed_cam_version = 1\n");   /* fixed_cam_controls knows Combined (config_load) */
+    fprintf(f, "cast_custom_set = 1\n");
+    fprintf(f, "enemy_custom_set = 1\n");
+    if (enemy_cast_alone(&g_enemy_opts)) fprintf(f, "cast_monsters_alone = 1\n");
+    fprintf(f, "enemy_rates = %s\n", enemy_rates_text());
+    cast_off_write(0, cast_off, off_line, f);
+    cast_off_write(2, g_enemy_opts.cast_enemy_off, enemy_off_line, f);
     if (g_config.iso_path[0]) fprintf(f, "iso = %s\n", g_config.iso_path);
     if (ini_hd_dir[0]) fprintf(f, "hd_textures_dir = %s\n", ini_hd_dir);   /* not --hd-textures */
+    if (g_import.dir[0]) fprintf(f, "import_dir = %s\n", g_import.dir);
+    for (int s = 0; s < IMPORT_SOURCES; s++)
+        if (g_import.iso[s][0]) fprintf(f, "import_%s_iso = %s\n", import_sources[s].key, g_import.iso[s]);
+    if (g_lang > 0 && g_lang < LANG_COUNT) fprintf(f, "language = %s\n", lang_codes[g_lang]);
     bind_ini_write(f);
     return 0;
 }

@@ -8,7 +8,9 @@
 extern "C" {
 #endif
 
-extern int g_modern_on;   /* "Fixed camera controls": 0 classic (tank), 1 modern (ini fixed_cam_controls) */
+extern int g_modern_on;   /* "Fixed camera controls" (ini fixed_cam_controls): 0 classic (tank), 1 modern,
+                             MODERN_COMBINED the stick modern and the gamepad's d-pad classic */
+#define MODERN_COMBINED 2
 
 #define MODERN_DEG(a) ((a) * (65536.0f / 360.0f))
 

@@ -1,6 +1,11 @@
 /* A rebuilt stream must consume the same queued PCM and continue the same ADX history. */
 #include "../src/audio/audio.c"
 HostConfig g_config;
+int biorand_active(void) { return 0; }
+const char* pc_lang_file_dir(const char* name) { (void)name; return NULL; }
+void pc_lang_file_opened(const char* name, int src) { (void)name; (void)src; }
+struct PcPart;
+int pc_lang_disc_parts(const char* name, FILE* f, uint32_t size, uint32_t lsn, uint32_t dsize, struct PcPart* out, int max) { (void)name; (void)f; (void)size; (void)lsn; (void)dsize; (void)out; (void)max; return 0; }
 void host_log(const char* fmt, ...) { (void)fmt; }
 FILE* pc_fopen(const char* p, const char* m) { return fopen(p, m); }
 int cdvd_find_file(const char* p, uint32_t* l, uint32_t* n) { (void)p; (void)l; (void)n; return 0; }

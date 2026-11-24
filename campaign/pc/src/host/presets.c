@@ -30,7 +30,7 @@ int preset_get(void)
 {
     int selected = g_config.settings_preset;
     if (selected != 0 && selected != 1) return 2;
-    if (g_modern_on != selected) return 2;
+    if (g_modern_on != (selected ? MODERN_COMBINED : 0)) return 2;
     for (size_t i = 0; i < sizeof(preset_fields) / sizeof(preset_fields[0]); ++i) {
         const int* value = (const int*)((const unsigned char*)&g_config + preset_fields[i].offset);
         int expected = selected ? preset_fields[i].enhanced : preset_fields[i].original;
@@ -49,7 +49,7 @@ void preset_set(int value)
             int* field = (int*)((unsigned char*)&g_config + preset_fields[i].offset);
             *field = value ? preset_fields[i].enhanced : preset_fields[i].original;
         }
-        g_modern_on = value;
+        g_modern_on = value ? MODERN_COMBINED : 0;
     }
     g_config.settings_preset = value;
 }

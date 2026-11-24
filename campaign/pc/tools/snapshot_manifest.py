@@ -20,7 +20,7 @@ LIMIT = 0x40000000
 MAX_REGIONS = 4096
 MANIFEST_BYTES = 24 + MAX_REGIONS * 8
 REQUIRED_SYMBOLS = ('sysp', 'romp', 'cam', 'ply', 'ene', 'freemem', 'Ps2_malloc_mem', 'bhEtask', 'swork')
-SAFE_GLUE = frozenset(('actor_glue', 'appearance_glue', 'enemyopt_glue', 'knife_glue', 'modern_glue', 'native_glue', 'script_rules', 'spawn_glue', 'stairs_glue', 'texture_glue', 'tps_glue', 'variant_glue', 'view_glue', 'ui_glue'))
+SAFE_GLUE = frozenset(('actor_glue', 'appearance_glue', 'biorand_glue', 'enemyopt_glue', 'extras_glue', 'knife_glue', 'modern_glue', 'native_glue', 'script_rules', 'spawn_glue', 'stairs_glue', 'texture_glue', 'tps_glue', 'variant_glue', 'view_glue', 'ui_glue'))
 
 @dataclass(frozen=True)
 class Region:

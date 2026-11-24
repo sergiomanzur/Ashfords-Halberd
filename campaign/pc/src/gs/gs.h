@@ -77,11 +77,15 @@ void     gs_write_pixel(int psm, uint32_t bp, uint32_t bw, uint32_t x, uint32_t 
 void     gs_local_to_local(void);
 void     gs_rt_to_mem(uint32_t bp, uint32_t bw, uint32_t psm, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 unsigned int gs_capture_rt(uint32_t fbp, uint32_t fbw, uint32_t w, uint32_t h, int wide);   /* GL texture of the RT area (0,0)-(w,h); wide: widened by hor+ about x w/2 */
+void     gs_replay_capture(unsigned int exec_tex, uint32_t fbp, uint32_t fbw, uint32_t w, uint32_t h, int wide);   /* in-between image's own StoreRenderTex */
+void     gs_scene_begin(int scene);
+void     gs_scene_aa(uint32_t fbp, uint32_t fbw);   /* anti-aliasing of the 3D in that render target, mid-frame (stream.c aa_split) */
 /* textures at TBP tbp are movie frame index (pc/src/movie) until the next executed frame */
 void     gs_movie_bind(uint32_t tbp, int index);
 /* decode a texture (TEX0 + TEXA) to RGBA8, w x h */
 void     gs_clut_load(uint64_t tex0);
 void     gs_decode_texture(uint64_t tex0, uint64_t texa, uint32_t w, uint32_t h, uint32_t* out);
+void     gs_read_rect(int psm, uint32_t bp, uint32_t bw, uint32_t w, uint32_t h, uint32_t* out);   /* gs_read_pixel of (0, 0)..(w-1, h-1), row by row */
 void     gs_get_palette(uint64_t tex0, uint64_t texa, uint32_t* out, int n);
 int      gs_mem_selftest(void);
 
@@ -91,7 +95,8 @@ void gs_notify_mem_write(uint32_t bp, uint32_t bw, int psm, uint32_t x, uint32_t
 /* exact set of written pages (bit per 8 KB page); changed = 0 if the data was identical */
 void gs_notify_pages(const uint64_t* pages, int changed);
 void gs_flush(void);
-int  gs_batch_two_pass(void);   /* the pending batch draws in two passes */
+void gs_batch_rewrite(void);   /* a draw-state register written with the value it has (gs.c flush_for) */
+int  gs_ab_off(int bit);       /* RECVX_AB (gs_gl.c): that optimization off in this interval */
 struct Frame;
 void gs_frame_begin(void);
 void gs_frame_executed(int interpolate);

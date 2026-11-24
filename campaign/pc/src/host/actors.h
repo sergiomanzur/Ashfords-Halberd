@@ -25,101 +25,104 @@ enum { ANIM_IDLE, ANIM_PLAYED, ANIM_MALE, ANIM_FEMALE };
 #define ACTOR_MODELS 62
 extern const ActorModel actor_models[];
 
-/* "Use gender-matched animations" (ini appear_gender_anim, default 1): a model of the other sex
-   than the character played moves with the motions of a player character of its own sex */
+/* Future/offline-safe import table slot (0 entries unless populated by tests or a later import module). */
+#define ACTOR_IMPORT_MAX 2048
+extern ActorModel actor_imports[ACTOR_IMPORT_MAX];
+extern const char* actor_import_file[ACTOR_IMPORT_MAX];
+extern unsigned char actor_import_group[ACTOR_IMPORT_MAX];
+extern int actor_import_n;
+const ActorModel* actor_model(int idx);   /* catalogue entry or import idx, NULL if none */
+
 extern int g_appear_chr;
 void appear_frame(void);
+int  appear_look_of(int pid);             /* effective resolved chr for character pid (0..3) */
+
+/* "Use gender-matched animations" (ini appear_gender_anim, default 1) */
 extern int g_appear_anim;
-/* "Talking faces in cutscenes" (ini appear_cutscene_face, default 0, experimental): the cutscene
-   double shown as a cast model moves its own face with the double's lip sync; a player file shown
-   there is replaced by the same character's cutscene model (which has a face) */
+/* "Talking faces in cutscenes" (ini appear_cutscene_face, default 0, experimental) */
 extern int g_appear_face;
-/* "Swapped model in cutscenes" (ini appear_in_cutscenes, default 1): the cutscene doubles of the
-   character played are shown as the chosen model; 0: as the game has them (the real Claire or
-   Chris with their own hands, faces and voice), the chosen model only while the player is shown */
+/* "Swapped model in cutscenes" (ini appear_in_cutscenes, default 1) */
 extern int g_appear_cutscene;
-/* the character (ply_id) whose motion set a model with `anim` (ANIM_*) moves with while character
-   `played` (0 Claire, 1 Chris, 2 Steve, 3 Wesker) is played: Chris for a man while Claire is
-   played, Claire for a woman while a man is played, else -1 (the played character's own) */
+
 int appear_motion_chr(int anim, int played);
-int appear_part_anim(int file);       /* ANIM_* of player part file 10 + file (0..4) */
-/* the player character (0..3) whose voice bank (CORE_<n>.SPQ) "You appear as" chr speaks with,
-   or -1: the played character's own */
+int appear_part_anim(int file);
 int appear_voice(int chr);
-/* a grab motion `mtn` of character `from` in the set of enemy type `id` (the player plays the
-   enemy's motions while grabbed): the same motion of character `to`, or -1 if not known */
 int appear_grab_motion(int id, int mtn, int from, int to);
 
-/* "You appear as" (g_coop.chr): 0 the character played, 1..5 the player files, then these */
+/* "You appear as" (g_appear_chr): 0 the character played, 1..5 the player files, then these */
 #define COOP_CHR_ACTOR 6
 #define COOP_CHR_MAX (COOP_CHR_ACTOR + ACTOR_MODELS - 1)
+#define COOP_CHR_IMPORT (COOP_CHR_MAX + 1)
+/* "Current Character (Cutscene)": the played character's cutscene model. */
+#define COOP_CHR_CINE 4095
+int appear_played(int chr, int ply_id);
+/* "Character models" (ini appear_per_char): 0 Same for both, 1 Per character (Claire's / Chris's) */
+extern int g_appear_per;
+extern int g_appear_own[2];
+int appear_choice(int one, int c);
 
-/* The list the menus show (F3, the lobby, ENHANCED SETTINGS): one entry per distinct look, the player
-   files first, the player characters' cutscene models last. Event doubles of a listed look are left
-   out of the list only: their chr values stay valid (co-op, recvx.ini) and appear_canon maps them to
-   the listed one. */
 int appear_count(void);
-int appear_at(int i);                 /* the chr listed at position i */
-int appear_pos(int chr);              /* the position of chr (a hidden one: its listed twin's) */
-int appear_canon(int chr);            /* chr, or the listed twin of a hidden one */
-int appear_step(int chr, int dir);    /* the next (dir 1) or previous (-1) listed chr, wrapping */
+int appear_at(int i);
+int appear_pos(int chr);
+int appear_canon(int chr);
+int appear_step(int chr, int dir);
 const char* appear_name(int chr);
-/* game thread (pc/glue/actor_glue.c). who: display slot 0 our player, 1 the co-op partner,
-   ACTOR_DOUBLE the cutscene double of the character played, ACTOR_VARIANT + k enemy variants. idx: catalogue entry, ACTOR_PART + n
-   for player part file 10 + n, or -1. */
-#define ACTOR_SLOTS 5
-#define ACTOR_DOUBLE 2
-#define ACTOR_VARIANT 3                 /* 3, 4: enemy variants' models (pc/glue/variant_glue.c), each posed per enemy drawn */
-#define ACTOR_PART 1000
-int  actor_set(int who, int idx);       /* 1 = shown (a failed entry is not retried) */
-int  actor_shown(int who);
-int  actor_rigged(int who);             /* its model is posed from a source's skeleton (a humanoid node map was found) */
-struct BH_PWORK;
-void actor_pose(int who, struct BH_PWORK* src);   /* after src's bhSetMotion and bhCalcModel */
-void actor_draw(int who);               /* bhPutModel: the caller sets camera matrix, lights, textures state */
-struct BH_PWORK* actor_work(int who);   /* its work (model, node matrices), NULL when none is shown */
-int  actor_hand_free(int who, int node);   /* 1: the source's hand node (9, 13) is at the model's hand, which has no mesh of its own */
-int  actor_head(int who, float* out);   /* world position of its head node (else its highest node); 0 when none is shown */
-int  actor_head_node(int who);          /* its head node (the rig's head role), -1: none found or none shown */
-void actor_doubles(int idx);            /* at the hand-off: the appearance for the cutscene doubles */
-void actor_double_tick(void);           /* every tick before the objects follow their links: the double's pose, hands, face */
-int  actor_double_acting(void);         /* a cutscene double of the character played is shown (a cutscene) */
-int  actor_double_kept(void);           /* the doubles stay the game's for the chosen model: the played character's own cutscene model */
-/* before actor_pose(who, src) (slots 0, 1): src shows the mesh of player character `mesh` (0..3, a
-   part-file mesh on the real skeleton; -1: a catalogue model is shown) and plays the motions of
-   character `motion`, its upper body bent by `pitch` (radians: the free-aim bend, tps_bend). Gender-matched
-   animations need it; without it src's own motions are used. */
-void actor_source(int who, struct BH_PWORK* src, int mesh, int motion, float pitch);
-int  actor_put_body(int who, struct BH_PWORK* src);   /* draw src (bhPutModel), in its gender-matched pose if it has one */
-int  actor_frame(const struct BH_PWORK* p);   /* the motion frame p shows this tick (our player: before bhSetMotion's advance) */
-void actor_textures_released(void);     /* njReleaseTextureAll */
+const char* appear_group(int chr);
 
-/* game thread: where a catalogue-format model is in its room file (read and expanded into a buffer
-   that stays valid until another room file is requested); used by the enemy spawner too */
+/* game thread (pc/glue/actor_glue.c). who: display slot 0 our player, 1 unused offline,
+   ACTOR_DOUBLE the cutscene double of the character played, ACTOR_VARIANT + k enemy variants,
+   ACTOR_CAST + k cutscene cast slots. */
+#define ACTOR_DOUBLE 2
+#define ACTOR_VARIANT 3
+#define ACTOR_CAST 5
+#define ACTOR_SLOTS (ACTOR_CAST + 6)
+#define ACTOR_PART 10000
+int  actor_set(int who, int idx);
+int  actor_shown(int who);
+int  actor_shown_model(int who);
+int  actor_rigged(int who);
+int  actor_talks(int who);
+struct BH_PWORK;
+struct O_WRK;
+void actor_weapon_hands(int who, struct O_WRK* wpn, int n);
+void actor_pose(int who, struct BH_PWORK* src);
+void actor_draw(int who);
+struct BH_PWORK* actor_work(int who);
+int  actor_hand_free(int who, int node);
+int  actor_head(int who, float* out);
+int  actor_head_node(int who);
+void actor_doubles(int idx);
+int  actor_double_model(int idx, int pid, int* kept);
+int  actor_double_shown(const struct BH_PWORK* ep);
+void actor_double_tick(void);
+int  actor_double_acting(void);
+int  actor_double_kept(void);
+void actor_act(int who, struct BH_PWORK* ep);
+int  actor_put_as(int who, struct BH_PWORK* ep);
+int  actor_own_hand(int who, int side, int* node);
+int  actor_src_head(int who, int node);
+void actor_cast_hands(int who);
+int  actor_cast_hands_chr(int who);
+void actor_source(int who, struct BH_PWORK* src, int mesh, int motion, float pitch);
+int  actor_put_body(int who, struct BH_PWORK* src);
+int  actor_frame(const struct BH_PWORK* p);
+void actor_textures_released(void);
+void actor_snapshot_before_restore(void);
+void actor_snapshot_after_restore(void);
+
 typedef struct ActorData {
-    const void* rec;                    /* its ETTY_WORK record */
-    const unsigned char *mdl, *mtn;     /* its model chunk list, its type's motion list (NULL: none) */
+    const void* rec;
+    const unsigned char *mdl, *mtn;
     int mlen, nlen, ntex;
-    const unsigned char* tex[16];       /* texture data per textured sub-model in chunk order (NULL: not found) */
+    const unsigned char* tex[16];
 } ActorData;
 int actor_find(const ActorModel* am, ActorData* out);
-const unsigned char* actor_fx_tex(int room, int fx);   /* room file `room`'s texture data for room effect fx, NULL: none */
-/* game thread: player part files, for co-op (the partner, our own mesh), the lobby's previews and here.
-   afs_read: file `file` of AFS partition `part` into buf (cap bytes); 1 = read (more than 4096 bytes:
-   unused costumes are 11-byte placeholders). player_model_read: bhReadPlayerData for `who` from part
-   file data `file` into the given buffers (plp, sys->memp, the player buffers and freemem swapped for
-   it and put back). player_hair: Claire's hair or Wesker's piece objs[2] on `who`'s head node for
-   character chr (as bhSetPlayer sets up sys->obwp[2]; none for the others); exp0/exp3: the hair
-   simulation's work (NULL: bhObjClpn takes the room heap, for our own player only).
-   player_weapon_read: bhReadWeaponData for `who` (wpnr_no = wpn) from weapon file data `file`: the hand
-   objects objs[0..1] (as sys->obwp[0..1]; their mlwP must point at a model, whose textures it
-   releases), models into wr/wl (32 KB each), motions into wmt (64 KB) and who->mnwP[100..]. */
-struct O_WRK;
+const unsigned char* actor_fx_tex(int room, int fx);
 int  afs_read(int part, int file, void* buf, int cap);
 void player_model_read(struct BH_PWORK* who, unsigned char* file, unsigned char* mdl, unsigned char* bmt, unsigned char* mth, unsigned char* zmt);
 void player_weapon_read(struct BH_PWORK* who, struct O_WRK* objs, int wpn, unsigned char* file, unsigned char* wr, unsigned char* wl, unsigned char* wmt);
 void player_hair(struct O_WRK* objs, struct BH_PWORK* who, int chr, unsigned char* exp0, unsigned char* exp3);
-void actor_tex_free(int* entries, int* heap);      /* free texture entries and heap bytes (after compacting) */
+void actor_tex_free(int* entries, int* heap);
 
 #ifdef __cplusplus
 }

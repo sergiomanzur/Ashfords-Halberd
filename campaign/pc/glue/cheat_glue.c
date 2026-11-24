@@ -23,6 +23,7 @@
 
 CheatState g_cheat = { .give_id = 1, .give_count = 1 };
 int pc_in_play(const BH_PWORK* p, int scope);   /* reload_glue.c */
+void snd_sysbank_load(void);                    /* audio/snd_iop.c: item box lid and typewriter keys outside save rooms */
 
 /* infinite ammo: every shot goes through bhCheckBullet/bhCountBullet (weapon.c), which then take
    the path of the game's own unlimited weapons (no count check, no decrement) */
@@ -412,6 +413,16 @@ static int room_case_exists(int stg, int rom, int c)
     snprintf(name, sizeof(name), "rm_%1d%02d%1d.rdx", stg, rom, c);   /* as system.c's room load names it */
     return c >= 0 && c <= 9 && GetFileSize(name) != 0;
 }
+/* test aids: the player and its collision points moved together to x, z facing ay (no wall check across the jump) */
+void cheat_put_player(float x, float z, int ay)
+{
+    EXP_WORK* e = (EXP_WORK*)plp->exp0;
+    float dx = x - plp->px, dz = z - plp->pz;
+    plp->px += dx; plp->pxb += dx; plp->pz += dz; plp->pzb += dz; plp->ay = ay;
+    plp->flg &= ~0xC0000;   /* not placed by the legs of the last pose (bhFixPosition) */
+    if (e) { e->fpx += dx; e->bpx += dx; e->bpxb += dx; e->spx += dx; e->plx += dx; e->fpz += dz; e->bpz += dz; e->bpzb += dz; e->spz += dz; e->plz += dz; }
+}
+
 void cheat_room_warp(int stg, int rom, int pos, int rcase)
 {
     int c;
@@ -600,7 +611,7 @@ static void scripted(unsigned int* inv)
         static const char* tw = (const char*)-1;
         if (tw == (const char*)-1) tw = getenv("RECVX_TEST_TYPEWRITER");
         if (tw && *tw && clock >= atoi(tw) && !(sys->cb_flg & 0x1)) {
-            sys->cb_flg |= 0x200000;
+            snd_sysbank_load(); sys->cb_flg |= 0x200000;
             printf("test: typewriter in %d/%d at game frame %d\n", sys->stg_no, sys->rom_no, clock);
             tw = strchr(tw, ',') ? strchr(tw, ',') + 1 : NULL;
         }
@@ -734,13 +745,30 @@ int pc_cheat_load_exit(void)
     return 1;
 }
 
-void pc_extras_scd1(void) {}   /* "Extra Item Boxes and Herbs": filled in by extras_glue.c when enabled */
+int cheat_give(int id, int count, int box)
+{
+    unsigned int *inv, w;
+    int ply, i;
+    if (!sys || id <= 0 || id >= CHEAT_ITEMS) return CHEAT_GIVE_FULL;
+    ply = sys->ply_id > 2 ? 0 : sys->ply_id;
+    inv = &sys->itm[ply * 16];
+    w = (unsigned int)id << 16 | (count & 0xFFFF);
+    if (pc_to_special(inv, id, standard[ply][0], standard[ply][1])) { inv[1] = w; return CHEAT_GIVE_INV; }
+    if (pc_inv_add(inv, (sys->gm_flg & 0x8000000) ? 10 : 8, w, itemdata)) return CHEAT_GIVE_INV;
+    if (!box) return CHEAT_GIVE_FULL;
+    for (i = 64; i < 64 + 128; i++)
+        if (!(sys->itm[i] >> 16)) { sys->itm[i] = w; return CHEAT_GIVE_BOX; }
+    return CHEAT_GIVE_FULL;
+}
+
+void placer_frame(void);
 
 void cheat_frame(void)
 {
     unsigned int* inv;
     int max_hp, slots, i, req;
 
+    placer_frame();
     if (!sys || !plp) return;
     inv = &sys->itm[sys->ply_id * 16];
     max_hp = sys->gm_mode == 2 ? 320 : 160;
@@ -767,12 +795,10 @@ void cheat_frame(void)
     if (req & CHEAT_RESET_SAVES) { sys->save_ct = 0; g_cheat.result = "save count reset"; }
     if (req & CHEAT_HEAL) { plp->hp = max_hp; g_cheat.result = "healed"; }
     if ((req & CHEAT_GIVE) && g_cheat.give_id > 0 && g_cheat.give_id < CHEAT_ITEMS) {
-        unsigned int entry = (unsigned int)g_cheat.give_id << 16 | (g_cheat.give_count & 0xFFFF);
-        if (pc_to_special(inv, g_cheat.give_id, standard[sys->ply_id][0], standard[sys->ply_id][1])) {
-            inv[1] = entry;
-            g_cheat.result = "item added";
-        } else
-            g_cheat.result = pc_inv_add(inv, slots, entry, itemdata) ? "item added" : "not enough inventory space";
+        int r = cheat_give(g_cheat.give_id, g_cheat.give_count, 1);
+        g_cheat.result = r == CHEAT_GIVE_INV ? "item added"
+                       : r == CHEAT_GIVE_BOX ? "inventory full: added to item box"
+                       : "inventory and item box are full";
     }
     if (req & CHEAT_DROP) {   /* the inventory's X: the slot emptied, as the item box leaves it */
         int s = g_cheat.drop_slot;
@@ -790,9 +816,9 @@ void cheat_frame(void)
         int kind = (req & CHEAT_LOAD) ? ANY_LOAD : (req & CHEAT_SAVE) ? ANY_SAVE : ANY_BOX;
         const char* why = anywhere_refused(kind);
         if (why) g_cheat.result = why;
-        else if (kind == ANY_BOX) { sys->cb_flg |= 0x40000; g_cheat.result = "Opening the item box."; }
+        else if (kind == ANY_BOX) { snd_sysbank_load(); sys->cb_flg |= 0x40000; g_cheat.result = "Opening the item box."; }
         else {
-            sys->cb_flg |= 0x200000;
+            snd_sysbank_load(); sys->cb_flg |= 0x200000;
             if (kind == ANY_SAVE) { cheat_saving = 1; g_cheat.result = "Opening the save screen."; }
             else { cheat_loading = 1; memcpy(load_keep, &sys->version, SAVE_REGION); g_cheat.result = "Opening the load screen."; }
         }

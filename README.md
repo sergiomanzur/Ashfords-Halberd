@@ -1,6 +1,6 @@
 # Ashford's Halberd
 
-**0.9.2b Beta** — see the [changelog](campaign/CHANGELOG.md) and [GitHub release](https://github.com/sergiomanzur/Ashfords-Halberd/releases/tag/v0.9.2b).
+**0.9.3b Beta** — see the [changelog](campaign/CHANGELOG.md) and [GitHub release](https://github.com/sergiomanzur/Ashfords-Halberd/releases/tag/v0.9.3b).
 
 An offline Windows fan port of **Resident Evil Code: Veronica X**, running the original campaign natively from your own USA PS2 disc image. Built on the MIT-licensed recvx-enhanced-port and AshfordFamily decompilation, with original Ashford presentation.
 
@@ -10,13 +10,18 @@ An offline Windows fan port of **Resident Evil Code: Veronica X**, running the o
 
 The Windows x86 campaign builds and boots. New Game, opening dialogue and actors, inventory, fixed-camera movement, third-person movement and live settings persistence have been exercised. Every retail movie has passed decoder verification.
 
-Full room quicksave tests now cover restoring after a room change and loading a persisted snapshot in a fresh process. The latest component run passed 39 tests, with the disc-dependent movie test skipped in that invocation. Targeted first-person tests cover controller look/movement, aiming/firing, inventory return and quicksave/quickload.
+Full room quicksave tests cover restoring after a room change and loading a persisted snapshot in a fresh process. The latest full CTest suite passed **50/50 tests** against the retail USA disc (including full retail movie verification, enemy/cast/voice randomizer checks, BioRand options & spoiler parser, disc importer & language font/translation checks, and renderer/audio/quicksave snapshot tests), alongside **9/9** source/offline-identity Python checks. Targeted first-person tests cover controller look/movement, aiming/firing, inventory return and quicksave/quickload.
 
 This is a working development build. Component tests and opening smoke runs do not establish that every scene, boss or ending is correct.
 
 ## Changes in this version
 
-- **0.9.2b upstream sync.** Brought in the single-player parts of recvx-enhanced-port 0.6.9–0.8.0: crash reports, checked file parsing, bounded HD-pack loading, startup memory diagnostics, renderer `-O3`, reload and item-box fixes, Battle Game exit fix, locational hit reactions, headshots/piercing, move while aiming, room-model camera collision, rifle-ammo stacking, memory-card slot 2, HUD, SMAA/dithering, and Save Now / Load Game / Open Item Box / Remove Item tools.
+- **Offline v0.8.0 upstream sync (Waves 1–3).** Brought in the complete offline single-player advancements of recvx-enhanced-port 0.6.9–0.8.0:
+  - *Renderer & HUD:* 3D-only FXAA/SMAA (keeping 2D menus, fonts, and HUD sharp), 16-bit floating-point render targets with IGN dithering & Deband, GS `TEX0` batching & interpolation optimizations, Ashford HUD (Weapon Circle & Minimal) with live spare-ammo counting and TIM2 weapon icons, live Performance Graph HUD, and 10-second Keep/Revert display confirmation.
+  - *Gameplay, enemies & randomizers:* Combined fixed-camera controls + rebindable `Aim (no auto-aim)`, locational hit reactions, headshots & piercing, move while aiming, room-model camera collision, rifle-ammo stacking, 255-slot enemies with per-slot sound banks, Hunter/Sweeper randomizer overhaul with custom per-type spawn weights, Extra Item Boxes / Blue Herb Planters / Antarctica Typewriter, and strictly offline BioRand pack support (`mods/biorand/`) with an in-game Spoiler Log (`L` or Ashford Pause).
+  - *Appearance, cast & menus:* Per-character player models, Wesker afterimage trails, Cutscene Cast & Voice-Line randomizers, Ashford Pause menu (with one-tap Original / Third Person / First Person cycling and active modifier summary), Title Screen `EXIT`, Visual Give Item picker with TIM2 icons, and procedural vector button glyphs.
+  - *Offline disc importers & overrides:* Offline Resident Evil Outbreak File #2 (`SLUS-20984`) character importer, offline regional Code: Veronica X language & independent cutscene subtitle importer (`Field Dossier > Play preferences` and `Character`), and `mods/MOVIE/*.PSS` movie overrides.
+  - *Reliability:* Crash reports, checked file parsing, bounded HD-pack loading, memory-card slot 2, `Ps2_PXLCONV` scratch isolation, and Save Now / Load Game / Open Item Box / Remove Item tools.
 - Single-player throughout.
 - Original gothic launcher with disc picker, display selection, volume controls and the original ambient composition **The Quiet Threshold**.
 - Newly generated brass/oxblood halberd icon and manor artwork.
@@ -33,9 +38,7 @@ frames, modern movement and convenience options. Custom preserves current
 choices, and individual adjustments remain available. Existing preferences are
 retained. See [preset contents and picture controls](docs/campaign-picture-presets.md).
 
-Display now includes **Saturation** (0–200%, 100% neutral) and optional **FXAA**.
-FXAA is off by default and independent of internal resolution; it can soften game
-text and fine detail. Picture calibration reset includes saturation.
+Display includes **Saturation** (0–200%, 100% neutral), 3D-only **Anti-aliasing** (`Off / FXAA / SMAA`, keeping 2D menus, text, and HUD sharp), and **Dithering** (`Off / On / Deband`) on 16-bit floating-point render targets. Picture calibration reset includes saturation.
 
 The [2026-10-24 reliability update](docs/campaign-reliability-2026-10-24.md)
 corrects expanded-inventory reload lookup, puzzle/interaction input ownership,
@@ -69,6 +72,7 @@ Windows 10 or later and OpenGL 3.3 are required. Extract the complete package, i
 | F9 / F10 | Quicksave / quickload during safe player control |
 | F11 | Toggle fullscreen |
 | F12 | Toggle campaign first person |
+| L | BioRand spoiler log (when a local `mods/biorand` pack is active) |
 
 Fixed-camera defaults: arrows move, W aims, Z interacts/confirms or fires while aiming, X runs/cancels, Enter opens inventory. Third-person defaults: WASD moves, mouse looks, right mouse aims, left mouse fires, Shift runs, E interacts, Q cancels, R reloads and Tab opens inventory. Both enhancement menus expose bindings, including the rebindable F8 FMV-skip action. FMV skipping follows each movie's native return and fade policy; it does not skip real-time scripted scenes. The post-release fix restores visible gameplay after skipping the graveyard's first-zombie movie.
 
@@ -97,6 +101,6 @@ The legacy prototype remains incomplete: its playable-slice acceptance test stil
 
 ## Credits
 
-Adapted from [aikatore/recvx-enhanced-port](https://github.com/aikatore/recvx-enhanced-port) 0.6.8, Copyright (c) 2026 aikatore and contributors, MIT, and the [AshfordFamily decompilation](https://github.com/AshfordFamily/recvx-decomp). Attribution is retained in [source provenance](campaign/PROVENANCE.md) and [third-party notices](campaign/THIRD_PARTY_NOTICES.md). [Original artwork/music provenance](assets/branding/PROVENANCE.md) includes the generation prompts and composition source.
+Adapted from [aikatore/recvx-enhanced-port](https://github.com/aikatore/recvx-enhanced-port) 0.6.8–0.8.0 (single-player), Copyright (c) 2026 aikatore and contributors, MIT, and the [AshfordFamily decompilation](https://github.com/AshfordFamily/recvx-decomp). Attribution is retained in [source provenance](campaign/PROVENANCE.md) and [third-party notices](campaign/THIRD_PARTY_NOTICES.md). [Original artwork/music provenance](assets/branding/PROVENANCE.md) includes the generation prompts and composition source.
 
 Resident Evil and Code: Veronica belong to Capcom. This unofficial project is not affiliated with or endorsed by Capcom, Sony, Sega or CRI Middleware.

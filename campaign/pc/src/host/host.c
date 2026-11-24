@@ -9,6 +9,10 @@
 #include "menu_mouse.h"
 #include "bindings.h"
 #include "settings.h"
+#include "biorand.h"
+#include "lang.h"
+#include "../import/import.h"
+extern char g_lang_us_iso[1024];   /* import/lang.c */
 #include "ashford_disc.h"
 #include "ashford_launcher.h"
 void render_loop(void);
@@ -57,7 +61,8 @@ int pc_intro_pressed(int start)
 int pc_quick_knife_on(void) { return g_config.quick_knife; }
 int pc_head_blowoff_on(void) { return g_config.head_blowoff; }
 int pc_auto_stairs_on(void) { return g_config.auto_stairs; }
-int pc_cfg_no_ink_ribbon(void) { return g_config.no_ink_ribbon; }   /* in co-op the host's counts (coop_glue.c pc_no_ink_ribbon) */
+int pc_cfg_no_ink_ribbon(void) { return g_config.no_ink_ribbon; }
+int pc_cfg_extra_objects(void) { return g_config.extra_objects; }
 /* the game tests a few joints of a model against the screen; with a wide or moving free
    camera that drops models that are partly visible, so third person never culls */
 extern int tps_cam_active;
@@ -107,7 +112,7 @@ float pc_overlay_x(float x)
 
 HostConfig g_config = { .window_w = 1280, .window_h = 960, .borderless_extra = 1,.vsync = 1, .log_level = 1, .music_volume = 100, .sfx_volume = 100, .rumble = 100, .interpolate = 1, .menu_smooth = 1, .frame_blend = 0, .aspect = 2, .show_fps = 1, .show_ping = 1,
                        .screen_filter = 1, .cinema_bars = 1, .screen_effects = 1, .native_3d = 1, .model_cull = 1, .native_tex = 1, .hd_textures = 1, .hd_textures_ui = 1, .quick_knife = 1, .head_blowoff = 1, .rifle_stack = 1,
-                       .skip_doors = 1, .fast_loading = 1, .auto_stairs = 1, .skip_intro = 1, .battle_unlocked = 1, .difficulty_select = 1, .contrast = 100, .gamma = 10, .saturation = 100, .settings_preset = 2, .fog_intensity = 100 };   /* first-start defaults; recvx.ini overrides */
+                       .skip_doors = 1, .fast_loading = 1, .auto_stairs = 1, .skip_intro = 1, .battle_unlocked = 1, .difficulty_select = 1, .pause_menu = 1, .contrast = 100, .gamma = 10, .saturation = 100, .settings_preset = 2, .fog_intensity = 100 };   /* first-start defaults; recvx.ini overrides */
 SDL_Window* g_window;
 SDL_GLContext g_gl;
 
@@ -137,6 +142,12 @@ void host_fatal(const char* fmt, ...)
     exit(1);
 }
 
+void host_quit(void)
+{
+    SDL_Event q = { .type = SDL_EVENT_QUIT };
+    SDL_PushEvent(&q);
+}
+
 void host_pump_events(void)
 {
     SDL_Event ev;
@@ -152,6 +163,7 @@ void host_pump_events(void)
         menu_mouse_event(&ev);
         switch (ev.type) {
         case SDL_EVENT_QUIT:
+            config_save();
             exit(0);
         case SDL_EVENT_WINDOW_DISPLAY_CHANGED:   /* moved to another monitor: its modes for Fullscreen resolution */
         case SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED:   /* the desktop resized: a borderless window covers it again */
@@ -172,10 +184,17 @@ void host_pump_events(void)
                 g_tps.on = g_tps.on == 2 ? 0 : 2;
                 settings_save_later();
             }
+            if (bind_hotkey(&ev, B_SPOILER)) spoiler_key(1);
+            else if (ev.key.scancode == SDL_SCANCODE_ESCAPE && !ev.key.repeat) spoiler_key(2);
+            else if (ev.key.scancode == SDL_SCANCODE_PAGEUP) spoiler_key(3);
+            else if (ev.key.scancode == SDL_SCANCODE_PAGEDOWN) spoiler_key(4);
+            else if (ev.key.scancode == SDL_SCANCODE_HOME) spoiler_key(5);
+            else if (ev.key.scancode == SDL_SCANCODE_END) spoiler_key(6);
             break;
         }
     }
     settings_poll();
+    if (__atomic_exchange_n(&g_import_reload, 0, __ATOMIC_ACQ_REL)) { import_registry_load(); lang_scan(); }
 }
 
 #ifndef _WIN32
@@ -355,8 +374,9 @@ int main(int argc, char** argv)
 #endif
     config_load();
     parse_args(argc, argv);   /* command line overrides the saved settings */
+    biorand_scan();
     { extern void pc_rifle_stack(int); pc_rifle_stack(g_config.rifle_stack); }
-    { extern void variants_load(void); variants_load(); }   /* mods/enemies.ini: custom enemies (variants.h) */
+    { extern void variants_load(void); extern void enemy_rates_load(void); variants_load(); enemy_rates_load(); }   /* mods/enemies.ini: custom enemies, then "Custom"'s rates */
     ps2_memory_init();
 
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD))
@@ -386,6 +406,9 @@ int main(int argc, char** argv)
         if (!g_config.iso_path[0]) { usage(); host_fatal("no game disc image given"); }
         if (!open_game_image()) host_fatal("%s", disc_error);
     }
+    SDL_strlcpy(g_lang_us_iso, g_config.iso_path, sizeof(g_lang_us_iso));   /* language import reads US text */
+    lang_scan();
+    tr_init();
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);

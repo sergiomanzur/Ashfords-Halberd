@@ -171,6 +171,11 @@ static int next_sample(Voice* v, int16_t* out)
 static void key_on(const SndBlob* hd, const SndBlob* bd, MidiCh* m, int note, int vel)
 {
     uint32_t prog = hd_entry(hd, HD_PROG, m->prog);
+    if (!prog && hd == &g_snd_banks.midi_hd[2] && (prog = hd_entry(&g_snd_banks.sys_hd, HD_PROG, m->prog))) {   /* snd_sysbank_load */
+        hd = &g_snd_banks.sys_hd;
+        bd = &g_snd_banks.sys_bd;
+        if (trace_snd()) printf("tsnd: key-on prog %d from the save room's bank 2\n", m->prog);
+    }
     if (!prog || !bd->size) {
         if (trace_snd()) printf("tsnd: key-on prog %d note %d dropped (%s)\n", m->prog, note, prog ? "no samples loaded" : "no such program");
         return;
@@ -318,9 +323,24 @@ static void set_reverb(int core, int mode, int depth)
     r->depth = (int16_t)depth / 32768.0f;
 }
 
+/* how loud the player's voice (SE port 4, sdfunc.c CallPlayerVoice) has been since it was last asked:
+   the mean |sample| of its voices, 0..1 */
+static float voice_sum;
+static int voice_n;
+float snd_synth_voice_level(void)
+{
+    float l;
+    snd_synth_lock();
+    l = voice_n ? voice_sum / voice_n / 32768.0f : 0.0f;
+    voice_sum = 0; voice_n = 0;
+    snd_synth_unlock();
+    return l;
+}
+
 /* n samples of every voice into acc (dry) and fx[core] (reverb send), interleaved stereo */
 static void render(float* acc, float* fx0, float* fx1, int n)
 {
+    voice_n += n;
     for (int i = 0; i < VOICES; i++) {
         Voice* v = &voice[i];
         MidiCh* m;
@@ -348,6 +368,7 @@ static void render(float* acc, float* fx0, float* fx1, int n)
             env = v->level / 32768.0f;
             if (v->dry) { acc[k * 2] += smp * env * gl; acc[k * 2 + 1] += smp * env * gr; }
             if (v->wet) { fx[k * 2] += smp * env * gl; fx[k * 2 + 1] += smp * env * gr; }
+            if (m >= midi[4] && m < midi[4] + 16) voice_sum += fabsf(smp * env) * v->vol;
             for (v->frac += step; v->frac >= 4096; v->frac -= 4096) {
                 v->s0 = v->s1;
                 if (!next_sample(v, &v->s1)) { v->on = 0; break; }
@@ -780,6 +801,16 @@ void snd_partner_arms(const void* hd, uint32_t hd_size, const void* bd, uint32_t
     for (int ch = 0; ch < 16; ch++) if (slot[1][ch].xb == XB_PARTNER) { slot[1][ch].flags = 0; slot[1][ch].xb = 0; active_bits[1] &= ~(1u << ch); }
     if (!hd || !blob_set(h, hd, hd_size) || !blob_set(b, bd, bd_size)) h->size = b->size = 0;
     snd_synth_unlock();
+}
+
+int snd_xbank_prog_ms(int xb, int tq)
+{
+    uint32_t n = 0;
+    if (xb < 1 || xb > 31 || tq < 0 || tq > 127) return 0;
+    snd_synth_lock();
+    if (g_snd_banks.xbd[xb - 1].size) n = tq_length(&g_snd_banks.xhd[xb - 1], tq);
+    snd_synth_unlock();
+    return n && n != 0xFFFF ? (int)(n * 1000u / (16 * 240)) : 0;   /* (the slot counts 16 a tick at 240 Hz, unbent) */
 }
 
 void snd_synth_xbanks_stop(void)

@@ -43,6 +43,7 @@ int main(void)
 {
     HostConfig expected, saved;
     for (int profile = 0; profile <= 1; ++profile) {
+        const int want_modern = profile ? MODERN_COMBINED : 0;
         /* Nonzero sentinels across the entire object protect paths, bindings,
            camera/backend, audio, progress, cheats, and future unowned settings. */
         memset(&g_config, 0x35, sizeof(g_config));
@@ -53,7 +54,7 @@ int main(void)
         g_modern_on = 7;
         preset_set(profile);
         CHECK(memcmp(&g_config, &expected, sizeof(expected)) == 0);
-        CHECK(g_modern_on == profile);
+        CHECK(g_modern_on == want_modern);
         CHECK(preset_get() == profile);
 
         /* Any controlled edit derives Custom, but restoring the baseline can
@@ -66,9 +67,9 @@ int main(void)
             --*value;
             CHECK(preset_get() == profile);
         }
-        g_modern_on = !profile;
+        g_modern_on = 1;
         CHECK(preset_get() == 2);
-        g_modern_on = profile;
+        g_modern_on = want_modern;
         CHECK(preset_get() == profile);
 
         /* Reapplying a named preset restores its controlled settings. */
@@ -82,7 +83,7 @@ int main(void)
         expected.settings_preset = 2;
         preset_set(2);
         CHECK(memcmp(&g_config, &expected, sizeof(expected)) == 0);
-        CHECK(g_modern_on == profile);
+        CHECK(g_modern_on == want_modern);
         CHECK(preset_get() == 2);
         memcpy(&saved, &g_config, sizeof(saved));
         memset(&g_config, 0, sizeof(g_config));
@@ -92,7 +93,7 @@ int main(void)
         preset_set(-1);
         preset_set(3);
         CHECK(memcmp(&g_config, &expected, sizeof(expected)) == 0);
-        CHECK(g_modern_on == profile);
+        CHECK(g_modern_on == want_modern);
 
         /* Persisted named markers are interpreted only if their actual values
            match, even after loading externally edited configuration. */

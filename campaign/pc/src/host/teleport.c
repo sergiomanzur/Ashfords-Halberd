@@ -10,8 +10,12 @@
    else a label of ours, else "Room n (RM_SRRC)"; a mods-only room is "Custom room RM_SRRC" or
    the name tag in its header (usrname, when it is not the tools' or retail's own tag). */
 #include "../ps2_platform.h"
+#include "../../include/pc_parse.h"
 #include "../audio/audio.h"
 #include "cheat.h"
+#include "cast.h"
+#include "enemies.h"
+#include "script_rules.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -119,44 +123,6 @@ static const char* const stages[10] = {
 /* ---------------------------------------------------------------- reading */
 static unsigned rd32(const unsigned char* d, long n, long o) { return o >= 0 && o + 4 <= n ? d[o] | d[o + 1] << 8 | d[o + 2] << 16 | (unsigned)d[o + 3] << 24 : 0; }
 
-/* expand.c Expand (docs/modding/ROOM_FORMAT.md "Compression") into *out, grown as needed: the size, -1 if broken */
-static long expand(const unsigned char* s, long n, unsigned char** out, long* cap)
-{
-    const unsigned char* e = s + n;
-    long o = 0;
-    unsigned field = 0, b;
-    int left = 1;
-#define BIT() (--left ? 0 : (field = s < e ? *s++ : 0, left = 8), b = field & 1, field >>= 1, b)
-    if (s < e) { field = *s++; left = 9; }
-    while (s < e) {
-        long len, off;
-        if (o + 260 > *cap) {
-            unsigned char* p = realloc(*out, *cap * 2);
-            if (!p) return -1;
-            *out = p; *cap *= 2;
-        }
-        if (BIT()) { (*out)[o++] = *s++; continue; }
-        if (!BIT()) {
-            len = 2 * BIT(); len += BIT() + 2;
-            if (s >= e) return -1;
-            off = *s++ - 256;
-        } else {
-            unsigned w;
-            if (s + 2 > e) return -1;
-            w = s[0] | s[1] << 8; s += 2;
-            if (!w) return o;
-            off = (long)(w >> 3) - 8192;
-            len = w & 7;
-            if (len) len += 2;
-            else { if (s >= e) return -1; len = *s++ + 1; }
-        }
-        if (-off > o) return -1;
-        for (long k = 0; k < len; k++, o++) (*out)[o] = (*out)[o + off];
-    }
-#undef BIT
-    return -1;
-}
-
 static void add_src(int stg, int rom, int pos, int from)
 {
     Row* t;
@@ -167,36 +133,13 @@ static void add_src(int stg, int rom, int pos, int from)
     if (k < TP_SRC) { t->src[pos][k] = (short)from; t->nsrc[pos]++; }   /* ponytail: a fifth source is left out; none has more than 4 */
 }
 
-/* script instruction length (event.c; pc/tools/rdx.py OP_LEN, CTRL_LEN: derived from the handlers) */
-static const unsigned char op_len[256] = {
-    2, 2, 2, 2, 6, 6, 4, 6, 4, 4, 4, 4, 4, 4, 6, 2, 2, 2, 2, 4, 4, 4, 2, 8, 2, 8, 2, 6, 6, 4, 6, 4,
-    4, 6, 4, 6, 4, 10, 2, 2, 2, 2, 4, 2, 4, 2, 2, 4, 4, 2, 12, 8, 12, 4, 6, 2, 6, 4, 2, 6, 4, 4, 4, 4,
-    8, 2, 4, 4, 6, 2, 8, 10, 6, 10, 8, 4, 6, 4, 14, 6, 2, 12, 12, 12, 12, 2, 6, 2, 14, 12, 4, 2, 2, 6, 4, 2,
-    6, 2, 6, 2, 1, 4, 1, 1, 6, 1, 2, 2, 8, 22, 22, 12, 2, 2, 14, 22, 4, 4, 4, 6, 14, 6, 2, 10, 10, 4, 4, 6,
-    4, 2, 4, 2, 8, 4, 16, 2, 10, 2, 2, 12, 6, 2, 4, 4, 2, 4, 2, 2, 4, 4, 2, 8, 12, 4, 4, 6, 2, 4, 2, 2,
-    6, 2, 4, 12, 4, 4, 4, 4, 10, 2, 10, 6, 6, 4, 2, 4, 22, 6, 4, 8, 4, 4, 2, 2, 2, 10, 16, 2, 2, 2, 6, 4,
-    28, 2, 6, 4, 8, 2, 2, 4, 8, 4, 2, 2, 4, 2, 2, 2, 4, 10, 10, 2, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 4, 3, 4, 2, 2, 1, 1, 2,
-};
-/* controller ops 100/102/103/105: sub-command, its length incl. the sub-command byte (an unknown one adds nothing) */
-static const unsigned char ctrl100[][2] = { { 150, 3 }, { 129, 11 }, { 130, 1 }, { 141, 5 }, { 142, 1 }, { 131, 3 }, { 140, 7 }, { 12, 5 },
-    { 13, 5 }, { 132, 5 }, { 143, 3 }, { 145, 5 }, { 137, 3 }, { 128, 1 }, { 139, 1 }, { 7, 7 }, { 52, 1 }, { 0, 1 } };
-static const unsigned char ctrl102[][2] = { { 20, 3 }, { 1, 1 } };
-static const unsigned char ctrl103[][2] = { { 128, 1 }, { 139, 1 }, { 144, 1 }, { 143, 5 }, { 146, 7 }, { 147, 7 }, { 148, 3 }, { 149, 3 }, { 0, 1 } };
-static const unsigned char ctrl105[][2] = { { 53, 3 }, { 51, 5 }, { 52, 3 }, { 50, 3 }, { 47, 1 }, { 43, 4 }, { 44, 4 }, { 45, 4 }, { 42, 3 },
-    { 41, 3 }, { 46, 3 }, { 40, 3 }, { 28, 2 }, { 30, 2 }, { 31, 2 }, { 29, 2 }, { 32, 2 }, { 33, 2 }, { 26, 9 }, { 27, 7 }, { 48, 3 },
-    { 49, 3 }, { 25, 7 }, { 35, 7 }, { 24, 7 }, { 34, 9 }, { 23, 3 }, { 5, 5 }, { 6, 5 }, { 12, 5 }, { 13, 5 }, { 7, 7 }, { 11, 5 },
-    { 8, 7 }, { 9, 5 }, { 2, 2 }, { 3, 2 }, { 4, 2 }, { 17, 2 }, { 18, 2 }, { 19, 2 }, { 22, 5 }, { 10, 5 }, { 132, 5 }, { 140, 7 },
-    { 141, 5 }, { 14, 3 }, { 21, 3 }, { 15, 5 }, { 16, 5 }, { 36, 1 }, { 38, 9 }, { 0, 1 } };
-
 static int insn_len(const unsigned char* d, long n, long o)
 {
-    const unsigned char (*t)[2] = d[o] == 100 ? ctrl100 : d[o] == 102 ? ctrl102 : d[o] == 103 ? ctrl103 : d[o] == 105 ? ctrl105 : NULL;
-    int len = op_len[d[o]],
-        nt = d[o] == 100 ? SDL_arraysize(ctrl100) : d[o] == 102 ? SDL_arraysize(ctrl102) : d[o] == 103 ? SDL_arraysize(ctrl103) : SDL_arraysize(ctrl105);
-    if (t && o + 1 < n)
-        for (int k = 0; k < nt; k++) if (t[k][0] == d[o + 1]) { len += t[k][1]; break; }
-    return o + len <= n ? len : 0;
+    int len;
+    if (o >= n) return 0;
+    if ((d[o] == 100 || d[o] == 102 || d[o] == 103 || d[o] == 105) && o + 1 >= n) return 0;
+    len = pc_insn_len_raw(d + o);
+    return len > 0 && o + len <= n ? len : 0;
 }
 
 /* one script, swept as pc/tools/rdx.py disasm_block: to its End (an event's also at op 255) outside any if-block */
@@ -257,13 +200,56 @@ static int is_room_name(const char* nm)
            SDL_isdigit(nm[5]) && SDL_isdigit(nm[6]);
 }
 
+static const char* mods_dir(void) { return SDL_getenv("RECVX_MODS") ? SDL_getenv("RECVX_MODS") : "mods"; }
+
+/* the room files as the game loads them: the disc's 205, then the mods folder over them */
+static int room_files(File* f, int* nmod)
+{
+    char** list;
+    int nf = 0, i, key;
+    *nmod = 0;
+    for (i = 0; i < 205; i++) { SDL_strlcpy(f[nf].name, rdx_files[i], sizeof(f[nf].name)); f[nf].disc = i; f[nf++].mod = 0; }
+    if ((list = SDL_GlobDirectory(mods_dir(), "RM_*.RDX", SDL_GLOB_CASEINSENSITIVE, &key))) {   /* key: the count here */
+        for (int m = 0; m < key && nf < MAX_FILES; m++) {
+            char nm[12];
+            int j;
+            if (!is_room_name(list[m])) continue;
+            for (j = 0; j < 11; j++) nm[j] = (char)SDL_toupper(list[m][j]);
+            nm[11] = 0;
+            for (j = 0; j < nf && strcmp(f[j].name, nm); j++) {}
+            if (j == nf) { SDL_strlcpy(f[nf].name, nm, sizeof(f[nf].name)); f[nf++].disc = -1; }
+            *nmod += !f[j].mod;
+            f[j].mod = 1;
+        }
+        SDL_free(list);
+    }
+    return nf;
+}
+
+static void mod_path(const File* f, char* path, size_t n) { snprintf(path, n, "%s/%s", mods_dir(), f->name); }
+
+/* room file f expanded into *out (*cap; packed through *in, *pcap): its length, -1 unreadable */
+static long room_read(const File* f, FILE* iso, unsigned char** in, long* pcap, unsigned char** out, long* cap)
+{
+    long n = -1, m;
+    uint32_t lsn, size = 0;
+    FILE* h = NULL;
+    if (f->mod) {
+        char path[1100];
+        mod_path(f, path, sizeof(path));
+        if ((h = pc_fopen(path, "rb"))) { fseek(h, 0, SEEK_END); size = (uint32_t)ftell(h); fseek(h, 0, SEEK_SET); }
+    } else if (adx_afs_locate(17, f->disc, &lsn, &size) && !fseeko(iso, (off_t)lsn * 2048, SEEK_SET)) h = iso;
+    if (h && size > (uint32_t)*pcap) { unsigned char* p = realloc(*in, size); if (p) { *in = p; *pcap = size; } }
+    if (h && size <= (uint32_t)*pcap && fread(*in, 1, size, h) == size) n = size;
+    if (h && h != iso) fclose(h);
+    return n < 0 || (m = pc_prs_expand(*in, n, out, cap)) < 0x80 ? -1 : m;
+}
+
 static int SDLCALL scan(void* ud)
 {
-    const char* mods = SDL_getenv("RECVX_MODS") ? SDL_getenv("RECVX_MODS") : "mods";
     Uint64 t0 = SDL_GetTicks();
     File* f = calloc(MAX_FILES, sizeof(File));
     FILE* iso = pc_fopen(g_config.iso_path, "rb");
-    char** list;
     int nf = 0, nmod = 0, ent = 0, named = 0, bad = 0, i, key;
     long cap = 16 << 20, pcap = 4 << 20;
     unsigned char *out = malloc(cap), *in = malloc(pcap);
@@ -275,21 +261,7 @@ static int SDLCALL scan(void* ud)
         free(f); free(out); free(in);
         return 0;
     }
-    for (i = 0; i < 205; i++) { SDL_strlcpy(f[nf].name, rdx_files[i], sizeof(f[nf].name)); f[nf].disc = i; f[nf++].mod = 0; }
-    if ((list = SDL_GlobDirectory(mods, "RM_*.RDX", SDL_GLOB_CASEINSENSITIVE, &key))) {   /* key: the count here */
-        for (int m = 0; m < key && nf < MAX_FILES; m++) {
-            char nm[12];
-            int j;
-            if (!is_room_name(list[m])) continue;
-            for (j = 0; j < 11; j++) nm[j] = (char)SDL_toupper(list[m][j]);
-            nm[11] = 0;
-            for (j = 0; j < nf && strcmp(f[j].name, nm); j++) {}
-            if (j == nf) { SDL_strlcpy(f[nf].name, nm, sizeof(f[nf].name)); f[nf++].disc = -1; }
-            f[j].mod = 1;
-            nmod++;
-        }
-        SDL_free(list);
-    }
+    nf = room_files(f, &nmod);
     /* rows in stage/room order; a row is custom when no case of it is on the disc */
     for (i = 0; i < 1000; i++) at[i] = -1;
     for (key = 0; key < 1000; key++)
@@ -303,18 +275,8 @@ static int SDLCALL scan(void* ud)
             if (f[i].disc >= 0) rows[at[key]].r.custom = 0;
         }
     for (i = 0; i < nf; i++) {
-        long n = -1, m;
-        uint32_t lsn, size;
-        FILE* h = NULL;
-        if (f[i].mod) {
-            char path[1100];
-            snprintf(path, sizeof(path), "%s/%s", mods, f[i].name);
-            if ((h = pc_fopen(path, "rb"))) { fseek(h, 0, SEEK_END); size = (uint32_t)ftell(h); fseek(h, 0, SEEK_SET); }
-        } else if (adx_afs_locate(17, f[i].disc, &lsn, &size) && !fseeko(iso, (off_t)lsn * 2048, SEEK_SET)) h = iso;
-        if (h && size > (uint32_t)pcap) { unsigned char* p = realloc(in, size); if (p) { in = p; pcap = size; } }
-        if (h && size <= (uint32_t)pcap && fread(in, 1, size, h) == size) n = size;
-        if (h && h != iso) fclose(h);
-        if (n < 0 || (m = expand(in, n, &out, &cap)) < 0x80) { bad++; host_log("teleport: cannot read %s%s\n", f[i].mod ? "mods/" : "", f[i].name); continue; }
+        long m = room_read(&f[i], iso, &in, &pcap, &out, &cap);
+        if (m < 0) { bad++; host_log("teleport: cannot read %s%s\n", f[i].mod ? "mods/" : "", f[i].name); continue; }
         parse(out, m, at[file_key(f[i].name)]);
     }
     for (i = 0; i < nrows; i++) {
@@ -335,6 +297,141 @@ static int SDLCALL scan(void* ud)
     free(f); free(out); free(in);
     __atomic_store_n(&state, 2, __ATOMIC_RELEASE);
     return 0;
+}
+
+/* ---------------------------------------------------------------- "Randomize Voice Lines"' catalogue (cast.h voices_want)
+   Read from the room files (the disc's and the mods folder's) on a thread of its own, or from
+   <save_dir>/voices.cache when its key matches. */
+static int vbusy;             /* a build runs */
+static unsigned vkey;         /* the key of the catalogue published or being built, 0 none */
+
+static unsigned voices_key(void)
+{
+    File* f = calloc(MAX_FILES, sizeof(File));
+    SDL_PathInfo pi;
+    unsigned h = voice_cat_hash(), v[4];
+    int nf, nmod, i;
+    if (!f) return 0;
+    if (SDL_GetPathInfo(g_config.iso_path, &pi)) h = (h ^ (unsigned)pi.size ^ (unsigned)(pi.size >> 32)) * 16777619u;
+    nf = room_files(f, &nmod);
+    for (i = 0; i < nf; i++) {
+        uint32_t lsn = 0, size = 0;
+        char path[1100];
+        memset(v, 0, sizeof v);
+        if (!f[i].mod) { adx_afs_locate(17, f[i].disc, &lsn, &size); v[0] = lsn; v[1] = size; }
+        else { mod_path(&f[i], path, sizeof path); if (SDL_GetPathInfo(path, &pi)) { v[0] = (unsigned)pi.size; v[1] = (unsigned)pi.modify_time; v[2] = (unsigned)(pi.modify_time >> 32); } v[3] = (unsigned)f[i].mod; }
+        for (const unsigned char* b = (const unsigned char*)f[i].name; *b; b++) h = (h ^ *b) * 16777619u;
+        for (const unsigned char* b = (const unsigned char*)v; b < (const unsigned char*)(v + 4); b++) h = (h ^ *b) * 16777619u;
+    }
+    free(f);
+    return h ? h : 1;
+}
+
+void voices_cache_path(char* p, size_t n, const char* name) { snprintf(p, n, "%s/%s", g_config.save_dir, name); }
+static void cache_path(char* p, size_t n) { voices_cache_path(p, n, "voices.cache"); }
+static int cache_fill(FILE* f, void* ud) { const size_t* b = ud; return fwrite((const void*)b[0], 1, b[1], f) == b[1] ? 0 : -1; }
+
+static void voices_log(const char* how, Uint64 t0)
+{
+    int g[CAST_CHARACTERS] = { 0 }, nl[CAST_CHARACTERS] = { 0 };
+    for (int c = 0; c < CAST_CHARACTERS; c++)
+        for (int i = 0; i < voice_count(c); i++) { g[c] += voice_line(c, i)->grunt; nl[c] += !voice_line(c, i)->lip_n; }
+    host_log("voices: %s (%u ms): Claire %d, Chris %d, Steve %d, Wesker %d, Alfred %d, Alexia %d, Rodrigo %d lines (grunts %d %d %d %d %d %d %d, "
+             "without lips %d %d %d %d %d %d %d); %d without a LipSet said surely by their record\n", how, (unsigned)(SDL_GetTicks() - t0),
+             voice_count(0), voice_count(1), voice_count(2), voice_count(3), voice_count(4), voice_count(5), voice_count(6),
+             g[0], g[1], g[2], g[3], g[4], g[5], g[6], nl[0], nl[1], nl[2], nl[3], nl[4], nl[5], nl[6], voice_sure_count());
+}
+
+int room_each(void (*fn)(int room, const unsigned char* d, int n, void* ud), void* ud)
+{
+    File* f = calloc(MAX_FILES, sizeof(File));
+    FILE* iso = pc_fopen(g_config.iso_path, "rb");
+    long cap = 16 << 20, pcap = 4 << 20, m;
+    unsigned char *out = malloc(cap), *in = malloc(pcap);
+    int nf, nmod, i, n = -1;
+    if (f && out && in && iso)
+        for (nf = room_files(f, &nmod), n = i = 0; i < nf; i++)
+            if ((m = room_read(&f[i], iso, &in, &pcap, &out, &cap)) >= 0) { fn(atoi(f[i].name + 3), out, (int)m, ud); n++; }
+    if (iso) fclose(iso);
+    free(f); free(out); free(in);
+    return n;
+}
+
+static int SDLCALL vscan(void* ud)
+{
+    Uint64 t0 = SDL_GetTicks();
+    File* f = calloc(MAX_FILES, sizeof(File));
+    FILE* iso = pc_fopen(g_config.iso_path, "rb");
+    long cap = 16 << 20, pcap = 4 << 20, m;
+    unsigned char *out = malloc(cap), *in = malloc(pcap);
+    unsigned key = (unsigned)(uintptr_t)ud;
+    int nf, nmod, i, bad = 0, bad_disc = 0;
+    if (f && out && in && iso) {
+        nf = room_files(f, &nmod);
+        for (i = 0; i < nf; i++)
+            if ((m = room_read(&f[i], iso, &in, &pcap, &out, &cap)) >= 0) voice_scan_room(atoi(f[i].name + 3), out, (int)m, pc_insn_len_raw);
+            else bad++, bad_disc += !f[i].mod;
+        voice_scan_done();
+        voices_log(bad ? "the lines read from the room files, some unreadable" : "the lines read from the room files", t0);
+        {
+            size_t b[2] = { 0, 0 };
+            char path[1100];
+            unsigned char* d = voice_cache_save(key, &b[1]);
+            b[0] = (size_t)d;
+            cache_path(path, sizeof path);
+            if (d && !bad_disc && pc_save_file(path, "wb", cache_fill, b)) host_log("voices: cannot write %s\n", path);
+            free(d);
+        }
+    } else {
+        host_log("voices: cannot read the room files (%s)\n", iso ? "out of memory" : "disc image");
+        vkey = 0;
+    }
+    if (iso) fclose(iso);
+    free(f); free(out); free(in);
+    __atomic_store_n(&vbusy, 0, __ATOMIC_RELEASE);
+    return 0;
+}
+
+unsigned voices_cat_key(void) { return __atomic_load_n(&vbusy, __ATOMIC_ACQUIRE) ? 0 : vkey; }
+
+int voices_want(void)
+{
+    Uint64 t0 = SDL_GetTicks();
+    unsigned key;
+    uint32_t lsn, size;
+    char path[1100];
+    FILE* h;
+    static const VoiceCurated none[] = { { 0 } };
+    if (__atomic_load_n(&vbusy, __ATOMIC_ACQUIRE) || !g_config.iso_path[0] || !adx_afs_locate(17, 204, &lsn, &size)) return 0;
+    if (SDL_getenv("RECVX_VOICE_CHECKED") && !SDL_atoi(SDL_getenv("RECVX_VOICE_CHECKED"))) voice_curation_use(none);
+    if (!(key = voices_key()) || key == vkey) return 1;
+    vkey = key;
+    cache_path(path, sizeof path);
+    if ((h = pc_fopen(path, "rb"))) {
+        long n;
+        unsigned char* d = NULL;
+        int ok = fseek(h, 0, SEEK_END) == 0 && (n = ftell(h)) > 0 && n < (8 << 20) && !fseek(h, 0, SEEK_SET) && (d = malloc((size_t)n)) &&
+                 fread(d, 1, (size_t)n, h) == (size_t)n && voice_cache_load(d, (size_t)n, key);
+        fclose(h);
+        free(d);
+        if (ok) { voices_log("the lines from voices.cache", t0); return 1; }
+        host_log("voices: voices.cache is for other room files or damaged: read anew\n");
+    }
+    __atomic_store_n(&vbusy, 1, __ATOMIC_RELEASE);
+    {
+        SDL_Thread* t = SDL_CreateThread(vscan, "voices", (void*)(uintptr_t)key);
+        if (t) SDL_DetachThread(t);
+        else { __atomic_store_n(&vbusy, 0, __ATOMIC_RELEASE); vkey = 0; }
+    }
+    return 1;
+}
+
+void voices_frame(void)
+{
+    static int was;
+    if (!enemy_opts()->voices || !g_config.iso_path[0]) { was = 0; return; }
+    if (was) return;
+    was = voices_want();
 }
 
 /* ---------------------------------------------------------------- the table */
@@ -365,15 +462,20 @@ int tp_stage_first(int stg, int* n)
 
 const char* tp_stage_name(int stg) { return stg >= 0 && stg < 10 ? stages[stg] : "?"; }
 
+const char* tp_place_name(int stg, int rom)
+{
+    unsigned k = RoomNameSwitch((unsigned)(stg * 100 + rom));
+    if (k && k < SDL_arraysize(g_cheat.rooms) && g_cheat.rooms[k][0]) return g_cheat.rooms[k];
+    for (int j = 0; j < (int)SDL_arraysize(labels); j++) if (labels[j].stg == stg && labels[j].rom == rom) return labels[j].name;
+    return NULL;
+}
+
 const char* tp_room_name(int i, int with_file, char* b, int n)
 {
     const TpRoom* r = tp_room(i);
-    const char* nm = NULL;
-    unsigned k;
+    const char* nm;
     if (!r) { snprintf(b, n, "-"); return b; }
-    k = RoomNameSwitch(r->stg * 100 + r->rom);
-    if (k && k < SDL_arraysize(g_cheat.rooms) && g_cheat.rooms[k][0]) nm = g_cheat.rooms[k];
-    for (int j = 0; !nm && j < (int)SDL_arraysize(labels); j++) if (labels[j].stg == r->stg && labels[j].rom == r->rom) nm = labels[j].name;
+    nm = tp_place_name(r->stg, r->rom);
     if (r->custom && !r->tag[0]) snprintf(b, n, "Custom room %s", r->file);
     else if (r->custom || nm) snprintf(b, n, with_file ? "%s (%s)" : "%s", r->custom ? r->tag : nm, r->file);
     else snprintf(b, n, "Room %d (%s)", r->rom, r->file);

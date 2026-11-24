@@ -107,7 +107,7 @@ int spawn_slots_needed(int id)
 static NJS_TEXLIST tl[TEX_LISTS];
 static NJS_TEXNAME tn[TEX_NAMES];
 static int tl_n, tn_n;
-static int spawned[128];                /* slots we spawned into (id + 1), for the trace */
+static int spawned[PC_ENE_SLOTS];                /* slots we spawned into (id + 1), for the trace */
 static int room_key = -1;              /* the room the textures belong to */
 
 static void release_textures(void)
@@ -119,7 +119,8 @@ static void release_textures(void)
     memset(spawned, 0, sizeof(spawned));
 }
 
-void spawn_release(void) { variant_release(); release_textures(); }   /* ps2_texture.c bhReleaseMainTexture; also the enemy variants' models */
+void cast_release(void);
+void spawn_release(void) { variant_release(); cast_release(); release_textures(); }   /* ps2_texture.c bhReleaseMainTexture; also enemy variants and cutscene cast models */
 
 void spawn_textures_released(void) { tl_n = tn_n = 0; memset(spawned, 0, sizeof(spawned)); }   /* njReleaseTextureAll */
 
@@ -194,37 +195,58 @@ static int room_tex_push(void)
 /* (sys->rdtp: the room file, which room_tex_push reads while the room's textures are not all up; it is
    still NULL when a guest that died rejoins and the host's EV_SPAWN arrives before its first room load -
    that crashed the guest) */
+/* in a room that runs, and the system monitor only runs the game (mn_mode 0): its other modes read a file into
+   sys->memp and take it a frame later (a weapon change: bhSysCallMonitor mode 3, bhReadWeaponData), and a spawn
+   then wrote its model there - the weapon's motions came out of the enemy's data (crash at the next aim, or in
+   bhReadWeaponData itself) */
 static int ready(void)
 {
-    return sys && plp && rom && sys->rdtp && (sys->tk_flg & 0x80) && (sys->sp_flg & 0x2) && !(sys->gm_flg & 0x9) && !(sys->cb_flg & 0x1);
+    return sys && plp && rom && sys->rdtp && (sys->tk_flg & 0x80) && (sys->sp_flg & 0x2) && !(sys->gm_flg & 0x9) && !(sys->cb_flg & 0x1) &&
+           !*(int*)&sys->mn_mode0;
 }
 
-/* Sounds: enemies play their sound ids in SE bank 3, which the room's sound pack fills with its own
-   types' sounds only, and ids collide between types (a Hunter's played zombie sounds). A type the room
-   file has no record of gets the bank 3 of its source room (or of another room with the type) as an
-   extra bank (pc/src/audio/snd_iop.c), released with the room; none to be had: its sounds are silent. */
+/* Sounds: enemies play their sound ids in SE bank 3, which the room's sound pack fills with the
+   programs its own records play, and ids collide between types (a Hunter's played zombie sounds). So
+   an enemy spawned here plays the bank 3 of its look's source room (or of another room with the type)
+   as an extra bank (pc/src/audio/snd_iop.c), released with the room, also when the room has its type:
+   that bank may hold another type's programs at the same numbers (RM_0050: the Cerberus's gate sounds
+   as a zombie's steps), lack the look's voice or be an event enemy's without steps. Its parts play from
+   it too (eneset.c pc_slot_sound); children its code makes and effects play their type's: the room's
+   for a type the room file has, else the first spawned look's; none to be had: silent. */
 int snd_xbank_load(int key);
 void snd_xbank_release(void);
 int pc_enemy_sound_type(int slot);      /* eneset.c */
+int pc_enemy_slot_sound(int slot);
+extern signed char pc_slot_sound[PC_ENE_SLOTS];
 static signed char sound_bank[100];     /* type -> extra bank, -1 none, 0 the room's */
 
 static void sound_release(void) { memset(sound_bank, 0, sizeof(sound_bank)); snd_xbank_release(); }
 
 int spawn_sound_bank(int enemy_no)      /* sdfunc.c RequestEnemySeBasic */
 {
-    int id = pc_enemy_sound_type(enemy_no);
-    return id >= 0 && id < 100 ? sound_bank[id] : 0;
+    int b = pc_enemy_slot_sound(enemy_no), id = pc_enemy_sound_type(enemy_no);
+    return b ? b : id >= 0 && id < 100 ? sound_bank[id] : 0;
 }
 
-static void sound_load(const ActorModel* am)
+/* the room whose bank 3 has the look's sounds: its catalogue room, but for looks whose room has none */
+static int sound_room(const ActorModel* am)
 {
-    int k, b;
+    if (am->id == 1 && am->mdlver == 39) return 9120;   /* zombie Hazmat Suit: RM_3140's bank has the infant albinoid's 3 programs */
+    if (am->id == 1 && am->mdlver == 40) return 3050;   /* zombie Dark Uniform: RM_5700's has its voice empty */
+    if (am->id == 21) return 3140;                      /* infant albinoid: RM_3120's bank is a zombie's */
+    return am->room;
+}
+
+static void sound_load(const ActorModel* am, int slot)
+{
+    int k, b = 0, key = sound_room(am), own = key == room_file_now();   /* (own: a record of this room's file, its bank) */
+    if (!own) b = snd_xbank_load(key);
+    for (k = 0; !b && !own && k < list_n; k++)   /* a source room without a bank 3 (Bandersnatch 2): another room of the type */
+        if (entry(k)->id == am->id && entry(k)->room != key) b = snd_xbank_load(entry(k)->room);
+    pc_slot_sound[slot] = (signed char)b;
     if (am->id >= 100 || sound_bank[am->id]) return;
     for (k = 0; k < rom->ene_n; k++)
-        if (rom->enep[k].id == am->id) return;   /* the room's own type: its bank has the sounds */
-    b = snd_xbank_load(am->room);
-    for (k = 0; !b && k < list_n; k++)   /* a source room without a bank 3 (Bandersnatch 2): another room of the type */
-        if (entry(k)->id == am->id && entry(k)->room != am->room) b = snd_xbank_load(entry(k)->room);
+        if (rom->enep[k].id == am->id) return;   /* the room's own type: its children's and effects' sounds are in its bank */
     sound_bank[am->id] = (signed char)(b ? b : -1);
     if (b) host_log("spawn: type %d plays its sounds from extra bank %d\n", am->id, b);
     else host_log("spawn: type %d: no sound bank found, its sounds are silent\n", am->id);
@@ -305,16 +327,16 @@ const char* spawn_at(const ActorModel* am, const SpawnNote* n, int want, int mod
     ActorData a;
     ETTY_WORK rec;
     BH_PWORK* ep;
-    unsigned char *mdl, *p, textured[16] = { 0 }, marked[128];
+    unsigned char *mdl, *p, textured[16] = { 0 }, marked[PC_ENE_SLOTS];
     int k, slot = -1, free_n = 0, j, t, texn = 0, lists, dt, need, tex_free, heap_free, nm = 0, pool0 = pool_n;
     const char* how;
 
     if (!loading && !ready()) return "not in a room now (door, event or menu)";
     if (spawn_refused(am->id)) return spawn_refused(am->id);
-    for (k = 0; k < 128; k++)   /* (helper code: each type's parts run its own, eneset.c pc_call_enemy) */
+    for (k = 0; k < PC_ENE_SLOTS; k++)   /* (helper code: each type's parts run its own, eneset.c pc_call_enemy) */
         if (!(ene[k].flg & 0x1)) { free_n++; if (slot < 0) slot = k; }
     if (want >= 0) {
-        if (want >= 128 || (ene[want].flg & 0x1)) { snprintf(msg, sizeof(msg), "refused: slot %d is taken", want); return msg; }
+        if (want >= PC_ENE_SLOTS || (ene[want].flg & 0x1)) { snprintf(msg, sizeof(msg), "refused: slot %d is taken", want); return msg; }
         slot = want;
     }
     if (free_n < spawn_slots_needed(am->id) + SPAWN_SLOTS_FREE) {
@@ -382,7 +404,7 @@ const char* spawn_at(const ActorModel* am, const SpawnNote* n, int want, int mod
     }
     for (j = 0; j < ep->mdl_n; j++) sys->memp = bhKeepObjWork(&ep->mdl[j], sys->memp);
     bhCalcModel(ep);
-    sound_load(am);
+    sound_load(am, slot);
     fx_load(am, rec.type);
     spawned[slot] = am->id + 1;
     pc_enemy_mark_added();
@@ -394,87 +416,15 @@ const char* spawn_at(const ActorModel* am, const SpawnNote* n, int want, int mod
     return NULL;
 }
 
-/* ---------------------------------------------------------------- enemies added to the room (co-op) */
-/* Everything that exists here but not in the room file (the F2 spawner, extra enemies): the host
-   sends each to the guest, which realizes it into the same slot; a guest entering the room later
-   or rejoining gets all of them again (spawn_replay). */
-#define ADDED 64
-static SpawnNote added[ADDED];
-static unsigned char added_slot[ADDED];
-static int added_n, added_gen = -1;
-
-static void added_room(void) { if (added_gen != enemy_room_gen) { added_gen = enemy_room_gen; added_n = 0; } }
-
-/* host or single player: spawn and keep it in the room's list; NULL or why not */
-const char* spawn_add(const ActorModel* am, const SpawnNote* n, int* slot_out)
+/* ---------------------------------------------------------------- enemies added to the room */
+/* Spawn into slot `want` (-1: the first free one); NULL or why not */
+const char* spawn_add(const ActorModel* am, const SpawnNote* n, int want, int* slot_out)
 {
     int slot;
-    const char* r = spawn_at(am, n, -1, 0, &slot);
+    const char* r = spawn_at(am, n, want, 0, &slot);
     if (r) return r;
-    added_room();
-    if (added_n < ADDED) { added[added_n] = *n; added_slot[added_n++] = (unsigned char)slot; }
     if (slot_out) *slot_out = slot;
     return NULL;
-}
-
-void spawn_replay(void)
-{
-    int i;
-    added_room();
-    if (added_n) host_log("spawn: %d added enemies sent to the partner (it entered the room)\n", added_n);
-}
-
-/* guest: the host's added enemy `n` into slot `slot` of room stg/rom, now */
-static void note_apply(int slot, const SpawnNote* n, int stg, int rom_no)
-{
-    ActorModel am = { "partner's enemy", n->room, n->rec, n->id, n->mdlver, 0, 0 };
-    const char* r;
-    int first;
-    if (stg != sys->stg_no || rom_no != sys->rom_no) return;   /* another room's: it went with that room */
-    if (slot < 128 && (ene[slot].flg & 0x1) && ene[slot].id == n->id) return;   /* already here (a replay) */
-    for (first = 0; first < 128 && (ene[first].flg & 0x1); first++);
-    r = spawn_at(&am, n, slot, SPAWN_DICTATED, NULL);
-    host_log("spawn: partner's enemy type %d model %d into slot %d (first free here: %d): %s\n", n->id, n->mdlver, slot, first, r ? r : "done");
-}
-
-/* Those that came while our room did not run (a door, an event, a menu) wait here and are placed
-   from coop_frame once it runs again (spawn_pending), in order; the event stream goes on meanwhile
-   (before, the stream stopped behind such a spawn for up to 30 s). Dropped after PEND_FRAMES. */
-#define PEND 64
-#define PEND_FRAMES 900
-static struct { SpawnNote n; int slot, stg, rom, t; } pend[PEND];
-static int pend_n;
-
-void spawn_pending(int run)
-{
-    int k;
-    if (!run || !sys || !plp || (sys->tk_flg & 0x8)) { pend_n = 0; return; }   /* session over, title: superseded by the next join */
-    if (!pend_n) return;
-    if (!ready()) {
-        for (k = 0; k < pend_n && ++pend[k].t < PEND_FRAMES; k++);
-        if (k == pend_n) return;
-        host_log("spawn: %d partner's enemies dropped (not in a room for too long)\n", pend_n);
-        pend_n = 0;
-        return;
-    }
-    for (k = 0; k < pend_n; k++) note_apply(pend[k].slot, &pend[k].n, pend[k].stg, pend[k].rom);
-    pend_n = 0;
-}
-
-/* guest: an EV_SPAWN of the host (always taken: 1) */
-int spawn_note_apply(int slot, const SpawnNote* n, int stg, int rom_no)
-{
-    if (n->pad == SPAWN_NOTE_KEPT) { enemy_rand_kept(n->room, slot, n->id); return 1; }   /* (also at the title: before the game state) */
-    if (!sys || !plp || (sys->tk_flg & 0x8)) return 1;   /* title: superseded by the next join */
-    if (!ready() || pend_n) {
-        if (pend_n == PEND) { host_log("spawn: too many partner's enemies waiting: the oldest dropped\n"); memmove(pend, pend + 1, sizeof(pend[0]) * --pend_n); }
-        pend[pend_n].n = *n; pend[pend_n].slot = slot; pend[pend_n].stg = stg; pend[pend_n].rom = rom_no; pend[pend_n++].t = 0;
-        if (!ready()) host_log("spawn: partner's enemy for slot %d waits until our room runs (%d waiting)\n", slot, pend_n);
-        if (ready()) spawn_pending(1);   /* (in order: the waiting ones first) */
-        return 1;
-    }
-    note_apply(slot, n, stg, rom_no);
-    return 1;
 }
 
 /* the F2 entry `i` at distance `dist` in front of the player, facing it */
@@ -489,7 +439,6 @@ static const char* spawn(int i, float dist, int* slot_out)
     if (v && !(am = variant_base(v))) return "refused: its base is not in the spawner list";
     if (!v) am = entry(i);
     if (!ready()) return "can't spawn now (not in a room, a door or an event)";
-    if (0) return "co-op: only the host spawns enemies (it runs them)";
     n.room = am->room; n.rec = am->rec; n.id = am->id; n.mdlver = am->mdlver;
     n.variant = v ? v->id : 0;
     /* variant 0, the free-roaming one: others wait for the room's enemy floor areas (Cerberus 1, 2),
@@ -503,7 +452,7 @@ static const char* spawn(int i, float dist, int* slot_out)
     n.py = plp->py;
     n.ay = (short)((plp->ay + 0x8000) & 0xFFFF);
     n.flr = plp->flr_no;
-    if ((r = spawn_add(am, &n, slot_out))) return r;
+    if ((r = spawn_add(am, &n, -1, slot_out))) return r;
     snprintf(msg, sizeof(msg), "spawned %s", v ? v->name : am->name);
     return msg;
 }
@@ -595,7 +544,7 @@ static void survey(void)
 void spawn_frame(int clock)
 {
     static const char* env = (const char*)-1;
-    static int trace, last_trace, last_hp, ene_hp[128], trace_room = -1;
+    static int trace, last_trace, last_hp, ene_hp[PC_ENE_SLOTS], trace_room = -1;
     int f, id, ver = -1, n = 0, k, slot_new = -1, vid = 0;
     float dist = 30.0f;
     if (env == (const char*)-1) trace = (env = getenv("RECVX_SPAWN")) != NULL;
@@ -626,7 +575,7 @@ void spawn_frame(int clock)
     }
     if (plp->hp < last_hp && last_hp - plp->hp < 400) printf("test: game frame %d player hit, hp %d -> %d\n", clock, last_hp, plp->hp);
     last_hp = plp->hp;
-    for (k = 0; k < 128; k++) {
+    for (k = 0; k < PC_ENE_SLOTS; k++) {
         BH_PWORK* ep = &ene[k];
         float dx, dz;
         if (!spawned[k] || !(ep->flg & 0x1) || ep->id != spawned[k] - 1) continue;
@@ -640,7 +589,7 @@ void spawn_frame(int clock)
     if (clock - last_trace >= 30) {
         if (clock / 30 % 3 == 0) {   /* every 90 game frames: all active slots (id, mode0), e.g. to compare co-op instances */
             printf("test: game frame %d room %d/%d slots:", clock, sys->stg_no, sys->rom_no);
-            for (k = 0; k < (int)sys->ewk_n && k < 128; k++)
+            for (k = 0; k < (int)sys->ewk_n && k < PC_ENE_SLOTS; k++)
                 if (ene[k].flg & 0x1) printf(" %d:%d/%d", k, ene[k].id, ene[k].mode0);
             printf("\n");
         }

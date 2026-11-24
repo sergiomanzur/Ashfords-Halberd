@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #define NOEV 0xFFFFFFFFu
 #define NATIVE_KEY (1ull << 63)   /* Group.key0 of a native 3D strip (v0 = its event) */
@@ -54,11 +55,13 @@ struct Frame {
     uint32_t* vx; size_t nvx, cvx;           /* event index of each vertex */
     uint32_t* stq; size_t cstq;              /* per vertex: its ST and RGBAQ events (NOEV: none) */
     uint64_t* spos; size_t nspos, cspos;     /* native strip vertices' screen positions (gpos), once per frame */
+    uint16_t (*box)[4]; size_t cbox;         /* per instance: x0, y0, x1, y1 of its screen positions (x0 > x1: none) */
     int spos_done;
     GsState start;
     uint8_t clut_start[GS_CLUT_STATE_SIZE];
     uint8_t ntex_start[NTEX_STATE_SIZE];
     int new_group;
+    uint32_t aa_ev, aa_fbp, aa_fbw;          /* anti-aliasing before event aa_ev (NOEV: none) of target FBP/FBW (aa_split) */
 };
 
 #define POOL 4
@@ -85,10 +88,22 @@ static int tex_event(const Ev* e)
     }
 }
 
+/* tex_event, and not a TEX0 write of the value the previous texture event wrote to it: the game
+   writes the same TEX0 (with a CLUT load) before each strip, nothing about the texture changed
+   since (gs_clut_load flushes only if the CLUT did), so its strips may share a batch. The executed
+   frame and its replays alike (their resources are found by epoch). */
+static int tex_epoch_event(const Ev* e, const Ev** last)
+{
+    const Ev* l = *last;
+    if (!tex_event(e)) return 0;
+    *last = e;
+    return !(l && e->kind == EV_REG && (e->reg == 0x06 || e->reg == 0x07) && l->kind == EV_REG && l->reg == e->reg && l->v == e->v);
+}
+
 static void* xrealloc(void* p, size_t n)
 {
     void* q = realloc(p, n);
-    if (!q && n) host_fatal("stream: out of memory (%zu bytes)", n);
+    if (!q && n) host_fatal("Not enough memory (%zu bytes).", n);
     return q;
 }
 #define GROW(ptr, n, cap, extra) do { if ((n) + (extra) > (cap)) { (cap) = ((n) + (extra)) * 2 + 1024; (ptr) = xrealloc((ptr), (cap) * sizeof(*(ptr))); } } while (0)
@@ -183,15 +198,18 @@ static NativeVertex nv_blend_pos(const NativeVertex* a, const NativeVertex* b, f
    vertices for it) */
 static int nv_same_pos(const NativeVertex* a, const NativeVertex* b, uint32_t n)
 {
+    static const size_t at[6] = { offsetof(NativeVertex, x), offsetof(NativeVertex, y), offsetof(NativeVertex, z),
+                                  offsetof(NativeVertex, w), offsetof(NativeVertex, near_d), offsetof(NativeVertex, far_d) };
     if (n > 64) n = 64;   /* what native_draw draws */
     for (uint32_t k = 0; k < n; k++) {
-        const float *fa[6] = { &a[k].x, &a[k].y, &a[k].z, &a[k].w, &a[k].near_d, &a[k].far_d },
-                    *fb[6] = { &b[k].x, &b[k].y, &b[k].z, &b[k].w, &b[k].near_d, &b[k].far_d };
+        uint32_t d = 0, bad = 0;   /* (the fields of a vertex at once: one branch, not six) */
         for (int j = 0; j < 6; j++) {
             uint32_t x, y;
-            memcpy(&x, fa[j], 4); memcpy(&y, fb[j], 4);
-            if (x != y || (x & 0x7F800000u) == 0x7F800000u || x == 0x80000000u) return 0;   /* differ, Inf/NaN, -0 */
+            memcpy(&x, (const char*)&a[k] + at[j], 4); memcpy(&y, (const char*)&b[k] + at[j], 4);
+            d |= x ^ y;
+            bad |= ((x & 0x7F800000u) == 0x7F800000u) | (x == 0x80000000u);   /* Inf/NaN, -0 */
         }
+        if (d | bad) return 0;
     }
     return 1;
 }
@@ -397,6 +415,99 @@ void stream_note_upload(const uint64_t* pages)
     ntex_note_upload(pages);
 }
 
+/* Anti-aliasing (the "Anti-Aliasing" setting, gs_gl.c gs_scene_aa) runs where the frame's 3D scene is
+   complete and its 2D not yet drawn: after the last 3D draw before the first 2D draw, both on the
+   scene's target (the one the frame's first native 3D strip draws to). The game draws its 3D first,
+   then the ordering table: translucent 3D and effects by depth, its 2D (messages, the font, menus,
+   letterbox, fades; our boxes and texts) at the front priorities, so after them.
+   - 3D: native strips with a depth (w != 1), 3D points/lines/sprites (particles, NATIVE_RAW_3D), and
+     GS-path draws under a mesh or effect tag (stream_tag, EV_TAGLAST).
+   - 2D: the native path's other strips and sprites (Ps2AddPrim2D), unless they cover the whole
+     screen: fades, the camera vignette and the under-water distortion are layers of the scene,
+     drawn over the anti-aliased 3D.
+   - Neither: GS-path draws without a tag (clears, the shadow composite, the display copy, movies).
+   No 3D (title, menus, inventory, files, map, movies): none. 2D under the 3D (drawn before it):
+   none, rather than blurring it. 3D after the first 2D stays as it is (none in the scenes measured,
+   RECVX_AA_TRACE=1 counts it). Needs the native 3D path (Hardware 3D Rendering): without
+   it the game's 2D is plain GS-path drawing and there is no native 3D, so no anti-aliasing.
+   Computed once per executed frame; its replays (in-between images) run it at the same event. */
+static void aa_split(Frame* f)
+{
+    uint64_t fr[2], ofs[2], prim = gs.prim;
+    uint32_t scene = NOEV, fbw = 0, last = NOEV, kick = NOEV, stop = NOEV;
+    int tagged = 0, def = 0, n3 = 0, after = 0;
+    static int trace = -1;
+    f->aa_ev = NOEV;
+    if (!g_config.antialias && !g_config.dithering) return;
+    if (trace < 0) trace = SDL_getenv("RECVX_AA_TRACE") != NULL;
+    for (int pass = 0; pass < 2; pass++) {
+        fr[0] = gs.ctx[0].frame; fr[1] = gs.ctx[1].frame; ofs[0] = gs.ctx[0].xyoffset; ofs[1] = gs.ctx[1].xyoffset;
+        prim = gs.prim; tagged = def = 0;
+        for (uint32_t i = 0; i < f->nev; i++) {
+            const Ev* e = &f->ev[i];
+            int ctx, d3 = 0, full = 0;
+            if (e->kind == EV_TEXDEF) def = 1;
+            else if (e->kind == EV_TEXDEF_END) def = 0;
+            if (def) continue;   /* (texture definitions: recorded, not drawn) */
+            if (e->kind == EV_TAG) { tagged = e->v && !MENU_TAG(e->v); continue; }
+            if (e->kind == EV_TAGLAST) {   /* the GS-path polygon just drawn was an effect's */
+                if (pass && kick != NOEV && stop == NOEV && !MENU_TAG(e->v)) { last = kick; n3++; }
+                continue;
+            }
+            if (e->kind == EV_REG) {
+                if (e->reg == 0x00) prim = e->v;
+                else if (e->reg == 0x4C || e->reg == 0x4D) fr[e->reg - 0x4C] = e->v;
+                else if (e->reg == 0x18 || e->reg == 0x19) ofs[e->reg - 0x18] = e->v;
+                if (!pass || (e->reg != 0x04 && e->reg != 0x05)) continue;   /* drawing kicks: XYZF2, XYZ2 */
+                ctx = (int)(prim >> 9) & 1;
+                if ((fr[ctx] & 0x1FF) != scene) continue;
+                kick = tagged ? NOEV : i;
+                if (!tagged) continue;
+                d3 = 1;
+            } else if (e->kind == EV_NATIVE || e->kind == EV_RAW) {
+                float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f, ox, oy;
+                ctx = (int)(e->v >> 41) & 1;
+                if (e->kind == EV_NATIVE) {
+                    const NativeVertex* v = native_verts(f, i);
+                    for (uint32_t k = 0; k < e->len && k < 64; k++) {
+                        if (v[k].w != 1.0f) { d3 = 1; break; }
+                        x0 = fminf(x0, v[k].x); x1 = fmaxf(x1, v[k].x); y0 = fminf(y0, v[k].y); y1 = fmaxf(y1, v[k].y);
+                    }
+                    if (!pass) {
+                        if (d3) { scene = (uint32_t)(fr[ctx] & 0x1FF); fbw = (uint32_t)(fr[ctx] >> 16) & 0x3F; break; }
+                        continue;
+                    }
+                } else {
+                    const NativeRawVertex* v = raw_verts(f, i);
+                    if (!pass) continue;
+                    d3 = (e->v >> 32 & NATIVE_RAW_3D) != 0;
+                    for (uint32_t k = 0; k < e->len; k++) {
+                        x0 = fminf(x0, v[k].x / 16.0f); x1 = fmaxf(x1, v[k].x / 16.0f); y0 = fminf(y0, v[k].y / 16.0f); y1 = fmaxf(y1, v[k].y / 16.0f);
+                    }
+                }
+                if ((fr[ctx] & 0x1FF) != scene) continue;
+                ox = (float)(ofs[ctx] & 0xFFFF) / 16.0f; oy = (float)((ofs[ctx] >> 32) & 0xFFFF) / 16.0f;
+                full = x0 <= ox + 8.0f && x1 >= ox + 632.0f && y0 <= oy + 8.0f && y1 >= oy + 440.0f;
+            } else continue;
+            if (stop != NOEV) { after += d3; continue; }   /* (RECVX_AA_TRACE: the 3D left out) */
+            if (d3) { last = i; n3++; continue; }
+            if (full) continue;
+            stop = i;   /* the first 2D */
+            if (!trace) break;
+        }
+        if (scene == NOEV) break;   /* no native 3D */
+    }
+    if (scene != NOEV && last != NOEV) {
+        f->aa_ev = last + 1;
+        f->aa_fbp = scene;
+        f->aa_fbw = fbw ? fbw : 1;
+    }
+    if (trace)
+        host_log("aa: game frame %llu: %s, scene FBP %d, %d 3D draws, after event %d, first 2D at %d of %zu, then %d 3D draws\n", (unsigned long long)stream_game_frames(),
+                 f->aa_ev != NOEV ? "on" : scene == NOEV ? "off (no 3D)" : "off (2D under the 3D)", scene == NOEV ? -1 : (int)scene, n3,
+                 last == NOEV ? -1 : (int)last, stop == NOEV ? -1 : (int)stop, f->nev, after);
+}
+
 void stream_exec(Frame* f)
 {
     long inst = -1;
@@ -409,11 +520,15 @@ void stream_exec(Frame* f)
     f->start = gs;
     gs_clut_state_save(f->clut_start);
     ntex_state_save(f->ntex_start);
+    const Ev* last_tex = NULL;
     gs_tex_epoch = 0;
     hdpack_frame(f->fade);
+    aa_split(f);
+    gs_scene_begin(f->aa_ev != NOEV);
     for (size_t i = 0; i < f->nev; i++) {
         const Ev* e = &f->ev[i];
-        if (tex_event(e)) gs_tex_epoch = (uint32_t)i + 1;
+        if (i == f->aa_ev) gs_scene_aa(f->aa_fbp, f->aa_fbw);
+        if (tex_epoch_event(e, &last_tex)) gs_tex_epoch = (uint32_t)i + 1;
         if (ntex_defining()) {   /* texture definition: recorded, not executed */
             if (e->kind == EV_REG) { ntex_define_reg(e->reg, e->v); continue; }
             if (e->kind == EV_IMAGE) { ntex_define_image(f->pool + e->v, e->len); continue; }
@@ -513,6 +628,7 @@ void stream_exec(Frame* f)
             break;
         }
     }
+    if (f->aa_ev == f->nev) gs_scene_aa(f->aa_fbp, f->aa_fbw);
     gs_flush();
 }
 
@@ -583,8 +699,10 @@ static uint64_t project(const NativeVertex* nv)
     x = x < 0 ? 0 : x > 0xFFFF ? 0xFFFF : x; y = y < 0 ? 0 : y > 0xFFFF ? 0xFFFF : y;
     return (uint64_t)x | ((uint64_t)y << 16);
 }
+static uint64_t gpos(const Frame* f, const Group* g, uint32_t v);
 /* the native strips' screen positions of an executed frame, projected once (a frame is
-   matched as the newer and then as the older one, each instance against every candidate) */
+   matched as the newer and then as the older one, each instance against every candidate),
+   and each instance's box */
 static void frame_spos(const Frame* cf)
 {
     Frame* f = (Frame*)cf;   /* a cache of the frame's own data */
@@ -602,11 +720,42 @@ static void frame_spos(const Frame* cf)
         nv = native_verts(f, g->v0);
         for (uint32_t v = 0; v < g->nv; v++) f->spos[g->sp + v] = project(&nv[v]);
     }
+    GROW(f->box, 0, f->cbox, f->nin);
+    for (size_t i = 0; i < f->nin; i++) {
+        uint16_t* b = f->box[i];
+        b[0] = b[1] = 0xFFFF; b[2] = b[3] = 0;
+        for (uint32_t k = 0; k < f->in[i].ng; k++) {
+            const Group* g = &f->g[f->in[i].g0 + k];
+            for (uint32_t v = 0; v < g->nv; v++) {
+                uint64_t q = gpos(f, g, v);
+                uint16_t x = (uint16_t)q, y = (uint16_t)(q >> 16);
+                if (q == NO_POS) continue;
+                if (x < b[0]) b[0] = x;
+                if (y < b[1]) b[1] = y;
+                if (x > b[2]) b[2] = x;
+                if (y > b[3]) b[3] = y;
+            }
+        }
+    }
     f->spos_done = 1;
 }
 static uint64_t gpos(const Frame* f, const Group* g, uint32_t v)
 {
     return g->key0 & (NATIVE_KEY | RAW_KEY) ? f->spos[g->sp + v] : vtx(f, g->v0 + v);
+}
+
+/* the least inst_pair can give for instances a (frame p) and b (frame c): each judged vertex pair is
+   at least as far apart (moved) as their boxes, capped as inst_pair caps it */
+static long inst_gap(const Frame* p, size_t a, const Frame* c, size_t b)
+{
+    const uint16_t *x = p->box[a], *y = c->box[b];
+    long d = 0;
+    if (x[0] > x[2] || y[0] > y[2]) return 0;   /* no position: nothing known */
+    if ((long)x[0] - y[2] > d) d = (long)x[0] - y[2];
+    if ((long)y[0] - x[2] > d) d = (long)y[0] - x[2];
+    if ((long)x[1] - y[3] > d) d = (long)x[1] - y[3];
+    if ((long)y[1] - x[3] > d) d = (long)y[1] - x[3];
+    return d < 2 * JUMP ? d : 2 * JUMP;
 }
 
 /* Pair the groups of instance b (frame c) with those of instance a (frame p) by strip and
@@ -621,11 +770,13 @@ static uint64_t gpos(const Frame* f, const Group* g, uint32_t v)
    rotating GS memory, so a mesh's texture address changes between frames; the tags
    identify the geometry. */
 static int32_t* pair; static size_t cap_pair;
+static const Inst *pair_a, *pair_b;   /* whose pairs pair[] holds */
 static long inst_pair(const Frame* p, const Inst* a, const Frame* c, const Inst* b)
 {
     int64_t sum = 0, n = 0, total = 0, near = 0, paired = 0;
     uint32_t j = 0;
     int native = 1;   /* all its groups native strips */
+    pair_a = a; pair_b = b;
     for (uint32_t k = 0; k < b->ng; k++) {
         const Group* g = &c->g[b->g0 + k];
         pair[k] = -1;
@@ -850,6 +1001,23 @@ int stream_match(const Frame* p, const Frame* c)
             size_t m = (lo + hi) / 2;
             if (p->in[order[m]].mesh < b->mesh) lo = m + 1; else hi = m;
         }
+        if (!MENU_TAG(b->mesh)) {
+            /* the same choice as below (the nearest, the first in order of the nearest), with fewer
+               candidates judged: the one whose box is nearest first, then only those whose boxes could
+               do as well (a crowd of 30 zombies: 3000 judged a frame before, 750 now) */
+            size_t first = (size_t)-1;
+            long gap = 2 * JUMP + 1, d;
+            for (size_t m = lo; m < p->nin && p->in[order[m]].mesh == b->mesh; m++)
+                if (!used[m] && (d = inst_gap(p, order[m], c, i)) < gap) { gap = d; first = m; }
+            if (first != (size_t)-1 && (d = inst_pair(p, &p->in[order[first]], c, b)) >= 0) { best_d = d; best = first; }
+            for (size_t m = lo; m < p->nin && p->in[order[m]].mesh == b->mesh; m++) {
+                if (used[m] || m == first) continue;
+                gap = inst_gap(p, order[m], c, i);
+                if (gap > best_d || (gap == best_d && m > best)) continue;
+                d = inst_pair(p, &p->in[order[m]], c, b);
+                if (d >= 0 && (d < best_d || (d == best_d && m < best))) { best_d = d; best = m; }
+            }
+        } else
         for (size_t m = lo; m < p->nin && p->in[order[m]].mesh == b->mesh && best_d; m++) {
             const Inst* a = &p->in[order[m]];
             long d;
@@ -885,7 +1053,8 @@ int stream_match(const Frame* p, const Frame* c)
             continue;
         }
         used[best] = 1;
-        inst_pair(p, &p->in[order[best]], c, b);   /* the pairs of the chosen instance */
+        if (pair_a != &p->in[order[best]] || pair_b != b)
+            inst_pair(p, &p->in[order[best]], c, b);   /* the pairs of the chosen instance (unless the last one judged) */
         {
             int lone = 0;   /* native strips without a pair */
             for (uint32_t k = 0; k < b->ng; k++) {
@@ -1006,17 +1175,23 @@ void stream_replay(const Frame* r, float t)
     gs_replaying = 1;
     gs_replay_begin();
     int in_def = 0;
+    const Ev* last_tex = NULL;
     gs_tex_epoch = 0;
+    gs_scene_begin(r->aa_ev != NOEV);
     for (size_t i = 0; i < r->nev; i++) {
         const Ev* e = &r->ev[i];
-        if (tex_event(e)) gs_tex_epoch = (uint32_t)i + 1;
+        if (i == r->aa_ev) gs_scene_aa(r->aa_fbp, r->aa_fbw);   /* where the executed frame ran it */
+        if (tex_epoch_event(e, &last_tex)) gs_tex_epoch = (uint32_t)i + 1;
         uint64_t v;
         if (e->kind == EV_TEXDEF) { in_def = 1; continue; }
         if (e->kind == EV_TEXDEF_END) { in_def = 0; continue; }
         if (in_def) continue;
         if (e->kind == EV_TEXBIND) { ntex_bind((uint32_t)e->v, (uint32_t)(e->v >> 32) & 0x3FFF, (uint32_t)(e->v >> 46) & 0x3FFF); continue; }
         if (e->kind == EV_MOVIE) { gs_movie_bind((uint32_t)e->v, (int)e->len); continue; }
-        if (e->kind == EV_RTEX) continue;    /* draws bind the executed frame's capture (replay resources) */
+        if (e->kind == EV_RTEX) {   /* this image's own capture, bound in place of the executed frame's (gs_gl.c rcap) */
+            gs_replay_capture(ntex_capture_tex((uint32_t)e->v), (uint32_t)(e->v >> 32) & 0x1FF, (uint32_t)(e->v >> 48) & 0x3F, e->len & 0xFFFF, e->len >> 16, (int)(e->v >> 56) & 1);
+            continue;
+        }
         if (e->kind == EV_IMAGE) continue;   /* a replay writes no GS memory: its textures and render-target
                                                   reloads are the executed frame's (gs_gl.c, replay resources) */
         if (e->kind == EV_RAW) {
@@ -1064,6 +1239,7 @@ void stream_replay(const Frame* r, float t)
         if (vi < r->nvx && r->vx[vi] == i) vi++;
         gs_exec_reg(e->reg, v);
     }
+    if (r->aa_ev == r->nev) gs_scene_aa(r->aa_fbp, r->aa_fbw);
     gs_flush();
     gs_replaying = 0;
     gs = end;

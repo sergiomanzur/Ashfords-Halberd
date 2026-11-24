@@ -43,8 +43,9 @@ typedef struct {
     int  contrast;           /* 50..150 %, 100 neutral */
     int  gamma;              /* tenths, 5..20, 10 neutral */
     int  saturation;         /* 0..200 %, 100 neutral, final game image only */
-    int  antialias;          /* 0 off, 1 FXAA, 2 SMAA */
-    int  dithering;          /* 0 off, 1 on (light deband), 2 deband */
+    int  antialias;          /* 0 off, 1 FXAA, 2 SMAA (3D scene only, gs_scene_aa) */
+    int  dithering;          /* 0 off, 1 on (16F smooth 3D + IGN dither), 2 deband (+ game-res deband) */
+    int  dyn_res;            /* Internal Resolution Auto: dynamically lower scale cap when GPU falls behind */
     int  settings_preset;    /* 0 Original, 1 Enhanced, 2 Custom; controlled values validated */
     int  skip_doors;         /* door/stairs/ladder animations: 0 played, 1 instant (load screen), 2 played, a press skips */
     int  fast_loading;       /* room loads: sound packs and texture lists at once instead of spread over frames (pc_fast_loading) */
@@ -56,7 +57,10 @@ typedef struct {
     int  skip_intro;         /* boot straight into the title menu */
     int  battle_unlocked;    /* the title menu offers BATTLE GAME without a cleared game (pc/glue/lobby_glue.c) */
     int  difficulty_select;  /* NEW GAME asks for the difficulty as the PAL/JP versions (adv.c CheckButton) */
-    int  no_ink_ribbon;      /* typewriters save without an ink ribbon and use none (in co-op the host's; pc_no_ink_ribbon) */
+    int  no_ink_ribbon;      /* typewriters save without an ink ribbon and use none (pc_no_ink_ribbon) */
+    int  extra_objects;      /* extra item boxes, blue herb planters and typewriter in selected rooms (extras_glue.c) */
+    int  biorand;            /* play locally generated BioRand pack from mods/biorand/ on New Game (biorand.c) */
+    int  pause_menu;         /* 1 Ashford Pause menu in-game, 0 classic PS2 OPTION screen */
     int  save_system;        /* 0 native save files (<save_dir>/saves, default), 1 the memory card (<save_dir>/card0) */
     int  native_3d;
     int  native_tex;         /* rendering rework: TIM2 textures uploaded once, bound afterwards (pc/glue/texture_glue.c) */          /* rendering rework: chunk models drawn by the GPU (pc/glue/native_glue.c) */         /* room transitions (doors, stairs, ladders) without their animation */
@@ -84,6 +88,7 @@ void  gs_update_widescreen(void);   /* apply g_config.aspect / window aspect (be
 float gs_picture(float c);          /* a 0..1 grey through brightness/contrast/gamma, as the present shader */
 void host_pump_events(void);
 void host_present(void);
+void host_quit(void);
 void host_fatal(const char* fmt, ...);
 void host_log(const char* fmt, ...);
 

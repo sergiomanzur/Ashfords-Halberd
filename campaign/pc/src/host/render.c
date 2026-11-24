@@ -38,13 +38,20 @@ static double present_hz(void)
     return lim && lim < hz ? lim : hz;
 }
 
+double render_present_hz(void) { return present_hz(); }   /* (gs_gl.c drs_update) */
+
 void render_loop(void)
 {
     Frame *prev = NULL, *cur = NULL;
-    uint64_t arrived = 0, pace_until = 0;
+    uint64_t arrived = 0, pace_until = 0, last_present = 0;
+    double pace_gap = SDL_getenv("RECVX_PACE_GAP") ? SDL_atof(SDL_getenv("RECVX_PACE_GAP")) : 1.5;
     double swap_avg = 0.0;   /* how long the buffer swap blocks, smoothed */
     double period = 1001.0 / 30000.0 * 1e9;   /* game frame period, measured below */
     int interp = 0, shown = 0;   /* refreshes presented since the frame arrived */
+    int done = 0;   /* cur's own image (t = 1) is up */
+    int fallback = !SDL_getenv("RECVX_PACE_FALLBACK") || SDL_atoi(SDL_getenv("RECVX_PACE_FALLBACK"));
+    unsigned skip_q = 0, skip_gpu = 0, skip_fb = 0, n_inb = 0, n_exe = 0;
+    uint64_t gpu_wait = 0, executed = 0;
     int check_replay = SDL_getenv("RECVX_REPLAY_CHECK") && SDL_atoi(SDL_getenv("RECVX_REPLAY_CHECK"));
     float fixed_t = SDL_getenv("RECVX_INTERP_T") ? (float)SDL_atof(SDL_getenv("RECVX_INTERP_T")) : 0.0f;   /* test aid: first refresh shows t */
     FILE* trace = SDL_getenv("RECVX_TRACE_PRESENT") ? fopen(SDL_getenv("RECVX_TRACE_PRESENT"), "w") : NULL;   /* test aid */
@@ -52,7 +59,7 @@ void render_loop(void)
         int interval = -2;
         SDL_GL_GetSwapInterval(&interval);
         fprintf(trace, "# display_hz=%.3f requested_vsync=%d driver_swap_interval=%d\n", display_hz(), g_config.vsync, interval);
-        fprintf(trace, "# game_frame interpolation start_us swap_block_us completion_us\n");
+        fprintf(trace, "# game_frame interpolation start_us swap_block_us completion_us executed\n");
     }
     prof_thread(PROF_RIDLE);
     for (;;) {
@@ -61,7 +68,7 @@ void render_loop(void)
         host_pump_events();
         if (stream_snapshot_service() == 2) {
             stream_release(prev); stream_release(cur); prev=cur=NULL;
-            arrived=pace_until=0; swap_avg=0; period=1001.0/30000.0*1e9; interp=shown=0;
+            arrived=pace_until=last_present=0; swap_avg=0; period=1001.0/30000.0*1e9; interp=shown=done=0;
             continue;
         }
         /* nothing to show yet: wait for the game; otherwise take what has arrived, waiting for
@@ -81,6 +88,8 @@ void render_loop(void)
             }
             arrived = now;
             shown = 0;
+            done = 0;
+            executed++;
             prof_push(PROF_INTERP);
             interp = g_config.interpolate && stream_match(cur, f);
             prof_pop();
@@ -112,24 +121,41 @@ void render_loop(void)
             else if (fixed_t > 0.0f) t = shown ? 1.0f : fixed_t;
             else if (step_interpolation) t = (float)((shown + 1) / floor(n + 0.5));
             else t = (float)((double)(now - arrived) / period);
-            /* the next game frame is already waiting (the game runs below its rate): an
-               in-between image of this one would only delay it (a whole replay of the scene) */
-            if (t < 1.0f && fixed_t <= 0.0f && stream_queued()) continue;
-            /* the GPU is still two frames or images behind most of a refresh later (a heavy
-               scene at a high resolution and rate): this refresh gets no in-between image.
-               Replays queued up behind each other would hold up the next game frame's execution,
-               and with it the game thread (one frame in flight): the game would slow down. */
-            if (t < 1.0f && fixed_t <= 0.0f && !gs_gpu_ready(tick / 8 * 7)) {
-                shown++;
-                pace_until = present_next_deadline(pace_until, SDL_GetTicksNS(), tick);
-                continue;
+            /* When an in-between image cannot be made, the frame's own image (t = 1: a copy, no
+               replay, hardly any GPU work) is the fallback, once per frame; after it nothing older
+               of the frame is shown. (RECVX_INTERP_T runs never come here.) */
+            if (t < 1.0f && fixed_t <= 0.0f) {
+                int ready = 0;
+                if (stream_queued()) {
+                    if (done || now - last_present < (uint64_t)(period * pace_gap)) { skip_q++; continue; }
+                } else if (done) {   /* its own image is up: nothing older of it any more */
+                    shown++;
+                    pace_until = present_next_deadline(pace_until, now, tick);
+                    continue;
+                } else {
+                    uint64_t w0 = trace ? SDL_GetTicksNS() : 0;
+                    ready = gs_gpu_ready(tick / 8 * 7);
+                    if (trace) gpu_wait += SDL_GetTicksNS() - w0;
+                    if (!ready && !(fallback && !step_interpolation && (double)(SDL_GetTicksNS() - arrived) + 1.25 * tick > period)) {
+                        skip_gpu++;
+                        shown++;
+                        pace_until = present_next_deadline(pace_until, SDL_GetTicksNS(), tick);
+                        continue;
+                    }
+                }
+                if (!ready) { skip_fb++; t = 1.0f; }
             }
             now = SDL_GetTicksNS();   /* the GPU fence may have consumed most of a refresh */
-            if (interp && fixed_t <= 0.0f && !step_interpolation) t = (float)((double)(now - arrived) / period);
+            if (interp && fixed_t <= 0.0f && !step_interpolation && t < 1.0f) t = (float)((double)(now - arrived) / period);
             swap = gs_present(cur, t);
+            last_present = now;
             shown++;
-            if (trace) fprintf(trace, "%llu %.3f %llu %llu %llu\n", (unsigned long long)gs_frame_count(), t, (unsigned long long)(now / 1000),
-                               (unsigned long long)(swap / 1000), (unsigned long long)(SDL_GetTicksNS() / 1000));
+            if (t >= 1.0f) done = 1;
+            if (t < 1.0f) n_inb++; else n_exe++;
+            if (trace && (n_inb + n_exe) % 300 == 0)
+                fprintf(trace, "# in-between %u executed %u skipped: queued %u gpu %u, own image instead %u, gpu wait %.1f ms\n", n_inb, n_exe, skip_q, skip_gpu, skip_fb, gpu_wait / 1e6);
+            if (trace) fprintf(trace, "%llu %.3f %llu %llu %llu %llu\n", (unsigned long long)gs_frame_count(), t, (unsigned long long)(now / 1000),
+                               (unsigned long long)(swap / 1000), (unsigned long long)(SDL_GetTicksNS() / 1000), (unsigned long long)executed);
             /* pace to the display refresh instead of spinning: without vsync, and with vsync when
                the swap does not wait (the offscreen driver, some compositors): presenting as fast
                as the GPU allows starved the frames themselves (RM_1310 headless: 197 -> 37 ms a

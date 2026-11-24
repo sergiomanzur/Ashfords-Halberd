@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(recvx_pc VERSION 0.6.8 LANGUAGES C CXX)   # retained reference version for engine compatibility
+project(recvx_pc VERSION 0.8.0 LANGUAGES C CXX)   # synced single-player backend baseline
 include(cmake/version.cmake)
 
 # The decomp's data files and code assume the EE's 32-bit pointers. Phase 1

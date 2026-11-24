@@ -54,17 +54,23 @@ typedef struct TpsLegs { int mtn, frm, yaw; float w; int on; } TpsLegs;   /* (on
 extern TpsLegs tps_legs_me;
 
 /* The HUD (pc/glue/hud_glue.c): what it shows, published by the game thread each frame and drawn by
-   the overlay. A frame's fields may mix with the next one's: harmless. */
+   the overlay (overlay.cpp hud_draw). A frame's fields may mix with the next one's: harmless. */
 enum { HUD_FINE, HUD_CAUTION, HUD_CAUTION2, HUD_DANGER, HUD_POISON };
 enum { HUD_NONE = -1, HUD_INF = -2 };
 typedef struct TpsHud {
     volatile int on;          /* in play, shown by the setting */
     volatile int left;        /* on the left */
+    volatile float fade;      /* the screen fade over it, 0..1 */
     volatile int hp, hp_max, cond;
-    volatile int rounds, spare;   /* loaded rounds (HUD_NONE / HUD_INF), spare ammo in the bag */
-    volatile int weapon;      /* equipped item id, 0 none */
+    volatile int icon_x, icon_y, icon_w, icon_h;   /* icon cell in the icon atlas (hud_icons), pixels; icon_w 0: none */
+    volatile int rounds, rounds_pct;   /* loaded: a count, HUD_NONE / HUD_INF; pct: in percent */
+    volatile int spare, spare_pct;     /* reload ammo in the bag, the same */
+    volatile int round_kind;           /* 0 plain, 1 acid, 2 flame, 3 gas, 4 gunpowder arrows */
 } TpsHud;
 extern TpsHud g_hud;
+const unsigned int* hud_icons(int* w, int* h);   /* RGBA atlas (both 512x512 textures stacked), NULL if not read */
+int hud_item_info(int id, int* group, int* two_slot, int* counted, int* pct, int* def_amt, int* min_amt, int* max_amt,
+                  float* u0, float* v0, float* u1, float* v1);
 void hud_frame(void);         /* game thread, frame hand-off */
 
 /* input (pc/src/input/tps_input.c), called on the game thread */

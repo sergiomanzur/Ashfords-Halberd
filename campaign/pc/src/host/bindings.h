@@ -18,6 +18,7 @@ enum {
     B_QUICKTURN,                       /* back, then the run button (the game's quick turn) */
     B_QUICKKNIFE,                      /* hold: knife drawn and readied, the weapon before back on release (knife_glue.c) */
     B_RELOAD,                          /* reload the weapon from the inventory's ammo, as on an empty trigger pull (reload_glue.c); R, Aim + Triangle */
+    B_FREEAIM,                         /* fixed cameras: aim as the aim button, without the game's turn to a target (pad.c, modern_glue.c); E, LT */
     /* third person: keyboard and mouse; the gamepad set has its own (modern scheme, g_tps.pad_modern:
        run .. quick turn, knife, options, recenter; the classic scheme drives it through the DS2 rows) */
     B_TPS_FWD, B_TPS_BACK, B_TPS_LEFT, B_TPS_RIGHT, B_TPS_RUN, B_TPS_ACTION, B_TPS_CANCEL,
@@ -28,6 +29,7 @@ enum {
     B_WEAPON_PREV, B_WEAPON_NEXT, B_WEAPON_1, B_WEAPON_2, B_WEAPON_3, B_WEAPON_4,
     B_QUICKSAVE, B_QUICKLOAD,           /* global quicksave/quickload shortcuts */
     B_FPS_TOGGLE,                      /* optional first-person camera */
+    B_SPOILER,                         /* BioRand in-game spoiler log screen */
     B_COUNT
 };
 enum { BIND_KB, BIND_PAD };            /* device sets */
@@ -51,7 +53,11 @@ int  bind_conflict(int row, int dev);                   /* another row of the sa
 int  bind_row_shown(int row, int dev);                  /* the row exists for this device */
 const char* bind_code_name(int dev, int code, char* buf, int n);   /* for menus, by the connected pad's type */
 const char* bind_row_label(int row, char* buf, int n);  /* game rows: the actions of the button under the key type */
-const char* bind_pad_desc(void);                        /* the connected gamepad, or "No gamepad" */
+enum { BI_AUTO, BI_XBOX, BI_PS, BI_SWITCH, BI_KBM };    /* g_button_icons (ini "button_icons"): menu button glyph style */
+extern int g_button_icons;
+enum { BPS_XBOX, BPS_PS, BPS_SWITCH };
+int  bind_pad_style(void);                              /* effective controller glyph style (BPS_*) */
+const char* bind_pad_desc(char* buf, int n);            /* the connected gamepad (its name in buf), or "No gamepad"; any thread */
 const char* bind_swapped(void);                         /* the row the last bind_set moved a code from, or NULL */
 
 /* capture ("press a key"): main-thread events; any thread starts/polls */
@@ -66,8 +72,8 @@ int  bind_combo(int row, int dev, int slot);                    /* a reload slot
 void bind_combo_frame(int on, const bool* keys, int mouse);     /* each pad report, first: which reload combinations were pressed with aim held */
 int  bind_pad_raw(int row);                                     /* the gamepad holds an input of the row, whichever set reads it now */
 int  bind_hotkey(const void* sdl_event, int row);               /* a key-down event of this hotkey */
-void* bind_gamepad(void);              /* the open SDL_Gamepad (pad.c) */
-void bind_set_gamepad(void* gamepad);
+void* bind_gamepad(void);              /* the open SDL_Gamepad (pad.c): game thread only */
+void bind_set_gamepad(void* gamepad);  /* game thread: pad.c opened or closed it */
 const bool* bind_keys(void);           /* SDL keyboard state plus scripted keys (RECVX_KEYS) */
 void bind_latch_event(const void* sdl_event);              /* main thread: a key or button change, for bind_latch_frame */
 const bool* bind_latch_frame(int on, const bool* keys);    /* pad report: on (a menu, Smooth menus), keys and buttons that changed since the last report at least once each */
@@ -80,6 +86,10 @@ int  pad_quick_knife(void);            /* the quick-knife row is held (pad.c) */
 unsigned pad_quicksave_actions(void); /* held mask: bit 0 quicksave, bit 1 quickload; game thread */
 unsigned pad_weapon_switch(void);     /* held mask: bit 0 previous, 1 next, 2..5 carried slots 1..4; game thread */
 int  pad_reload(void);                 /* a reload row is held (pad.c) */
+int  pad_free_aim(void);               /* the free-aim row raised the weapon in the last pad report (pad.c) */
+int  pad_report_bits(void);            /* the DS2 buttons held in the last pad report (pad.c) */
+int  pad_kb_start(void);               /* Start's keyboard binding is down in the last pad report (pad.c) */
+int  pad_last_pad(void);               /* 1 if gamepad was pressed most recently, 0 keyboard (pad.c) */
 
 /* Input source of this window (F1 Controls, ENHANCED SETTINGS -> CONTROLS; ini input_source, input_pad;
    docs/USER_GUIDE.md "Input source (per window)"). Auto: keyboard/mouse and the gamepad, while focused. Gamepad only:

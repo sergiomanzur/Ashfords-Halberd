@@ -1,0 +1,1017 @@
+/* The language import (docs/LANGUAGES.md): from the player's own disc image of another release the text of its
+   languages, written to <import_dir>/<source>/<code>/ under the US disc's names:
+     SYSMES.ALD                      item names and system messages in the US order (European: rebuilt, the
+                                     language's file pages appended; lang.txt "fsheader" points at them)
+     SYSTEM.AFS/1 (/2)               the effect textures with the language's font (the computer's font)
+     ADV.AFS/n MRY.AFS/n ITEM1.AFS/n ITEM2.AFS/n   the pictures with writing (entries that differ from English);
+                                     ADV.AFS/3 is a sound: the title call (Japanese, Korean, Italian: Translated Title Call)
+     ROOMS.MES                       every room's message table (by room index; bhSetRoom takes it)
+     SAVELOAD.MES                    the executable's save / load messages (adv.c SaveLoadMessage), if they differ
+     RM_0000.RDX                     the US room with the opening's text crawl of the language (Russian, Brazilian Portuguese)
+     MOVIE/MV_0nn.PSS                the movies that differ from the US ones (Japanese: the logo)
+     lang.txt                        written last: the language, the font's widths, the file tables, the
+                                     executable's other texts
+   Sources (lang_discs[]): the European disc (French, German, Spanish; its English is the US text), the US disc
+   with the Russian fan translation by Brosko (told from the clean US disc by its patched font), the Japanese disc,
+   the European disc with the Turkish fan translation (Patriots Çeviri; in the Spanish folder), the US disc with
+   the Brazilian Portuguese fan translation (gledson999), the European disc with the Arabic fan translation
+   (Abdulaziz Al-Amri, SKZEZO EDITING; in the Spanish folder), the Japanese disc with the Korean fan translation (the
+   Japanese font with Hangul cells; its author is not named on the disc) and the European disc with the Italian fan
+   translation (KimeraVX; in the French folder).
+   The Japanese text's glyph codes are moved up by LANG_JA_BASE (lang.h): codes below it are the US font's, as the
+   US engine writes them (digits, times), drawn with the Japanese font's look-alikes; so are the Korean. The Arabic text's are moved up
+   the same way (LANG_AR_BASE): the codes below are the US font's (its Latin letters; the Arabic font has none). */
+#include "import.h"
+#include "../host/lang.h"
+#include "../host/fileio.h"
+#include "../../include/pc_parse.h"
+#include <SDL3/SDL.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+void host_log(const char* fmt, ...);
+extern const unsigned char FontSz[126];          /* decomp message.c: the US font's widths */
+extern unsigned int fstbl[24], fsheader[24];     /* decomp fileview.c: the US files' page counts and first pages */
+extern unsigned int wallpaper[24];               /* decomp fileview.c: the files' backgrounds (the same in every release) */
+extern void* comevt_message_tab[8];              /* decomp sp_evt.c: the computer events' texts */
+char g_lang_us_iso[1024];                        /* the US image (lang_extract reads its SYSMES.ALD; host.c sets it) */
+
+const char* const lang_codes[LANG_COUNT] = { "en", "fr", "de", "es", "ja", "ru", "tr", "pt-BR", "ar", "ko", "it" };
+const char* const lang_names[LANG_COUNT] = { "English", "Fran\xC3\xA7" "ais", "Deutsch", "Espa\xC3\xB1ol",
+                                             "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E", "\xD0\xA0\xD1\x83\xD1\x81\xD1\x81\xD0\xBA\xD0\xB8\xD0\xB9",
+                                             "T\xC3\xBCrk\xC3\xA7" "e", "Portugu\xC3\xAAs (Brasil)",
+                                             /* (العربية in display order, as lang_shape gives it: ctest lang) */
+                                             "\xEF\xBA\x94\xEF\xBB\xB4\xEF\xBA\x91\xEF\xBA\xAE\xEF\xBB\x8C\xEF\xBB\x9F\xEF\xBA\x8D",
+                                             "\xED\x95\x9C\xEA\xB5\xAD\xEC\x96\xB4", "Italiano" };
+
+/* a disc's languages: its folder, the digit of its file names, its index in the executable's tables */
+typedef struct LangDisc { int lang; const char* dir; int digit; int exe; } LangDisc;
+enum { LS_EU, LS_RU, LS_JA, LS_PT };   /* the European disc; a disc laid out as the US one (one language at its root) */
+typedef struct LangSource {
+    int src, kind;           /* import_sources[], LS_* */
+    const char* exe;         /* the executable (SYSTEM.CNF names it) */
+    const char* refuse;      /* another disc */
+    const char* clean;       /* the base disc without the fan translation (NULL: none) */
+    const char* eng_dir;     /* the European disc's English (its pictures are compared with it) */
+    int eng_digit;
+    int n;
+    LangDisc langs[3];
+} LangSource;
+static const LangSource lang_discs[] = {
+    { IMPORT_SLES50306, LS_EU, "SLES_503.06", "Use a European Resident Evil Code: Veronica X disc (%s).", NULL, "ENG", 1,
+      3, { { LANG_FR, "FRA", 2, 1 }, { LANG_DE, "GER", 5, 4 }, { LANG_ES, "SPA", 4, 3 } } },
+    { IMPORT_SLUS20184RU, LS_RU, "SLUS_201.84", "Use the US disc with the Russian fan translation by Brosko (%s).",
+      "This is the US disc without the Russian translation.", NULL, 0, 1, { { LANG_RU, "", 0, 0 } } },
+    { IMPORT_SLPM65022, LS_JA, "SLPM_650.22", "Use a Japanese Biohazard Code: Veronica Kanzenban disc (%s).", NULL, NULL, 0,
+      1, { { LANG_JA, "", 0, 0 } } },
+    /* the Turkish patch replaces the Spanish (its folder, its tables in the executable) */
+    { IMPORT_SLES50306TR, LS_EU, "SLES_503.06", "Use the European disc with the Turkish fan translation by Patriots \xC3\x87" "eviri (%s).",
+      "This is the European disc without the Turkish translation.", "ENG", 1, 1, { { LANG_TR, "SPA", 4, 3 } } },
+    { IMPORT_SLUS20184PT, LS_PT, "SLUS_201.84", "Use the US disc with the Brazilian Portuguese fan translation by gledson999 (%s).",
+      "This is the US disc without the Brazilian Portuguese translation.", NULL, 0, 1, { { LANG_PT, "", 0, 0 } } },
+    /* the Arabic patch replaces the Spanish too */
+    { IMPORT_SLES50306AR, LS_EU, "SLES_503.06", "Use the European disc with the Arabic fan translation by Abdulaziz Al-Amri (%s).",
+      "This is the European disc without the Arabic translation.", "ENG", 1, 1, { { LANG_AR, "SPA", 4, 3 } } },
+    /* the Korean patch: the Japanese disc's layout, Hangul in the Japanese font's cells */
+    { IMPORT_SLPM65022KO, LS_JA, "SLPM_650.22", "Use the Japanese disc with the Korean fan translation (%s).",
+      "This is the Japanese disc without the Korean translation.", NULL, 0, 1, { { LANG_KO, "", 0, 0 } } },
+    /* the Italian patch replaces the French (its folder, its tables in the executable) */
+    { IMPORT_SLES50306IT, LS_EU, "SLES_503.06", "Use the European disc with the Italian fan translation by KimeraVX (%s).",
+      "This is the European disc without the Italian translation.", "ENG", 1, 1, { { LANG_IT, "FRA", 2, 1 } } },
+};
+#define LD_TR 3   /* (lang_discs[]: the Turkish, Arabic, Korean and Italian entries) */
+#define LD_AR 5
+#define LD_KO 6
+#define LD_IT 7
+
+#define MES_FILES 280            /* the first file page in the system messages (every release) */
+#define MES_MAX 4096
+#define ROOMS_MAX 512
+#define STEPS (1 + 5 + 205 + 1)  /* per language: messages, archives, rooms, executable */
+
+static ImportProgress* const pg = &g_import_progress;
+
+/* a file of the image, read whole (malloc'd), NULL if missing or above `max` bytes */
+static unsigned char* read_file(FILE* f, const char* path, uint32_t max, uint32_t* n)
+{
+    int64_t off;
+    unsigned char* d;
+    if (!imp_iso_find(f, path, &off, n) || *n > max || !(d = malloc(*n ? *n : 1))) return NULL;
+    if (!imp_read_at(f, off, d, *n)) { free(d); return NULL; }
+    return d;
+}
+
+static int put(const char* dir, const char* name, const void* d, uint32_t n)
+{
+    char p[1300];
+    FILE* o;
+    snprintf(p, sizeof(p), "%s/%s", dir, name);
+    if (strchr(name, '/')) {   /* (ADV.AFS/2: the archive's folder) */
+        char q[1300];
+        snprintf(q, sizeof(q), "%s", p);
+        *strrchr(q, '/') = 0;
+        SDL_CreateDirectory(q);
+    }
+    if (!(o = pc_fopen(p, "wb"))) return 0;
+    int ok = fwrite(d, 1, n, o) == n;
+    return fclose(o) == 0 && ok;
+}
+
+/* ---------------------------------------------------------------- messages
+   A table: u32 count, count u32 offsets (from the table's start) of u16 texts ending in 0xFFFF (pc_parse.h). */
+typedef struct Mes { const uint16_t* t[MES_MAX]; uint32_t len[MES_MAX]; int n; } Mes;   /* len in u16, with the end */
+
+static int mes_read(const unsigned char* d, uint32_t size, Mes* m)
+{
+    uint32_t n;
+    if (size < 4 || (n = pc_rd32(d)) > MES_MAX || !pc_range_ok(4, 4ull * n, size)) return 0;
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t o = pc_rd32(d + 4 + 4 * i), k;
+        if ((o & 1) || o >= size || !(k = pc_mes_len(d + o, (size - o) / 2))) return 0;   /* (0xFF03 0xFFFF is no end: pc_parse.h) */
+        m->t[i] = (const uint16_t*)(d + o);
+        m->len[i] = k;
+    }
+    m->n = (int)n;
+    return 1;
+}
+static uint32_t mes_bytes(const Mes* m)
+{
+    uint32_t b = 4 + 4 * m->n;
+    for (int i = 0; i < m->n; i++) b += 2 * m->len[i];
+    return b;
+}
+static void mes_write(const Mes* m, unsigned char* out)
+{
+    uint32_t o = 4 + 4 * m->n;
+    memcpy(out, &(uint32_t){ (uint32_t)m->n }, 4);
+    for (int i = 0; i < m->n; i++) {
+        memcpy(out + 4 + 4 * i, &o, 4);
+        memcpy(out + o, m->t[i], 2 * m->len[i]);
+        o += 2 * m->len[i];
+    }
+}
+static int visible(const uint16_t* t)   /* a glyph or an item name (0xFF02's operand is a wait) */
+{
+    for (; *t != 0xFFFF; t++) {
+        if (*t < 0xFE00 || *t == 0xFF03) return 1;
+        if (*t == 0xFF02 && t[1] != 0xFFFF) t++;
+    }
+    return 0;
+}
+static const uint16_t empty_mes[1] = { 0xFFFF };
+
+/* the Japanese glyph codes moved up by LANG_JA_BASE (in place; the operands of 0xFF02 / 0xFF03 stay) */
+static void ja_codes(uint16_t* t, uint32_t len)
+{
+    for (uint32_t i = 0; i + 1 < len; i++) {
+        if (t[i] < 0xFE00) t[i] = (uint16_t)(t[i] + LANG_JA_BASE);
+        else if (t[i] == 0xFF02 || t[i] == 0xFF03) i++;
+    }
+}
+static void ja_mes(Mes* m)
+{
+    for (int i = 0; i < m->n; i++) {
+        int dup = 0;
+        for (int j = 0; j < i && !dup; j++) dup = m->t[j] == m->t[i];   /* (a text two messages share: moved once) */
+        if (!dup) ja_codes((uint16_t*)m->t[i], m->len[i]);
+    }
+}
+
+/* SYSMES.ALD: u32 n, the item names' table (n bytes), u32, the system messages' table */
+typedef struct Ald { Mes items, sys; } Ald;
+static int ald_read(const unsigned char* d, uint32_t size, Ald* a)
+{
+    uint32_t n;
+    if (size < 8 || (n = pc_rd32(d)) > size - 8 || (n & 3)) return 0;
+    return mes_read(d + 4, n, &a->items) && mes_read(d + 8 + n, size - 8 - n, &a->sys);
+}
+static unsigned char* ald_write(const Mes* items, const Mes* sys, uint32_t* n)
+{
+    uint32_t ni = mes_bytes(items), ns = mes_bytes(sys);
+    unsigned char* o = calloc(1, 8 + ni + ns);
+    if (!o) return NULL;
+    memcpy(o, &ni, 4);
+    mes_write(items, o + 4);
+    memcpy(o + 4 + ni, &ns, 4);
+    mes_write(sys, o + 8 + ni);
+    *n = 8 + ni + ns;
+    return o;
+}
+
+/* a SYSMES.ALD that ends inside its last message (the Brazilian Portuguese one: the file is shorter than its table
+   says) as long as its table says, that message cut after its last whole line; malloc'd, NULL: not such a file */
+static unsigned char* ald_cut(const unsigned char* d, uint32_t* n)
+{
+    uint32_t ni, ns, want, cnt, o, k;
+    unsigned char* x;
+    if (*n < 12 || (ni = pc_rd32(d)) > *n - 8 || (ni & 3) || (ns = pc_rd32(d + 4 + ni)) > (1u << 20) || (want = 8 + ni + ns) <= *n ||
+        want > *n + 4096 || !(x = malloc(want))) return NULL;
+    memcpy(x, d, *n);
+    memset(x + *n, 0xFF, want - *n);
+    cnt = pc_rd32(x + 8 + ni);
+    if (!cnt || cnt > MES_MAX || !pc_range_ok(12ull + ni, 4ull * cnt, want) || (o = pc_rd32(x + 12 + ni + 4 * (cnt - 1))) >= ns || (o & 1)) { free(x); return NULL; }
+    for (k = 8 + ni + o; k + 1 < *n && pc_rd16(x + k) != 0xFFFF; k += 2) {}
+    if (k + 1 >= *n) {   /* (no end: cut after its last new line) */
+        while (k > 8 + ni + o && pc_rd16(x + k - 2) != 0xFF00) k -= 2;
+        if (k > 8 + ni + o) k -= 2;   /* (the new line too) */
+        x[k] = x[k + 1] = 0xFF;
+    }
+    *n = want;
+    return x;
+}
+
+/* the language's system messages in the US order (docs/LANGUAGES.md "System messages"): the same up to the
+   files; the files page by page (a page the language lacks: empty); after the files the load question (2) and
+   the memory card block (from the end); the language's whole file region appended for its own tables */
+static int sysmes_rebuild(const Ald* us, const Ald* l, const unsigned* fl, const unsigned* hl, Mes* out, unsigned* hl_out)
+{
+    int nu = us->sys.n, nl = l->sys.n, tu = MES_FILES + fsheader[23] + fstbl[23] + 1, tl = MES_FILES + hl[23] + fl[23] + 1;
+    int card = tu + 2, k;
+    while (card < nu && !visible(us->sys.t[card])) card++;
+    k = nu - card;   /* the memory card block: the US disc's last k messages */
+    if (us->items.n != l->items.n || tl + 2 > nl - k || card >= nu || tu > nu || nu + tl - MES_FILES > MES_MAX) return 0;
+    out->n = nu + tl - MES_FILES;
+    for (int i = 0; i < out->n; i++) { out->t[i] = empty_mes; out->len[i] = 1; }
+#define TAKE(o, i) (out->t[o] = l->sys.t[i], out->len[o] = l->sys.len[i])
+    for (int i = 0; i < MES_FILES; i++) TAKE(i, i);
+    for (int f = 0; f < 24; f++)
+        for (unsigned p = 0; p <= fstbl[f] && p <= fl[f]; p++) TAKE(MES_FILES + fsheader[f] + p, MES_FILES + hl[f] + p);
+    TAKE(tu, tl); TAKE(tu + 1, tl + 1);
+    for (int i = 0; i < k; i++) TAKE(nu - k + i, nl - k + i);
+    for (int i = MES_FILES; i < tl; i++) TAKE(nu - MES_FILES + i, i);
+#undef TAKE
+    for (int f = 0; f < 24; f++) hl_out[f] = nu - MES_FILES + hl[f];
+    return 1;
+}
+
+/* the language's SYSMES.ALD (l: n bytes) in the US order (us: nus bytes), malloc'd (*n bytes); its file tables (fl, hl)
+   moved to the appended pages in hl_out; NULL: a layout this does not know (import.h) */
+unsigned char* lang_sysmes(const unsigned char* us, uint32_t nus, const unsigned char* l, uint32_t* n,
+                           const unsigned* fl, const unsigned* hl, unsigned* hl_out)
+{
+    Ald *a = malloc(sizeof(Ald)), *b = malloc(sizeof(Ald));   /* (heap: the address window, docs/ARCHITECTURE.md) */
+    Mes* sys = malloc(sizeof(Mes));
+    unsigned char* o = NULL;
+    if (a && b && sys && ald_read(us, nus, a) && ald_read(l, *n, b) && sysmes_rebuild(a, b, fl, hl, sys, hl_out)) o = ald_write(&b->items, sys, n);
+    free(a); free(b); free(sys);
+    return o;
+}
+
+/* the Japanese SYSMES.ALD (l, *n bytes; its codes moved up in place) in the US order: its messages up to the files,
+   its load question (right after them) at the US one's place; the US English elsewhere (the files are pictures:
+   lang.txt "fpics"; the US disc's later memory card block has no Japanese counterpart). NULL: unknown layout */
+static unsigned char* ja_sysmes(const unsigned char* us, uint32_t nus, unsigned char* l, uint32_t* n)
+{
+    Ald *a = malloc(sizeof(Ald)), *b = malloc(sizeof(Ald));
+    Mes* sys = malloc(sizeof(Mes));
+    unsigned char* o = NULL;
+    int tu = MES_FILES + fsheader[23] + fstbl[23] + 1;
+    if (a && b && sys && ald_read(us, nus, a) && ald_read(l, *n, b) && a->items.n == b->items.n && b->sys.n >= MES_FILES + 2 && tu + 2 <= a->sys.n) {
+        ja_mes(&b->items);
+        ja_mes(&b->sys);
+        *sys = a->sys;
+        for (int i = 0; i < MES_FILES; i++) { sys->t[i] = b->sys.t[i]; sys->len[i] = b->sys.len[i]; }
+        for (int i = 0; i < 2; i++) { sys->t[tu + i] = b->sys.t[MES_FILES + i]; sys->len[tu + i] = b->sys.len[MES_FILES + i]; }
+        o = ald_write(&b->items, sys, n);
+    }
+    free(a); free(b); free(sys);
+    return o;
+}
+
+/* ---------------------------------------------------------------- the executable */
+/* `len` bytes at virtual address va (its loadable segments), NULL outside */
+static const unsigned char* exe_va(const unsigned char* x, uint32_t n, uint32_t va, uint32_t len)
+{
+    uint32_t ph, phn;
+    if (n < 0x34 || memcmp(x, "\x7F" "ELF", 4)) return NULL;
+    ph = pc_rd32(x + 0x1C);
+    phn = pc_rd16(x + 0x2C);
+    for (uint32_t i = 0; i < phn && i < 16 && pc_range_ok(ph + 32ull * i, 32, n); i++) {
+        const unsigned char* p = x + ph + 32 * i;
+        uint32_t off = pc_rd32(p + 4), v = pc_rd32(p + 8), fs = pc_rd32(p + 16);
+        if (pc_rd32(p) == 1 && va >= v && va - v < fs && len <= fs - (va - v) && pc_range_ok((uint64_t)off + (va - v), len, n))
+            return x + off + (va - v);
+    }
+    return NULL;
+}
+/* the address an instruction pair lui / addiu at va, va + d forms (the patch moved some texts) */
+static uint32_t exe_hilo(const unsigned char* x, uint32_t n, uint32_t va, uint32_t d)
+{
+    const unsigned char *a = exe_va(x, n, va, 4), *b = exe_va(x, n, va + d, 4);
+    if (!a || !b || pc_rd32(a) >> 26 != 15 || pc_rd32(b) >> 26 != 9) return 0;
+    return (pc_rd32(a) << 16) + (uint32_t)(int32_t)(int16_t)pc_rd32(b);
+}
+
+/* bhGetFontSize: "andi v1,a0,0xffff; slti v0,v1,N; ...; lui v0,hi; addiu v0,v0,lo": its glyph count N and table */
+static int exe_font(const unsigned char* x, uint32_t n, unsigned* count, const unsigned char** table)
+{
+    for (uint32_t i = 0; i + 40 <= n; i += 4) {
+        if (pc_rd32(x + i) != 0x3083FFFFu || pc_rd32(x + i + 4) >> 16 != 0x2862) continue;
+        for (uint32_t k = 8; k < 36; k += 4) {
+            uint32_t a = pc_rd32(x + i + k), b = pc_rd32(x + i + k + 4);
+            if (a >> 16 != 0x3C02 || b >> 16 != 0x2442) continue;
+            *count = pc_rd32(x + i + 4) & 0xFFFF;
+            *table = *count <= 256 ? exe_va(x, n, (a << 16) + (uint32_t)(int32_t)(int16_t)b, *count) : NULL;
+            return *table != NULL;
+        }
+    }
+    return 0;
+}
+
+/* the European font's widths: right after FontSz (the English one, its code 95 changed) */
+static int exe_widths(const unsigned char* x, uint32_t n, unsigned char* w)
+{
+    for (uint32_t i = 0; i + 128 + 162 <= n; i++) {
+        if (x[i] != FontSz[0] || memcmp(x + i, FontSz, 95) || memcmp(x + i + 96, FontSz + 96, 126 - 96)) continue;
+        for (int k = 0; k < 162; k++) if (x[i + 128 + k] < 6 || x[i + 128 + k] > 28) return 0;
+        memcpy(w, x + i + 128, 162);
+        return 162;
+    }
+    return 0;
+}
+/* the file tables of language index k (English 0): five pairs of fstbl, fsheader, 0xC0 bytes apart */
+static int exe_files(const unsigned char* x, uint32_t n, int k, unsigned* fl, unsigned* hl)
+{
+    unsigned char us[0xC0];
+    for (int i = 0; i < 24; i++) { memcpy(us + 4 * i, &fstbl[i], 4); memcpy(us + 0x60 + 4 * i, &fsheader[i], 4); }
+    for (uint32_t i = 0; i + 5 * 0xC0 <= n; i += 4) {
+        if (memcmp(x + i, us, sizeof(us))) continue;
+        const unsigned char* t = x + i + k * 0xC0;
+        for (int f = 0; f < 24; f++) {
+            fl[f] = pc_rd32(t + 4 * f);
+            hl[f] = pc_rd32(t + 0x60 + 4 * f);
+            if (fl[f] > 15 || (f && hl[f] != hl[f - 1] + fl[f - 1] + 1) || (!f && hl[f])) return 0;
+        }
+        return 1;
+    }
+    return 0;
+}
+/* the file tables right before the backgrounds' table (wallpaper: fstbl, fsheader, wallpaper, 0x60 bytes each) */
+static int exe_files_before_wallpaper(const unsigned char* x, uint32_t n, unsigned* fl, unsigned* hl)
+{
+    unsigned char wp[0x60];
+    for (int i = 0; i < 24; i++) memcpy(wp + 4 * i, &wallpaper[i], 4);
+    for (uint32_t i = 0xC0; i + 0x60 <= n; i += 4) {
+        if (memcmp(x + i, wp, sizeof(wp))) continue;
+        for (int f = 0; f < 24; f++) {
+            fl[f] = pc_rd32(x + i - 0xC0 + 4 * f);
+            hl[f] = pc_rd32(x + i - 0x60 + 4 * f);
+            if (fl[f] > 15 || (f && hl[f] != hl[f - 1] + fl[f - 1] + 1) || (!f && hl[f])) return 0;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+/* the save / load messages (adv.c SaveLoadMessage: 45 messages, the first right after the offsets), one after another
+   (malloc'd, *len bytes, at most the decomp's 10956). The Korean patch wrote its first message from 2 bytes before its
+   place, over the high half of the last message's offset (on the disc that message loses its first letter and the
+   last one is lost): the first message starts there again and the last offset is its low half. */
+static unsigned char* exe_saveload(const unsigned char* x, uint32_t n, uint32_t* len)
+{
+    enum { SL_N = 45, SL_MAX = 10956 };
+    for (uint32_t i = 0; i + 4 + SL_N * 4 <= n; i += 4) {
+        uint32_t o, end = 0, at = 4 + SL_N * 4, last;
+        unsigned char* out;
+        int k, moved;
+        if (pc_rd32(x + i) != SL_N || pc_rd32(x + i + 4) != 4 + SL_N * 4) continue;
+        last = pc_rd32(x + i + 4 + 4 * (SL_N - 1));
+        moved = (last >> 16) && (last >> 16) < 0xFE00 && !pc_range_ok((uint64_t)i + last, 2, n);
+        if (!(out = malloc(SL_MAX))) return NULL;
+        for (k = 0; k < SL_N; k++) {
+            uint32_t e;
+            o = k == SL_N - 1 && moved ? last & 0xFFFF : pc_rd32(x + i + 4 + 4 * k) - (!k && moved ? 2 : 0);
+            if (o < end || (o & 1) || !pc_range_ok((uint64_t)i + o, 2, n)) break;
+            for (e = o; i + e + 1 < n && pc_rd16(x + i + e) != 0xFFFF && e - o < 0x4000; e += 2) {}
+            if (e - o >= 0x4000 || i + e + 1 >= n || at + (e + 2 - o) > SL_MAX) break;
+            memcpy(out + 4 + 4 * k, &at, 4);
+            memcpy(out + at, x + i + o, e + 2 - o);
+            at += e + 2 - o;
+            end = e + 2;
+        }
+        if (k < SL_N) { free(out); continue; }
+        memcpy(out, &(uint32_t){ SL_N }, 4);
+        *len = at;
+        return out;
+    }
+    return NULL;
+}
+
+/* a u16 text (0xFFFF end, at most 64 codes) at va as "name|hex" (lang.txt "exemes") */
+static void exe_mes_line(char* out, size_t on, const char* name, const unsigned char* x, uint32_t n, uint32_t va)
+{
+    const unsigned char* p = va ? exe_va(x, n, va, 2) : NULL;
+    size_t k = (size_t)snprintf(out, on, "exemes|%s|", name);
+    for (int i = 0; p && i < 64 && exe_va(x, n, va + 2 * i, 2); i++) {
+        uint16_t c = pc_rd16(exe_va(x, n, va + 2 * i, 2));
+        k += (size_t)snprintf(out + k, on > k ? on - k : 0, "%04X", c);
+        if (c == 0xFFFF) return;
+    }
+    out[0] = 0;   /* (not found, or no end) */
+}
+
+/* the Japanese font's look-alikes of the US codes (glyphs.c lang_cell): advance (ink + 2) and shift (32 + 1 - the ink's
+   left edge: the cells are drawn left of their place) from the font's first texture (the first TIM2 of 512 x 512 at 4
+   bits in SYSTEM.AFS/1; alpha from its 16-colour palette) */
+static int ja_ink(int lang, const unsigned char* d, uint32_t n, unsigned char* w, unsigned char* ox)
+{
+    for (uint32_t i = 0; i + 0x40 < n; i += 4) {
+        uint32_t ph, img, clut, hs;
+        if (memcmp(d + i, "TIM2", 4)) continue;
+        ph = i + (d[i + 5] ? 128 : 16);
+        if (!pc_range_ok(ph, 0x30, n)) continue;
+        clut = pc_rd32(d + ph + 4); img = pc_rd32(d + ph + 8); hs = pc_rd16(d + ph + 12);
+        if (d[ph + 19] != 4 || pc_rd16(d + ph + 20) != 512 || pc_rd16(d + ph + 22) != 512 || pc_rd16(d + ph + 14) < 16 ||
+            img < 512 * 512 / 2 || clut < 64 || !pc_range_ok((uint64_t)ph + hs, (uint64_t)img + clut, n)) continue;
+        const unsigned char *px = d + ph + hs, *pal = px + img;
+        for (int c = 0; c < LANG_JA_BASE; c++) {
+            int cell = lang_cell(lang, c), l = 28, r = -1;
+            w[c] = c ? 0 : 10; ox[c] = 32;
+            if (cell < 0 || cell >= 324) continue;
+            for (int y = 0; y < 28; y++)
+                for (int x = 0; x < 28; x++) {
+                    int p = (cell / 18 * 28 + y) * 512 + cell % 18 * 28 + x, v = px[p / 2] >> (p & 1 ? 4 : 0) & 15;
+                    if (pal[4 * v + 3] > 20) { if (x < l) l = x; if (x > r) r = x; }
+                }
+            if (r >= 0) { w[c] = (unsigned char)(r - l + 3); ox[c] = (unsigned char)(32 + 1 - l); }
+        }
+        return 1;
+    }
+    return 0;
+}
+
+/* ---------------------------------------------------------------- archives */
+/* the entries [lo, hi] of the language's archive (fl: lng) that differ from the English one (fe: eng); ja: the
+   Japanese title picture spliced into the US one (below) */
+static int pictures(FILE* fe, const char* eng, FILE* fl, const char* lng, const char* dir, const char* us_name, int lo, int hi, int ja, int* written)
+{
+    int64_t oe, ol;
+    uint32_t se, sl;
+    int ne = 0, nl = 0, ok = 1;
+    AfsFile *ae = imp_iso_find(fe, eng, &oe, &se) ? imp_afs_list(fe, oe, se, &ne) : NULL;
+    AfsFile *al = imp_iso_find(fl, lng, &ol, &sl) ? imp_afs_list(fl, ol, sl, &nl) : NULL;
+    if (!ae || !al || ne != nl) { free(ae); free(al); return 0; }
+    for (int i = lo; i < nl && i <= hi && ok; i++) {
+        unsigned char *a = NULL, *b = NULL;
+        if (al[i].size > (32u << 20) || ae[i].size > (32u << 20)) { ok = 0; break; }
+        if (al[i].size == ae[i].size) {
+            a = malloc(ae[i].size + 1); b = malloc(al[i].size + 1);
+            ok = a && b && imp_read_at(fe, ae[i].off, a, ae[i].size) && imp_read_at(fl, al[i].off, b, al[i].size);
+            if (ok && !memcmp(a, b, al[i].size)) { free(a); free(b); continue; }
+        } else {
+            b = malloc(al[i].size + 1);
+            ok = b && imp_read_at(fl, al[i].off, b, al[i].size);
+        }
+        if (ok) {
+            char name[64];
+            if (ja && a && !strcmp(us_name, "ADV.AFS") && i == 2 && pc_rd32(a) == 0x20 && !memcmp(a, b, 0x20) && pc_rd32(a + 4) < al[i].size) {
+                /* the Japanese title: its picture (resource 0) in the US file, whose plates (resource 2) the title's
+                   layout reads (the Japanese plates are English, laid out otherwise) */
+                memcpy(a, b, pc_rd32(a + 4));
+                memcpy(b, a, al[i].size);
+            }
+            snprintf(name, sizeof(name), "%s/%d", us_name, i);
+            ok = put(dir, name, b, al[i].size);
+            (*written)++;
+        }
+        free(a); free(b);
+    }
+    free(ae); free(al);
+    return ok;
+}
+
+/* ROOMS.MES: "RMES", u32 1, u32 n; n x (u32 offset, u32 size) by room index (0 size: none); the tables */
+static int rooms(FILE* f, const char* dir, const char* rdx, const char* lname, int ja, int* subs)
+{
+    int64_t off;
+    uint32_t size;
+    int n = 0, ok = 1;
+    AfsFile* a = imp_iso_find(f, rdx, &off, &size) ? imp_afs_list(f, off, size, &n) : NULL;
+    unsigned char *pk = NULL, *ex = NULL, *outb = NULL;
+    long cap = 0;
+    uint32_t used, room = 0;
+    if (!a || n <= 0 || n > ROOMS_MAX || !(ex = malloc(cap = 16 << 20))) { free(a); return 0; }
+    used = 12 + 8 * n;
+    outb = calloc(1, used);
+    memcpy(outb, "RMES\1\0\0\0", 8);
+    memcpy(outb + 8, &n, 4);
+    for (int i = 0; i < n && ok && outb; i++) {
+        uint32_t hed, mp, mn, end;
+        long xn;
+        Mes* m;
+        snprintf(pg->phase, sizeof(pg->phase), tr("%s: room messages"), lname);
+        pg->done++;
+        if (!a[i].size) continue;
+        if (a[i].size > (64u << 20) || !(pk = realloc(pk, a[i].size)) || !imp_read_at(f, a[i].off, pk, a[i].size)) { ok = 0; break; }
+        /* (lax: the Russian rooms end without PRS's end mark) */
+        if ((xn = pc_prs_expand_ex(pk, a[i].size, &ex, &cap, 1)) < 0x200) continue;   /* (not a room: no messages) */
+        hed = pc_rd32(ex + 16);
+        if (!pc_range_ok(hed, 0xB4, (uint64_t)xn)) continue;
+        mp = pc_rd32(ex + hed + 0x38);
+        mn = pc_rd32(ex + hed + 0xB0);
+        if (!mp || !mn || mp >= (uint32_t)xn) continue;
+        if (!(m = malloc(sizeof(Mes))) || !mes_read(ex + mp, (uint32_t)xn - mp, m) || (uint32_t)m->n != mn) { free(m); continue; }
+        if (ja) ja_mes(m);
+        for (int k = 0; k < m->n; k++) *subs += m->t[k][0] == 0xFE00 && visible(m->t[k]);
+        end = mes_bytes(m);
+        unsigned char* g = realloc(outb, used + end + 3);
+        if (!g) { free(m); ok = 0; break; }
+        outb = g;
+        mes_write(m, outb + used);
+        memset(outb + used + end, 0, 3);   /* (the padding: the same file from the same disc) */
+        memcpy(outb + 12 + 8 * i, &used, 4);
+        memcpy(outb + 16 + 8 * i, &end, 4);
+        used = (used + end + 3) & ~3u;
+        room++;
+        free(m);
+    }
+    ok = ok && outb && room && put(dir, "ROOMS.MES", outb, used);
+    host_log("lang: %s: messages of %u rooms\n", lname, room);
+    free(a); free(pk); free(ex); free(outb);
+    return ok;
+}
+
+/* ---------------------------------------------------------------- the import */
+typedef struct LangTxt {
+    int lang; const char* src; const char* iso; const unsigned char* w; int nw; const unsigned* fl; const unsigned* hl; int subs;
+    const unsigned char* ox;  /* the glyphs' shifts (32: none), nw of them, or NULL */
+    int fpics;               /* the files are pictures from this entry of ITEM?.AFS on (Japanese), 0 text */
+    const char* extra;       /* more lines (the executable's texts), or NULL */
+} LangTxt;
+/* version 2: the messages whole past 0xFF03 0xFFFF (1 cut the item messages there: lang_glue.c lang_old_import); 3: the
+   opening's text crawl (Russian, Brazilian Portuguese), the movies (Japanese) */
+static int write_txt(FILE* o, void* ud)
+{
+    const LangTxt* t = ud;
+    char when[64];
+    time_t now = time(NULL);
+    strftime(when, sizeof(when), "%Y-%m-%d %H:%M", localtime(&now));
+    fprintf(o, "# recvx language 3\nlang|%s\nsource|%s\niso|%s\nwhen|%s\nsubtitles|%d\nwidths|", lang_codes[t->lang], t->src, t->iso, when, t->subs);
+    for (int i = 0; i < t->nw; i++) fprintf(o, "%s%d", i ? "," : "", t->w[i]);
+    if (t->ox) {
+        fprintf(o, "\noffsets|");
+        for (int i = 0; i < t->nw; i++) fprintf(o, "%s%d", i ? "," : "", t->ox[i]);
+    }
+    fprintf(o, "\nfstbl|");
+    for (int i = 0; i < 24; i++) fprintf(o, "%s%u", i ? "," : "", t->fl[i]);
+    fprintf(o, "\nfsheader|");
+    for (int i = 0; i < 24; i++) fprintf(o, "%s%u", i ? "," : "", t->hl[i]);
+    fprintf(o, "\n");
+    if (t->fpics) fprintf(o, "fpics|%d\npageend|0,1,2,3,4,5\n", t->fpics);   /* (the Japanese PlayPageCheck's) */
+    if (t->extra) fputs(t->extra, o);
+    return ferror(o) ? -1 : 0;
+}
+static void folder(const LangDisc* ld, const char* outdir, char* dir, size_t dn, char* txt, size_t tn)
+{
+    snprintf(dir, dn, "%s/%s", outdir, lang_codes[ld->lang]);
+    SDL_CreateDirectory(dir);
+    snprintf(txt, tn, "%s/lang.txt", dir);
+    remove(txt);   /* (the folder is complete only once lang.txt is written again) */
+}
+
+static char* eu_texts(int lang, const unsigned char* x, uint32_t n, const char* dir);   /* (below) */
+
+static int one_lang(FILE* f, const LangSource* s, const LangDisc* ld, const char* outdir, const char* iso,
+                    const unsigned char* us, uint32_t nus, const unsigned char* exe, uint32_t nexe, const unsigned char* w, int nw)
+{
+    char dir[1100], path[64], txt[1200];
+    const char* lname = lang_names[ld->lang];
+    unsigned fl[24], hl[24], hl2[24];
+    unsigned char* d;
+    uint32_t n;
+    int pics = 0, subs = 0, ok;
+    folder(ld, outdir, dir, sizeof(dir), txt, sizeof(txt));
+    snprintf(pg->phase, sizeof(pg->phase), tr("%s: messages"), lname);
+    snprintf(path, sizeof(path), "%s/SYSMES%d.ALD", ld->dir, ld->digit);
+    if (!exe_files(exe, nexe, ld->exe, fl, hl)) { host_log("lang: %s: the file tables are not in %s\n", lname, s->exe); return 0; }
+    if (!(d = read_file(f, path, 1u << 20, &n))) { host_log("lang: %s: %s missing\n", lname, path); return 0; }
+    if (ld->lang == LANG_AR) {   /* (its glyph codes moved up: LANG_AR_BASE) */
+        Ald* a = malloc(sizeof(Ald));
+        if (a && ald_read(d, n, a)) { ja_mes(&a->items); ja_mes(&a->sys); }
+        free(a);
+    }
+    {
+        unsigned char* b = lang_sysmes(us, nus, d, &n, fl, hl, hl2);
+        ok = b && put(dir, "SYSMES.ALD", b, n);
+        free(b);
+    }
+    free(d);
+    if (!ok) { host_log("lang: %s: %s has an unknown layout\n", lname, path); return 0; }
+    pg->done++;
+    snprintf(pg->phase, sizeof(pg->phase), tr("%s: pictures"), lname);
+    {   /* the font and the effect pictures (SYSTEM?.AFS/1), then the archives' pictures with writing */
+        static const char* const arch[][2] = { { "SYSTEM", "SYSTEM.AFS" }, { "ADV", "ADV.AFS" }, { "MRY", "MRY.AFS" }, { "ITEM1", "ITEM1.AFS" }, { "ITEM2", "ITEM2.AFS" } };
+        for (int i = 0; i < 5 && ok; i++) {
+            char e[64], g[64];
+            snprintf(e, sizeof(e), "%s/%s%d.AFS", s->eng_dir, arch[i][0], s->eng_digit);
+            snprintf(g, sizeof(g), "%s/%s%d.AFS", ld->dir, arch[i][0], ld->digit);
+            ok = pictures(f, e, f, g, dir, arch[i][1], i ? 0 : 1, i ? 1 << 30 : 1, 0, &pics);   /* (SYSTEM.AFS/0 is the system messages: SYSMES.ALD) */
+            pg->done++;
+        }
+    }
+    if (!ok) { host_log("lang: %s: the pictures could not be read or written\n", lname); return 0; }
+    snprintf(path, sizeof(path), "%s/RDX_LNK%d.AFS", ld->dir, ld->digit);
+    if (!rooms(f, dir, path, lname, ld->lang == LANG_AR, &subs)) { host_log("lang: %s: the rooms could not be read or written\n", lname); return 0; }
+    char* extra = eu_texts(ld->lang, exe, nexe, dir);
+    LangTxt t = { ld->lang, import_sources[s->src].key, iso, w, nw, fl, hl2, subs, NULL, 0, extra };
+    ok = !pc_save_file(txt, "w", write_txt, &t);
+    free(extra);
+    if (!ok) { host_log("lang: cannot write %s\n", txt); return 0; }
+    host_log("lang: %s installed in %s (%d pictures, %d subtitles)\n", lname, dir, pics, subs);
+    return 1;
+}
+
+/* the executable's other texts of the Russian and Brazilian Portuguese translations (lang.txt "exemes", "term"): the
+   demo, PAL start and pause lines, the game over question (pad.c, system.c, gameover.c; at the US addresses or where
+   the patched code points), the computer events' lines (sp_evt.c, rewritten in place) */
+static char* ru_texts(const unsigned char* x, uint32_t n)
+{
+    static const int tabs[][2] = { { 0, 27 }, { 1, 19 }, { 2, 17 }, { 3, 23 }, { 4, 20 }, { 7, 4 } };
+    size_t cap = 64 << 10, k = 0;
+    char* o = malloc(cap);
+    char line[600];
+    if (!o) return NULL;
+    o[0] = 0;
+#define ADD(s) do { size_t l_ = strlen(s); if (l_ && k + l_ + 2 < cap) { memcpy(o + k, s, l_); k += l_; o[k++] = '\n'; o[k] = 0; } } while (0)
+    exe_mes_line(line, sizeof(line), "demo", x, n, 0x3557E0); ADD(line);                          /* pdm_mes */
+    exe_mes_line(line, sizeof(line), "press", x, n, exe_hilo(x, n, 0x131630, 4)); ADD(line);       /* pdm_palmes (bhSetPad) */
+    exe_mes_line(line, sizeof(line), "pause", x, n, exe_hilo(x, n, 0x136E80, 8)); ADD(line);       /* pause_mes (bhSysCallScreenSaver) */
+    exe_mes_line(line, sizeof(line), "retry", x, n, 0x35D180); ADD(line);                         /* cnt_mes */
+    const unsigned char* tab = exe_va(x, n, 0x3356E0, 32);   /* comevt_message_tab */
+    for (int t = 0; tab && t < (int)(sizeof(tabs) / sizeof(tabs[0])); t++) {
+        const unsigned char* arr = exe_va(x, n, pc_rd32(tab + 4 * tabs[t][0]), 4u * tabs[t][1]);
+        char** us = (char**)comevt_message_tab[tabs[t][0]];
+        for (int i = 0; arr && i < tabs[t][1]; i++) {
+            const unsigned char* s = exe_va(x, n, pc_rd32(arr + 4 * i), 1);
+            size_t l = 0, q;
+            while (s && l < 200 && exe_va(x, n, pc_rd32(arr + 4 * i) + l, 1) && s[l]) l++;
+            if (!s || l >= 200 || (l == strlen(us[i]) && !memcmp(s, us[i], l))) continue;
+            q = (size_t)snprintf(line, sizeof(line), "term|%d|%d|", tabs[t][0], i);
+            for (size_t c = 0; c < l; c++) q += (size_t)snprintf(line + q, sizeof(line) - q, "%02X", s[c]);
+            ADD(line);
+        }
+    }
+#undef ADD
+    return o;
+}
+
+/* the European fan translations' executable texts (the European executable's symbols): lang.txt "exemes" (demo, PAL
+   start, pause, the game over question) and SAVELOAD.MES. Arabic: the Spanish ones it fills (the patch adds the load
+   segment they are in, so a clean disc has none; SaveLoadMessage_SPA's texts there), the codes moved up by
+   LANG_AR_BASE. Italian: the French PAL start line and game over question it rewrote in place (SaveLoadMessage_FRA
+   too, but the European save / load texts are about twice the size of the US table: not taken, as for the clean
+   European languages). */
+typedef struct EuTexts { int lang, up; uint32_t va[4], sl; } EuTexts;   /* va: demo, press, pause, retry (0 none) */
+static const EuTexts eu_texts_of[] = {
+    { LANG_AR, 1, { 0x1E46246, 0x36B2E0, 0x1E46260, 0x1E46276 }, 0x348E30 },   /* pdm_mes_SPA, pdm_palmes_SPA, pause_mes_SPA, cnt_mes_SPA */
+    { LANG_IT, 0, { 0, 0x36B280, 0, 0x3736C0 }, 0 },                          /* pdm_palmes_FRA, cnt_mes_FRA */
+};
+static int eu_text(const unsigned char* x, uint32_t n, uint32_t va, uint16_t* t, int max, int up)
+{
+    for (int i = 0; i < max; i++) {
+        const unsigned char* p = exe_va(x, n, va + 2 * i, 2);
+        if (!p) return 0;
+        t[i] = (uint16_t)pc_rd16(p);
+        if (t[i] == 0xFFFF) { if (up) ja_codes(t, (uint32_t)i + 1); return i + 1; }
+    }
+    return 0;
+}
+static char* eu_texts(int lang, const unsigned char* x, uint32_t n, const char* dir)
+{
+    static const char* const names[4] = { "demo", "press", "pause", "retry" };
+    enum { SL_N = 45, SL_MAX = 10956, OUT = 2048 };   /* (the decomp's SaveLoadMessage size) */
+    const EuTexts* e = NULL;
+    uint16_t t[2048];
+    char* o;
+    unsigned char* sl;
+    const unsigned char* h;
+    uint32_t at = 4 + 4 * SL_N;
+    size_t k = 0;
+    for (size_t i = 0; i < sizeof(eu_texts_of) / sizeof(eu_texts_of[0]); i++) if (eu_texts_of[i].lang == lang) e = &eu_texts_of[i];
+    if (!e) return NULL;
+    o = calloc(1, OUT);
+    sl = e->sl ? calloc(1, SL_MAX) : NULL;
+    h = e->sl ? exe_va(x, n, e->sl, 4 + 4 * SL_N) : NULL;
+    for (size_t m = 0; o && m < 4; m++) {
+        int len = e->va[m] ? eu_text(x, n, e->va[m], t, 64, e->up) : 0;
+        if (!len) continue;
+        k += (size_t)snprintf(o + k, OUT - k, "exemes|%s|", names[m]);
+        for (int i = 0; i < len && k + 6 < OUT; i++) k += (size_t)snprintf(o + k, OUT - k, "%04X", t[i]);
+        if (k + 2 < OUT) o[k++] = '\n';
+    }
+    for (int i = 0; sl && h && pc_rd32(h) == SL_N && i < SL_N; i++) {   /* (contiguous, in order) */
+        int len = eu_text(x, n, e->sl + pc_rd32(h + 4 + 4 * i), t, 2048, e->up);
+        if (!len || at + 2u * len > SL_MAX) { h = NULL; break; }
+        memcpy(sl + 4 + 4 * i, &at, 4);
+        memcpy(sl + at, t, 2u * len);
+        at += 2u * len;
+    }
+    if (sl && h && pc_rd32(h) == SL_N) {
+        memcpy(sl, &(uint32_t){ SL_N }, 4);
+        if (!put(dir, "SAVELOAD.MES", sl, at)) host_log("lang: %s: SAVELOAD.MES not written\n", lang_names[lang]);
+    } else if (e->sl) host_log("lang: %s: the save messages are not in the executable\n", lang_names[lang]);
+    free(sl);
+    return o;
+}
+
+/* ---------------------------------------------------------------- the opening's text crawl, the movies */
+/* RDX_LNK.AFS entry 0 (RM_0000.RDX) expanded into *ex (*cap bytes, grown): its size, < 0 if unreadable */
+static long room0(FILE* f, unsigned char** ex, long* cap)
+{
+    int64_t off;
+    uint32_t size;
+    int n = 0;
+    long xn = -1;
+    AfsFile* a = imp_iso_find(f, "RDX_LNK.AFS", &off, &size) ? imp_afs_list(f, off, size, &n) : NULL;
+    unsigned char* pk = a && n > 0 && a[0].size && a[0].size < (64u << 20) ? malloc(a[0].size) : NULL;
+    if (pk && imp_read_at(f, a[0].off, pk, a[0].size)) xn = pc_prs_expand_ex(pk, a[0].size, ex, cap, 1);   /* (lax: the Russian rooms) */
+    free(pk); free(a);
+    return xn;
+}
+/* a room's textures in order (rdx.py texture_blocks: the table at hed[4], each entry a list of 32-byte chunk heads up
+   to code -1): where each TIM2 starts (at) and its size; how many (up to max) */
+static int room_tims(const unsigned char* d, long n, uint32_t* at, uint32_t* len, int max)
+{
+    uint32_t tt = n >= 36 ? pc_rd32(d + 32) : 0, cnt, k = 0;
+    if (!tt || !pc_range_ok(tt, 4, (uint64_t)n) || (cnt = pc_rd32(d + tt)) > 4096 || !pc_range_ok(tt + 4, 4ull * cnt, (uint64_t)n)) return 0;
+    for (uint32_t i = 0; i < cnt; i++)
+        for (uint64_t p = pc_rd32(d + tt + 4 + 4 * i); p && p + 32 <= (uint64_t)n && pc_rd32(d + p) != 0xFFFFFFFFu;) {
+            uint32_t sz = pc_rd32(d + p + 4);
+            if (!memcmp(d + p, "TIM2", 4)) {
+                if ((int)k == max || !pc_range_ok(p + 32, sz, (uint64_t)n)) return (int)k;
+                at[k] = (uint32_t)p + 32; len[k++] = sz;
+            }
+            p += 32ull + sz;
+        }
+    return (int)k;
+}
+/* the opening's text crawl: RM_0000's textures 85..87 (its three pages: the story so far, "3 months later..."),
+   which the Russian and the Brazilian Portuguese patches translated, into the US room (its messages stay the US
+   ones: ROOMS.MES gives the language's), packed as the disc's rooms are (PRS, here literals only) to RM_0000.RDX.
+   lang_glue.c reads it with Translated Pictures on. 1 written, 0 none to take, -1 failed */
+#define CRAWL_FIRST 85
+#define CRAWL_PAGES 3
+static int crawl(FILE* uf, FILE* f, const char* dir)
+{
+    enum { MAXT = 512 };
+    unsigned char *u = malloc(1 << 20), *l = malloc(1 << 20), *pk = NULL;
+    long ucap = 1 << 20, lcap = 1 << 20, un = u && l ? room0(uf, &u, &ucap) : -1, ln = un > 0 ? room0(f, &l, &lcap) : -1;
+    uint32_t ua[MAXT], ul[MAXT], la[MAXT], ll[MAXT];
+    int nu, nl, took = 0, r = -1;
+    if (ln > 0 && (nu = room_tims(u, un, ua, ul, MAXT)) == (nl = room_tims(l, ln, la, ll, MAXT)) && nu >= CRAWL_FIRST + CRAWL_PAGES) {
+        for (int k = CRAWL_FIRST; k < CRAWL_FIRST + CRAWL_PAGES; k++)
+            if (ul[k] == ll[k] && memcmp(u + ua[k], l + la[k], ul[k])) { memcpy(u + ua[k], l + la[k], ul[k]); took++; }
+        r = 0;
+        if (took && (pk = malloc(PC_PRS_PACKED((uint32_t)un)))) r = put(dir, "RM_0000.RDX", pk, pc_prs_pack_literals(u, (uint32_t)un, pk)) ? 1 : -1;
+        else if (took) r = -1;
+    }
+    free(u); free(l); free(pk);
+    return r;
+}
+
+/* the movies of the language's disc that differ from the US disc's, copied to MOVIE/ (the Japanese release: the
+   ending's and the title demo's logo "BIOHAZARD -CODE:Veronica- 完全版"); movie_glue.c plays them with Translated
+   Pictures on. The bytes copied (*bytes); -1 if one could not be read or written */
+static int movies(FILE* uf, FILE* f, const char* dir, int64_t* bytes)
+{
+    enum { CH = 1 << 20 };
+    unsigned char *a = malloc(CH), *b = malloc(CH);
+    int ok = a && b;
+    *bytes = 0;
+    for (int m = 0; m < 32 && ok; m++) {
+        char name[40], p[1300];
+        int64_t uo, lo;
+        uint32_t us, ls, k;
+        int same;
+        FILE* o;
+        snprintf(name, sizeof(name), "MOVIE/MV_%03d.PSS", m);
+        if (!imp_iso_find(f, name, &lo, &ls)) continue;
+        same = imp_iso_find(uf, name, &uo, &us) && us == ls;
+        for (k = 0; same && k < ls; k += CH) {
+            uint32_t c = ls - k < CH ? ls - k : CH;
+            same = imp_read_at(uf, uo + k, a, c) && imp_read_at(f, lo + k, b, c) && !memcmp(a, b, c);
+        }
+        if (same) continue;
+        snprintf(p, sizeof(p), "%s/MOVIE", dir);
+        SDL_CreateDirectory(p);
+        snprintf(p, sizeof(p), "%s/%s", dir, name);
+        if (!(o = pc_fopen(p, "wb"))) { ok = 0; break; }
+        for (k = 0; ok && k < ls; k += CH) {
+            uint32_t c = ls - k < CH ? ls - k : CH;
+            ok = imp_read_at(f, lo + k, a, c) && fwrite(a, 1, c, o) == c;
+        }
+        ok = !fclose(o) && ok;
+        if (!ok) remove(p);   /* (no half movie) */
+        *bytes += ls;
+    }
+    free(a); free(b);
+    return ok ? 0 : -1;
+}
+
+/* a disc laid out as the US one, with one language at its root (the Russian, Brazilian Portuguese translations, the Japanese release):
+   its files compared with the US disc's (uf) */
+static int one_disc(FILE* f, FILE* uf, const LangSource* s, const char* outdir, const char* iso,
+                    const unsigned char* us, uint32_t nus, const unsigned char* exe, uint32_t nexe)
+{
+    const LangDisc* ld = &s->langs[0];
+    const char* lname = lang_names[ld->lang];
+    char dir[1100], txt[1200];
+    unsigned char *d, w[256], ox[LANG_JA_BASE];
+    unsigned fl[24], hl[24], count = 0;
+    const unsigned char* table = NULL;
+    unsigned char* sl;
+    uint32_t n, nsl = 0;
+    int pics = 0, subs = 0, nw = 0, ok, ja = s->kind == LS_JA;
+    char* extra = NULL;
+    folder(ld, outdir, dir, sizeof(dir), txt, sizeof(txt));
+    snprintf(pg->phase, sizeof(pg->phase), tr("%s: messages"), lname);
+    memcpy(fl, fstbl, sizeof(fl));
+    memcpy(hl, fsheader, sizeof(hl));
+    if (ja && !exe_files_before_wallpaper(exe, nexe, fl, hl)) { host_log("lang: %s: the file tables are not in %s\n", lname, s->exe); return 0; }
+    if (!ja) {   /* the patched font's widths (bhGetFontSize) */
+        if (!exe_font(exe, nexe, &count, &table) || count < 108 || count > 256) { host_log("lang: %s: the font's widths are not in %s\n", lname, s->exe); return 0; }
+        memcpy(w, table, count);
+        nw = (int)count;
+    }
+    if (!(d = read_file(f, "SYSMES.ALD", 1u << 20, &n))) { host_log("lang: %s: SYSMES.ALD missing\n", lname); return 0; }
+    if (ja) {
+        unsigned char* b = ja_sysmes(us, nus, d, &n);
+        ok = b && put(dir, "SYSMES.ALD", b, n);
+        free(b);
+    } else {   /* the US layout (checked) */
+        Ald *a = malloc(sizeof(Ald)), *b = malloc(sizeof(Ald));
+        unsigned char* c = ald_cut(d, &n);
+        if (c) { free(d); d = c; }
+        ok = a && b && ald_read(us, nus, a) && ald_read(d, n, b) && a->items.n == b->items.n && a->sys.n == b->sys.n && put(dir, "SYSMES.ALD", d, n);
+        free(a); free(b);
+    }
+    free(d);
+    if (!ok) { host_log("lang: %s: SYSMES.ALD has an unknown layout\n", lname); return 0; }
+    pg->done++;
+    snprintf(pg->phase, sizeof(pg->phase), tr("%s: pictures"), lname);
+    {   /* the font, the effect and computer pictures (SYSTEM.AFS from 1; 0 is the system messages), the pictures */
+        static const char* const arch[] = { "SYSTEM.AFS", "ADV.AFS", "MRY.AFS", "ITEM1.AFS", "ITEM2.AFS" };
+        for (int i = 0; i < 5 && ok; i++) {
+            ok = pictures(uf, arch[i], f, arch[i], dir, arch[i], i ? 0 : 1, 1 << 30, ja, &pics);
+            pg->done++;
+        }
+    }
+    if (!ok) { host_log("lang: %s: the pictures could not be read or written\n", lname); return 0; }
+    if (ja) {   /* the look-alikes' widths, from the font */
+        int64_t off;
+        uint32_t size;
+        int na = 0;
+        AfsFile* a = imp_iso_find(f, "SYSTEM.AFS", &off, &size) ? imp_afs_list(f, off, size, &na) : NULL;
+        unsigned char* e = a && na > 1 && a[1].size < (16u << 20) ? malloc(a[1].size + 1) : NULL;
+        if (e && imp_read_at(f, a[1].off, e, a[1].size) && ja_ink(ld->lang, e, a[1].size, w, ox)) nw = LANG_JA_BASE;
+        else host_log("lang: %s: the font's letters cannot be measured\n", lname);
+        free(e); free(a);
+    }
+    if (!rooms(f, dir, "RDX_LNK.AFS", lname, ja, &subs)) { host_log("lang: %s: the rooms could not be read or written\n", lname); return 0; }
+    snprintf(pg->phase, sizeof(pg->phase), tr("%s: pictures"), lname);
+    if (!ja) {   /* (the Russian, the Brazilian Portuguese) */
+        int c = crawl(uf, f, dir);
+        if (c) host_log(c > 0 ? "lang: %s: the opening's text crawl\n" : "lang: %s: the opening's text crawl could not be read or written\n", lname);
+    }
+    if (ld->lang == LANG_JA) {   /* (the Korean disc's movies are the Japanese ones: no Korean in them) */
+        int64_t mb;
+        if (movies(uf, f, dir, &mb)) host_log("lang: %s: the movies could not be read or written\n", lname);
+        else if (mb) host_log("lang: %s: movies, %.0f MB\n", lname, mb / 1048576.0);
+    }
+    snprintf(pg->phase, sizeof(pg->phase), tr("%s: messages"), lname);
+    if ((sl = exe_saveload(exe, nexe, &nsl))) {   /* the save / load messages */
+        if (ja) {
+            Mes* m = malloc(sizeof(Mes));
+            if (m && mes_read(sl, nsl, m)) ja_mes(m);
+            free(m);
+        }
+        if (!put(dir, "SAVELOAD.MES", sl, nsl)) host_log("lang: %s: SAVELOAD.MES not written\n", lname);
+        free(sl);
+    } else host_log("lang: %s: the save messages are not in %s\n", lname, s->exe);
+    if (!ja) extra = ru_texts(exe, nexe);
+    pg->done++;
+    LangTxt t = { ld->lang, import_sources[s->src].key, iso, w, nw, fl, hl, subs, ja ? ox : NULL, ja ? 160 : 0, extra };
+    ok = !pc_save_file(txt, "w", write_txt, &t);
+    free(extra);
+    if (!ok) { host_log("lang: cannot write %s\n", txt); return 0; }
+    host_log("lang: %s installed in %s (%d pictures, %d subtitles)\n", lname, dir, pics, subs);
+    return 1;
+}
+
+/* a fan translation's disc, told from its clean base disc by what the patch changed (docs/LANGUAGES.md): 1 patched,
+   0 the clean base disc, -1 another disc. Russian: bhGetFontSize counts more glyphs than the US 108; Brazilian
+   Portuguese: the US count, with the accents' widths at 96..107 (the US font: 28); Turkish (the Spanish folder): its
+   text never writes the Spanish font's inverted marks (codes 142, 143); Arabic (the Spanish folder): its text writes
+   the article "al" (lam, alef: codes 105 11 in display order) hundreds of times, Spanish never (Í +); Italian (the
+   French folder): its text writes ì and ò (codes 125, 129) dozens of times, French never (French: ç ê, 138 123);
+   Korean (the Japanese disc's SYSMES.ALD): its text has no hiragana (cells 54..99), the Japanese text is full of it */
+static int fan_patched(FILE* f, const LangSource* s, const unsigned char* exe, uint32_t nexe)
+{
+    unsigned count = 0;
+    const unsigned char* t = NULL;
+    if (s->kind == LS_RU) return !(exe_font(exe, nexe, &count, &t) && count == 108);
+    if (s->kind == LS_PT) {
+        if (!exe_font(exe, nexe, &count, &t) || count != 108) return -1;
+        for (int c = 96; c < 108; c++) if (t[c] != 28) return 1;
+        return 0;
+    }
+    {
+        char p[64];
+        uint32_t n = 0;
+        int inv = 0, al = 0, it = 0, fr = 0, kana = 0, glyphs = 0, ok, l = s->langs[0].lang;
+        Ald* a = malloc(sizeof(Ald));
+        unsigned char* d;
+        if (s->kind == LS_JA) snprintf(p, sizeof(p), "SYSMES.ALD");
+        else snprintf(p, sizeof(p), "%s/SYSMES%d.ALD", s->langs[0].dir, s->langs[0].digit);
+        d = read_file(f, p, 1u << 20, &n);
+        ok = a && d && ald_read(d, n, a);
+        for (int i = 0; ok && i < a->sys.n; i++)
+            for (uint32_t k = 0; k + 1 < a->sys.len[i]; k++) {
+                uint16_t c = a->sys.t[i][k];
+                if (c == 0xFF02 || c == 0xFF03) { k++; continue; }   /* (a wait, an item: not a glyph) */
+                if (c >= 0xFE00) continue;
+                glyphs++;
+                inv += c == 142 || c == 143;
+                al += c == 105 && a->sys.t[i][k + 1] == 11;
+                it += c == 125 || c == 129;
+                fr += c == 138 || c == 123;
+                kana += c >= 54 && c <= 99;
+            }
+        free(a); free(d);
+        if (!ok) return -1;
+        if (s->kind == LS_JA) return glyphs < 1000 ? -1 : kana * 50 < glyphs ? 1 : kana * 10 > glyphs ? 0 : -1;
+        if (l == LANG_IT) return it > 20 ? 1 : fr ? 0 : -1;
+        if (l == LANG_AR) return al > 50 ? 1 : inv ? 0 : -1;   /* (the Turkish disc: another one) */
+        return al > 50 ? -1 : !inv;
+    }
+}
+
+int lang_extract(int src, const char* iso, const char* outdir)
+{
+    const LangSource* s = NULL;
+    FILE *f, *uf;
+    char cnf[128] = { 0 };
+    unsigned char *exe = NULL, *usd = NULL, w[162];
+    uint32_t nexe = 0, nus = 0, ncnf;
+    int64_t cnf_off;
+    int nw = 0, fails = 0;
+    Ald* us = NULL;   /* (heap: the address window) */
+    for (size_t i = 0; i < sizeof(lang_discs) / sizeof(lang_discs[0]); i++) if (lang_discs[i].src == src) s = &lang_discs[i];
+    if (!s) return -1;
+    if (!(f = pc_fopen(iso, "rb"))) { snprintf(pg->phase, sizeof(pg->phase), tr("Cannot open the disc image: %s"), iso); return -1; }
+    if (!imp_iso_find(f, "SYSTEM.CNF", &cnf_off, &ncnf) || !imp_read_at(f, cnf_off, cnf, ncnf < 127 ? ncnf : 127) || !strstr(cnf, s->exe)) {
+        snprintf(pg->phase, sizeof(pg->phase), tr(s->refuse), import_sources[src].serial);
+        fclose(f);
+        return -1;
+    }
+    exe = read_file(f, s->exe, 32u << 20, &nexe);
+    if (exe && s->clean) {   /* a fan translation: not its clean base disc */
+        int p = fan_patched(f, s, exe, nexe);
+        if (p <= 0) {
+            if (p) snprintf(pg->phase, sizeof(pg->phase), tr(s->refuse), import_sources[src].serial);
+            else snprintf(pg->phase, sizeof(pg->phase), "%s", tr(s->clean));
+            free(exe); fclose(f);
+            return -1;
+        }
+    } else if (exe && s->kind == LS_EU && fan_patched(f, &lang_discs[LD_TR], exe, nexe) == 1) {   /* (its Spanish is Turkish) */
+        snprintf(pg->phase, sizeof(pg->phase), "%s", tr("This disc has the Turkish translation: import it with its own entry."));
+        free(exe); fclose(f);
+        return -1;
+    } else if (exe && s->kind == LS_EU && fan_patched(f, &lang_discs[LD_AR], exe, nexe) == 1) {   /* (its Spanish is Arabic) */
+        snprintf(pg->phase, sizeof(pg->phase), "%s", tr("This disc has the Arabic translation: import it with its own entry."));
+        free(exe); fclose(f);
+        return -1;
+    } else if (exe && s->kind == LS_EU && fan_patched(f, &lang_discs[LD_IT], exe, nexe) == 1) {   /* (its French is Italian) */
+        snprintf(pg->phase, sizeof(pg->phase), "%s", tr("This disc has the Italian translation: import it with its own entry."));
+        free(exe); fclose(f);
+        return -1;
+    } else if (exe && s->kind == LS_JA && fan_patched(f, &lang_discs[LD_KO], exe, nexe) == 1) {   /* (its Japanese is Korean) */
+        snprintf(pg->phase, sizeof(pg->phase), "%s", tr("This disc has the Korean translation: import it with its own entry."));
+        free(exe); fclose(f);
+        return -1;
+    }
+    uf = pc_fopen(g_lang_us_iso, "rb");
+    us = malloc(sizeof(Ald));
+    usd = uf ? read_file(uf, "SYSMES.ALD", 1u << 20, &nus) : NULL;
+    if (s->kind == LS_EU && uf) { fclose(uf); uf = NULL; }
+    if (!exe || (s->kind == LS_EU && !(nw = exe_widths(exe, nexe, w))) || !usd || !us || !ald_read(usd, nus, us)) {
+        snprintf(pg->phase, sizeof(pg->phase), "%s", !usd || !us ? tr("The US disc image could not be read.") : tr("Required game data not found. Check the selected disc image."));
+        free(exe); free(usd); free(us); fclose(f);
+        if (uf) fclose(uf);
+        return -1;
+    }
+    pg->total = s->n * STEPS;
+    for (int i = 0; i < s->n; i++) {
+        int ok = s->kind == LS_EU ? one_lang(f, s, &s->langs[i], outdir, iso, usd, nus, exe, nexe, w, nw)
+                                  : one_disc(f, uf, s, outdir, iso, usd, nus, exe, nexe);
+        fails += !ok;
+        pg->done = (i + 1) * STEPS;
+    }
+    free(exe); free(usd); free(us); fclose(f);
+    if (uf) fclose(uf);
+    snprintf(pg->phase, sizeof(pg->phase), tr("%d of %d languages imported."), s->n - fails, s->n);
+    return fails;
+}

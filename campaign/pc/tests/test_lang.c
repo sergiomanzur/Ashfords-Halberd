@@ -1,0 +1,102 @@
+/* ctest "lang": every translation of our own texts (src/host/tr_table.inc) shows with its language's game font
+   (src/host/glyphs.c): no letter the font lacks (the Japanese font has the kana and only the kanji the game uses,
+   the Russian one the Cyrillic letters, the European one its accents, the Arabic one the letters' joined forms, the
+   Korean one the Hangul syllables its fan translation uses).
+   Lists the texts and letters otherwise. Arabic (in display order, lang_shape): the printf placeholders are filled
+   left to right on screen, so they must come out in the English order. */
+#include "../src/host/lang.h"
+#include <stdio.h>
+#include <string.h>
+
+typedef struct TrRow { const char* en; const char* t[LANG_COUNT - 1]; } TrRow;
+static const TrRow rows[] = {
+#include "../src/host/tr_table.inc"
+};
+
+static const char* const codes[LANG_COUNT] = { "en", "fr", "de", "es", "ja", "ru", "tr", "pt-BR", "ar", "ko", "it" };
+int g_lang;                                        /* (lang_glue.c) */
+int lang_installed(int l) { return l >= 0 && l < LANG_COUNT; }
+
+/* the conversions of the printf placeholders of s, in order ("%d", "%.4s": 'd' 's'; %% not) */
+static void conversions(const char* s, char* out, int n)
+{
+    int k = 0;
+    for (; *s && k < n - 1; s++) {
+        if (*s != '%') continue;
+        s++;
+        while (*s && strchr("-+ #0123456789.*hlLqjzt", *s)) s++;
+        if (*s && strchr("diouxXeEfFgGaAcspn", *s)) out[k++] = *s;   /* (a "%" in a sentence, "100% keeps": none) */
+        if (!*s) break;
+    }
+    out[k] = 0;
+}
+
+static int check(const char* got, const char* want, const char* what)
+{
+    if (!strcmp(got, want)) return 0;
+    printf("%s: \"%s\", expected \"%s\"\n", what, got, want);
+    return 1;
+}
+
+int main(void)
+{
+    static char sh[4096];
+    int bad = 0;
+    for (int l = 1; l < LANG_COUNT; l++)
+        for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
+            char miss[256], a[64], b[64];
+            const char* t = rows[i].t[l - 1];
+            if (!t || !*t) continue;
+            lang_missing(l, t, miss, sizeof(miss));
+            if (miss[0]) { printf("%s: [%s] %s\n    (%s)\n", codes[l], miss, t, rows[i].en); bad++; }
+            if (l != LANG_AR) continue;
+            conversions(rows[i].en, a, sizeof(a));
+            conversions(lang_shape(t, sh, sizeof(sh)), b, sizeof(b));
+            if (strcmp(a, b)) { printf("%s: placeholders %s, the English %s: %s\n    (%s)\n", codes[l], b, a, t, rows[i].en); bad++; }
+        }
+    if (bad) printf("%d translations use letters their game font lacks or other placeholders: reword them (docs/LANGUAGES.md \"Letters\")\n", bad);
+    /* the shaping and the display order (glyphs.c lang_shape): joined forms, lam-alef, the line reversed, Latin and
+       placeholders left to right, brackets mirrored, lines kept in order */
+    bad += check(lang_shape("\xD8\xA7\xD9\x84\xD8\xB9\xD8\xB1\xD8\xA8\xD9\x8A\xD8\xA9", sh, sizeof(sh)),   /* العربية (lang.c lang_names) */
+                 "\xEF\xBA\x94\xEF\xBB\xB4\xEF\xBA\x91\xEF\xBA\xAE\xEF\xBB\x8C\xEF\xBB\x9F\xEF\xBA\x8D", "lang_shape(al-arabiyya)");
+    bad += check(lang_shape("\xD9\x84\xD8\xA7 F1 (%d)", sh, sizeof(sh)), "F1 (%d) \xEF\xBB\xBB", "lang_shape(la F1 (%d))");   /* لا */
+    bad += check(lang_shape("\xD9\x85\xD9\x86 %d x %d\n\xD9\x84\xD8\xA7", sh, sizeof(sh)), "%d x %d \xEF\xBB\xA6\xEF\xBB\xA3\n\xEF\xBB\xBB", "lang_shape(two lines)");   /* من, لا */
+    bad += check(lang_shape("English (%s) stays", sh, sizeof(sh)), "English (%s) stays", "lang_shape(no Arabic)");
+    {   /* Korean: the Hangul cells (한국어, lang.c lang_names), the look-alikes of the US codes (A, ?, the choice cursor),
+           a US code without one (/: the US font's, cell -1); Italian: its accents in the European font */
+        static const struct { int l; const char* s; int code, cell; unsigned ch; } g[] = {
+            { LANG_KO, "\xED\x95\x9C", LANG_JA_BASE + 499, 499, 0xD55C },   /* 한 */
+            { LANG_KO, "\xEC\x96\xB4", LANG_JA_BASE + 258, 258, 0xC5B4 },     /* 어 */
+            { LANG_KO, "A", 33, 0, 'A' }, { LANG_KO, "?", 31, 227, '?' }, { LANG_KO, "/", 15, -1, '/' },
+            { LANG_JA, "/", 15, 215, '/' }, { LANG_IT, "\xC3\xAC", 125, 125, 0xEC }, { LANG_IT, "\xC3\xB2", 129, 129, 0xF2 },
+        };
+        char m[64];
+        for (size_t i = 0; i < sizeof(g) / sizeof(g[0]); i++) {
+            const char* s = g[i].s;
+            int c = lang_glyph(g[i].l, &s);
+            if (c != g[i].code || lang_cell(g[i].l, c) != g[i].cell || lang_char(g[i].l, c) != g[i].ch) {
+                printf("%s \"%s\": code %d cell %d char %X, expected %d %d %X\n", codes[g[i].l], g[i].s, c, lang_cell(g[i].l, c),
+                       lang_char(g[i].l, c), g[i].code, g[i].cell, g[i].ch);
+                bad++;
+            }
+        }
+        lang_missing(LANG_KO, "\xED\x95\x9C\xEA\xB5\xAD\xEC\x96\xB4", m, sizeof(m));
+        bad += check(m, "", "Korean letters of the language's name");
+        lang_missing(LANG_IT, "Italiano \xC3\xA0\xC3\xA8\xC3\xA9\xC3\xAC\xC3\xB2\xC3\xB9\xC3\x88", m, sizeof(m));
+        bad += check(m, "", "Italian letters");
+    }
+    /* wrapping Japanese: after a kana or kanji, not before a closing mark; never in Latin or Hangul words */
+    bad += check(lang_cjk_break(0xE3, "\xE3\x81\x82") ? "1" : "0", "1", "lang_cjk_break(kana, kana)");                 /* あ */
+    bad += check(lang_cjk_break(0xE3, "\xE3\x80\x82") ? "1" : "0", "0", "lang_cjk_break(kana, full stop)");           /* 。 */
+    bad += check(lang_cjk_break('a', "b") || lang_cjk_break(0xEA, "\xEA\xB0\x80") ? "1" : "0", "0", "lang_cjk_break(Latin, Hangul)");
+    /* tr() reads the table from the executable's copy of the file (src/host/tr.c): the same rows as compiled here */
+    tr_init();
+    for (g_lang = 1; g_lang < LANG_COUNT; g_lang++)
+        for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
+            const char* t = rows[i].t[g_lang - 1];
+            const char* want = t && *t ? t : rows[i].en;
+            if (g_lang == LANG_AR && t && *t) want = lang_shape(t, sh, sizeof(sh));
+            if (strcmp(tr(rows[i].en), want)) { printf("%s: tr(\"%s\") is \"%s\", the table says \"%s\"\n", codes[g_lang], rows[i].en, tr(rows[i].en), want); bad++; }
+        }
+    return bad != 0;
+}

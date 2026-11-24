@@ -9,6 +9,11 @@
 #include <string.h>
 #define CHECK(x) do { if (!(x)) { printf("FAIL %d: %s\n", __LINE__, #x); return 1; } } while (0)
 HostConfig g_config;
+int biorand_active(void) { return 0; }
+const char* pc_lang_file_dir(const char* name) { (void)name; return NULL; }
+void pc_lang_file_opened(const char* name, int src) { (void)name; (void)src; }
+struct PcPart;
+int pc_lang_disc_parts(const char* name, FILE* f, uint32_t size, uint32_t lsn, uint32_t dsize, struct PcPart* out, int max) { (void)name; (void)f; (void)size; (void)lsn; (void)dsize; (void)out; (void)max; return 0; }
 void host_log(const char* fmt, ...) { (void)fmt; }
 FILE* pc_fopen(const char* path, const char* mode) { return fopen(path, mode); }
 int cdvd_find_file(const char* path, uint32_t* lsn, uint32_t* size) { if (strcmp(path, "SAMPLE.AFS")) return 0; *lsn = 0; *size = 16384; return 1; }

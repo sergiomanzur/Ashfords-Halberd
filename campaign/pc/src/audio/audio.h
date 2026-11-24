@@ -21,7 +21,10 @@ void     audio_stream_pause(int voice, int paused);
 void     audio_stream_volume(int voice, int vol_cdb);
 uint64_t audio_stream_position(int voice);
 int      audio_stream_finished(int voice);
+int      audio_adx_levels(const char* path, uint64_t base, uint32_t size, unsigned char* out, int max);
 int      adx_afs_locate(int ptid, int fid, uint32_t* lsn, uint32_t* size);
+int      adx_length_ms(int ptid, int fid);
+int      adx_levels(int ptid, int fid, unsigned char* out, int max);
 
 /* Full room snapshot transaction: prepare all handles/heaps before the core changes.
    A prepared stage pauses output until commit/discard; both consume the stage. */

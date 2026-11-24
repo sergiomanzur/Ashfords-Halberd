@@ -22,6 +22,7 @@ int ikou3(BH_PWORK* epw, NJS_POINT3* pos, int add_dir);   /* zonzon.c (its heade
 #include <ps2/veronica/prog/pwksub.h>
 #include <ps2/veronica/prog/ps2_sg_pdvib.h>
 #include "../src/host/actors.h"
+#include "../src/host/enemies.h"
 #include "../src/host/script_rules.h"
 #include <string.h>
 void host_log(const char*, ...);
@@ -170,6 +171,7 @@ static void self_actor(int idx)
     int was = actor_shown(0);
     if (actor_set(0, idx)) { if (!self_cine) sys->obwp[2].flg = 0; }
     else if (was) { setup_hair(sys->obwp, plp, self_mesh >= 0 ? self_mesh & 3 : sys->ply_id); self_cine = 0; }
+    actor_weapon_hands(0, sys->obwp, 2);
 }
 
 /* "Swapped model in cutscenes" off (g_appear_cutscene), or the doubles kept for the played character's
@@ -211,6 +213,7 @@ static void self_keep(void)
     if (actor_shown(0) && !self_cine) op->flg &= ~0x1;   /* also when the game set up the player again (story switch) */
     actor_source(0, plp, self_mesh >= 0 && self_ours() ? self_mesh & 3 : actor_shown(0) ? -1 : sys->ply_id, sys->ply_id, tps_aim_pitch());   /* gender-matched animations */
     actor_pose(0, plp);
+    actor_weapon_hands(0, sys->obwp, 2);
     if (self_mesh < 0 || !self_ours()) return;
     keep_bones(&plp->mdl[0], self_bone);
     if (self_part.objP && op->mdl[0].objP == self_part.objP) {
@@ -220,18 +223,24 @@ static void self_keep(void)
     }
 }
 
+int appear_look_of(int pid)
+{
+    return appear_played(appear_choice(g_appear_chr, pid & 3), pid & 3);
+}
+
 /* at the hand-off */
 static void self_frame(void)
 {
+    int pid = sys->ply_id & 3, chr = appear_look_of(pid);
     int own = sys->ply_id + (sys->costume & 3) * 4, want;
     if (!plp || !plp->mdl_n) return;
     if (self_mesh >= 0 && !self_ours()) self_restore();   /* the game reloaded the player */
     if (tx_in_game)   /* in cutscenes the character played is acted by its event double */
-        actor_doubles(!g_appear_chr ? -1 : g_appear_chr >= COOP_CHR_ACTOR ? g_appear_chr - COOP_CHR_ACTOR :
-                      (g_appear_chr == 5 ? 4 : g_appear_chr - 1) == own ? -1 : ACTOR_PART + (g_appear_chr == 5 ? 4 : g_appear_chr - 1));
+        actor_doubles(!chr ? -1 : chr >= COOP_CHR_ACTOR ? chr - COOP_CHR_ACTOR :
+                      (chr == 5 ? 4 : chr - 1) == own ? -1 : ACTOR_PART + (chr == 5 ? 4 : chr - 1));
     if (!tx_in_game || (sys->cb_flg & 0x1)) return;
-    self_actor(g_appear_chr >= COOP_CHR_ACTOR ? g_appear_chr - COOP_CHR_ACTOR : -1);
-    want = !g_appear_chr || g_appear_chr >= COOP_CHR_ACTOR ? -1 : g_appear_chr == 5 ? 4 : g_appear_chr - 1;
+    self_actor(chr >= COOP_CHR_ACTOR ? chr - COOP_CHR_ACTOR : -1);
+    want = !chr || chr >= COOP_CHR_ACTOR ? -1 : chr == 5 ? 4 : chr - 1;
     if (want == own) want = -1;
     if (want == self_mesh || (want >= 0 && want == self_fail)) return;   /* (-1 is no failure: back to the original) */
     self_restore();
@@ -242,6 +251,10 @@ static void self_frame(void)
 void appear_textures_released(void)
 {
     actor_textures_released();
+    {
+        void cast_release(void);
+        cast_release();
+    }
     self_tex_gone = 1;
     self_cine = 0;
     /* our mesh ends with the game too: the character's own model data back in the player work (its
@@ -258,9 +271,9 @@ void appear_textures_released(void)
 
 
 void appear_control(void) { if (!plp || !plp->mnwP) return; self_keep(); actor_double_tick(); tx_in_game = 1; }
-void appear_frame(void) { appear_on = sys && plp && (g_appear_chr || self_mesh >= 0 || actor_shown(0) || actor_shown(ACTOR_DOUBLE)); if (appear_on) self_frame(); tx_in_game = 0; }
+void appear_frame(void) { appear_on = sys && plp && (appear_look_of(sys->ply_id & 3) || self_mesh >= 0 || actor_shown(0) || actor_shown(ACTOR_DOUBLE) || cast_n > 0 || enemy_opts()->voices); if (appear_on) self_frame(); tx_in_game = 0; }
 int snd_xbank_load(int key);
-int pc_player_voice(int se) { (void)se; int own=sys->ply_id; int v = !g_appear_cutscene && actor_double_acting() ? own : appear_voice(g_appear_chr); return v < 0 || v == own ? 0 : snd_xbank_load(0xFFF0 | v); }
+int pc_player_voice(int se) { (void)se; int own = sys->ply_id; int v = !g_appear_cutscene && actor_double_acting() ? own : appear_voice(appear_look_of(own & 3)); return v < 0 || v == own ? 0 : snd_xbank_load(0xFFF0 | v); }
 int pc_room_key(void) { return sys->stg_no * 256 + sys->rom_no; }
 int pc_no_ink_ribbon(void) { extern int pc_cfg_no_ink_ribbon(void); return pc_cfg_no_ink_ribbon(); }
 
@@ -271,6 +284,6 @@ static void unhold(BH_PWORK* ep, int dead)
     *(int*)(ep->exp0 + 0x40) &= ~0xA4080;
     if (!dead) { *(int*)&ep->mode0 = 1; ep->flg2 &= ~1; ep->flg |= 0x40; }
     BH_PWORK* child = (BH_PWORK*)ep->exp1;
-    if (child && child >= ene && child < ene + 128 && (child->flg & 0x80)) unhold(child, dead);
+    if (child && child >= ene && child < ene + PC_ENE_SLOTS && (child->flg & 0x80)) unhold(child, dead);
 }
 void pc_enemy_unhold(BH_PWORK* ep) { unhold(ep, ep->hp < 0); }

@@ -1,6 +1,6 @@
 # Ashford's Halberd
 
-**0.9.2b Beta**. See the included CHANGELOG.md for this release's changes and limitations.
+**0.9.3b Beta**. See the included CHANGELOG.md for this release's changes and limitations.
 
 Run `AshfordsHalberd.exe`, choose your unmodified USA PS2 Code: Veronica X ISO (SLUS-20184), then select Play Campaign. Keep the included assets and licenses folders beside the executable. Windows 10+ and OpenGL 3.3 are required. No game data is supplied.
 
@@ -8,7 +8,9 @@ This is an offline single-player build. Online sessions, co-op, chat, trading an
 
 The original launcher artwork/icon and ambient score were created for Ashford's Halberd. Launcher controls support mouse, Tab/arrows and Enter. Music can be muted or adjusted; display mode is applied when the campaign starts.
 
-F1 opens the Field Dossier. The game's OPTION > ENHANCED OPTIONS menu uses the same video, audio, gameplay, camera, appearance and binding preferences. Both contain Cheats; F2 is a shortcut. F5 toggles third person and F11 toggles fullscreen.
+F1 opens the Field Dossier. The game's OPTION > ENHANCED OPTIONS menu uses the same video, audio, gameplay, camera, appearance and binding preferences. Both contain Cheats; F2 is a shortcut. F5 toggles third person, F11 toggles fullscreen, F12 toggles first person, and L opens the BioRand Spoiler Log when a local `mods/biorand` pack is active. In-game Pause defaults to Ashford Pause (switchable back to Classic OPTION in Gameplay).
+
+Offline optional modules: Gameplay includes Extra Item Boxes and Herbs, local BioRand pack support (`mods/biorand/`), and 255-slot enemy/cast/voice randomizers with custom spawn weights. Field Dossier (F1) also includes strictly offline disc importers for Resident Evil Outbreak File #2 characters (`Character > IMPORTED CHARACTERS`) and regional Code: Veronica X languages & independent cutscene subtitles (`Play preferences > LANGUAGE DISC IMPORT`), plus `mods/MOVIE/*.PSS` movie overrides.
 
 Fixed camera: arrows move, W aims, Z interacts/confirms/fires while aiming, X runs/cancels, Enter opens inventory. Third person: WASD, mouse look, right mouse aim, left mouse fire, Shift run, E interact, Q cancel, R reload, Tab inventory. Bindings are editable.
 
@@ -34,7 +36,7 @@ Campaign first person: choose Camera > Camera mode > First person in either enha
 
 The Alfred stairway script explicitly hides both actors before its sound sequence, so this build makes no speculative actor/visibility change; the exact encounter still needs save-based playtesting.
 
-Engine adapted from aikatore/recvx-enhanced-port 0.6.8, Copyright (c) 2026 aikatore and contributors, MIT. Decompilation by AshfordFamily and contributors. Original source attribution and dependency licenses are in licenses/. Artwork/music provenance is in assets/branding/. This unofficial project is not affiliated with Capcom, Sony, Sega or CRI Middleware.
+Engine adapted from aikatore/recvx-enhanced-port 0.6.8-0.8.0 (single-player), Copyright (c) 2026 aikatore and contributors, MIT. Decompilation by AshfordFamily and contributors. Original source attribution and dependency licenses are in licenses/. Artwork/music provenance is in assets/branding/. This unofficial project is not affiliated with Capcom, Sony, Sega or CRI Middleware.
 
 F8 skips the current FMV cutscene using its native return and fade policy. This build fixes the persistent black image after skipping the graveyard's first-zombie movie. Rebind Skip FMV cutscene in either enhancement menu's control bindings. Real-time scripted scenes are separate.
 

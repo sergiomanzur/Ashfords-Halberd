@@ -144,13 +144,15 @@ static int step(void)
 
 static int SDLCALL run(void* user)
 {
+    extern void crash_thread_init(void);
     (void)user;
+    crash_thread_init();
     while (!SDL_GetAtomicInt(&mv.quit))
         if (!step()) SDL_DelayNS(2000000);
     return 0;
 }
 
-int movie_open(uint32_t lsn, uint32_t size)
+int movie_open(FILE* f, uint32_t lsn, uint32_t size)
 {
     PssSink sink = { on_video, on_audio, NULL };
     movie_close();
@@ -161,7 +163,7 @@ int movie_open(uint32_t lsn, uint32_t size)
     mv.dec_ns = mv.dec_max_ns = 0; mv.late = 0;
     mv.paused = 1;   /* until the game plays it (movie_glue.c readMpeg) */
     SDL_UnlockMutex(mv.m);
-    mv.f = pc_fopen(g_config.iso_path, "rb");
+    mv.f = f ? f : pc_fopen(g_config.iso_path, "rb");
     if (!mv.f) return 0;
     mv.lsn = lsn; mv.size = size;
     mv.pss = pss_create(&sink);

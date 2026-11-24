@@ -10,9 +10,10 @@ ADV_WORK AdvWork;
 PAD_WRK Pad[4];
 TpsConfig g_tps;
 static MouseTake mt, pending;
-static int opt_held, rumble_available, sounds, checked_port;
-enum { P_SELECT=0x100, P_LEFT=0x8000, P_RIGHT=0x2000 };
+static int opt_held, rumble_available, sounds, checked_port, kb_start;
+enum { P_SELECT=0x100, P_START=0x800, P_LEFT=0x8000, P_RIGHT=0x2000 };
 int bind_pad_raw(int row) { (void)row; return 0; }
+int pad_kb_start(void) { return kb_start; }
 int pc_in_game(void) { return 0; }
 void menu_mouse_take(MouseTake* to) { *to = pending; }
 static float row8_x(void) { return 350; }
@@ -38,6 +39,11 @@ int main(void)
     CHECK(Pad[0].press & P_RIGHT);
     rumble_available=0; pending.left=0; pending.x=80; pending.y=176;
     pc_options_mouse0(0); CHECK(AdvWork.OptIndex==0 && sounds==2);
+    /* Keyboard Start (Enter) confirms on every OPTION row; gamepad Start stays ignored. */
+    Pad[0].press=P_START; kb_start=0; pc_options_mouse0(0);
+    CHECK((Pad[0].press & 0x40)==0);
+    Pad[0].press=P_START; kb_start=1; pc_options_mouse0(0);
+    CHECK((Pad[0].press & 0x40)!=0);
     printf("option mouse: %d failures\n",fails);
     return fails!=0;
 }

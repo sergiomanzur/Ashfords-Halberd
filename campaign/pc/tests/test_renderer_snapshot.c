@@ -16,6 +16,7 @@ void pc_view_changed(void) {} int pc_frame_fade(void) { return 0; }
 uint64_t pc_frame_view(float v[6],float c[STREAM_CAM]) { memset(v,0,6*sizeof(float));memset(c,0,STREAM_CAM*sizeof(float));return 0; }
 void glue_debug_frame(uint64_t f) { (void)f; }
 void overlay_render(void) {}
+double render_present_hz(void) { return 60.0; }
 void replay_check_compare(uint64_t f,uint8_t *a,uint8_t *b,int w,int h) { (void)f;(void)a;(void)b;(void)w;(void)h; }
 const uint8_t *movie_lock_frame(int i,uint32_t *s,int *w,int *h,int *stride) { (void)i;(void)s;(void)w;(void)h;(void)stride;return NULL; }
 void movie_unlock_frame(void) {}

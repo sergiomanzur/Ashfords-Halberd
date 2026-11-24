@@ -1,8 +1,9 @@
 /* PSS movie playback (platform side); driven by pc/glue/movie_glue.c. */
 #pragma once
 #include <stdint.h>
+#include <stdio.h>
 /* game thread */
-int    movie_open(uint32_t lsn, uint32_t size);   /* 1 if at least one frame decodes */
+int    movie_open(FILE* f, uint32_t lsn, uint32_t size);   /* 1 if at least one frame decodes (f != NULL: host file, closed by movie_close) */
 void   movie_close(void);
 void   movie_pause(int paused);
 int    movie_frames_total(void);                  /* -1 while still decoding */

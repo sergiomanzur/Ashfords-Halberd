@@ -74,3 +74,17 @@ Ashford picture/preset follow-up adds a shared saturation control, an original
 GLSL implementation of classic fast approximate anti-aliasing, and scoped
 Original/Enhanced/Custom configuration rules. Shader and preset tests use the
 production implementation. No reference-project graphical assets were added.
+
+Upstream v0.8.0 single-player sync (Waves 1–3) brings in the remaining offline
+single-player enhancements through `8a1b6f066f9aab03618a428c575e034c2769da55`
+and decomp `f30668f6fccddaa53ba3540b222a28fa09935165`: 3D-only FXAA/SMAA with
+16f IGN dithering/debanding, GS/interpolation performance passes, TIM2 HUD
+icons, Combined fixed-camera controls, 255-slot enemies with per-slot sound
+banks and custom spawn-weight randomizer, per-character appearance with Wesker
+afterimage trails, Cutscene Cast & Voice-Line randomizers, Ashford Pause menu,
+Title EXIT, Visual Give Item picker, procedural vector glyphs, Extra Item
+Boxes/Blue Herb Planters/Antarctica Typewriter, strictly offline local BioRand
+pack & In-Game Spoiler Log support, offline Outbreak File #2 character disc
+import, offline multi-language & cutscene subtitle disc import, and
+`mods/MOVIE/*.PSS` overrides. All online co-op, lobby, trading, relay/UPnP
+networking, auto-updater, and BioRand online downloader code remain excluded.

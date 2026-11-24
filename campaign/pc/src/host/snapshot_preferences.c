@@ -37,9 +37,10 @@ int snapshot_preferences_validate(const SnapshotBlob* in)
     p = (const SnapshotPreferences*)in->data;
     return p->version == 2 && p->bytes == sizeof(*p) && game_rng_validate(&p->rng) && cheat_room_snapshot_validate(&p->cheat_room) &&
         p->tps_on >= 0 && p->tps_on <= 2 &&
-        p->enemies.extra >= 0 && p->enemies.extra <= 3 && p->enemies.place >= 0 && p->enemies.place <= 1 &&
-        p->enemies.rand >= 0 && p->enemies.rand <= 1 && p->enemies.variety >= 0 && p->enemies.variety <= 1 &&
-        p->enemies.events >= 0 && p->enemies.events <= 1 && p->noclip >= 0 && p->noclip <= 2 &&
+        p->enemies.extra >= 0 && p->enemies.extra <= ENEMY_EXTRA_MAX && p->enemies.place >= 0 && p->enemies.place <= 1 &&
+        p->enemies.rand >= 0 && p->enemies.rand <= 1 && p->enemies.variety >= 0 && p->enemies.variety <= 2 &&
+        p->enemies.events >= 0 && p->enemies.events <= 1 && p->enemies.cast_imports >= 0 && p->enemies.cast_imports <= 1 &&
+        p->noclip >= 0 && p->noclip <= 2 &&
         p->health >= 0 && p->health <= 1 && p->ammo >= 0 && p->ammo <= 1 && p->freeze_time >= 0 && p->freeze_time <= 1 &&
         p->unlock >= 0 && p->unlock <= 1 && p->appear_anim >= 0 && p->appear_anim <= 1 &&
         p->appear_face >= 0 && p->appear_face <= 1 && p->appear_cutscene >= 0 && p->appear_cutscene <= 1;

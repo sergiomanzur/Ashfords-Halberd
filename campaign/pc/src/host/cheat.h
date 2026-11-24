@@ -28,9 +28,12 @@ typedef struct CheatState {
 } CheatState;
 
 extern CheatState g_cheat;
+enum { CHEAT_GIVE_FULL, CHEAT_GIVE_INV, CHEAT_GIVE_BOX };
+int  cheat_give(int id, int count, int box);   /* game thread: immediate give (box: fall back to item box if inventory full) */
 void cheat_frame(void);             /* game thread */
 void cheat_room_warp(int stg, int rom, int pos, int rcase);   /* game thread: to that room as a door without its animation
                                                                   (rcase: its room case, -1 ours as it is) */
+void cheat_put_player(float x, float z, int ay);   /* game thread: move player and collision points together */
 void cheat_warp_sound(int after);  /* sdfunc.c: around the entry script of the room it leads to */
 /* enemy spawner (pc/glue/spawn_glue.c): the list (constant, any thread) and the game-thread calls */
 int spawn_count(void);
@@ -54,6 +57,7 @@ int tp_find(int stg, int rom);      /* -1: not a room */
 int tp_stage_first(int stg, int* n);   /* the stage's first room, *n rooms */
 int tp_entries(int i);              /* entries to choose from (1 for a room without any) */
 const char* tp_stage_name(int stg);
+const char* tp_place_name(int stg, int rom);
 const char* tp_room_name(int i, int with_file, char* buf, int n);
 const char* tp_entry_name(int i, int pos, char* buf, int n);      /* "Entry 2: from Palace: S.Room" */
 const char* tp_entry_sources(int i, int pos, char* buf, int n);   /* every room with a door to it, one per line */

@@ -139,6 +139,8 @@ target_include_directories(recvx_platform PRIVATE ${xxhash_SOURCE_DIR} ${bcdec_S
 set_property(SOURCE src/gs/gs_gl.c src/gs/stream.c src/gs/gs_mem.c src/gs/textures.c APPEND PROPERTY COMPILE_OPTIONS -O3)
 set_property(SOURCE src/host/host.c src/host/overlay.cpp APPEND PROPERTY COMPILE_DEFINITIONS "RECVX_VERSION=\"${RECVX_VERSION}\"")
 set_property(SOURCE src/host/host.c APPEND PROPERTY COMPILE_DEFINITIONS "ASHFORD_VERSION=\"${ASHFORD_VERSION}\"")
+set_property(SOURCE src/host/tr.c APPEND PROPERTY COMPILE_DEFINITIONS "TR_TABLE_INC=\"${CMAKE_CURRENT_SOURCE_DIR}/src/host/tr_table.inc\"")
+set_property(SOURCE src/host/tr.c APPEND PROPERTY OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/host/tr_table.inc)
 target_include_directories(recvx_platform PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../src
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -170,10 +172,13 @@ set(ASHFORD_BRANDING ${CMAKE_CURRENT_SOURCE_DIR}/../../assets/branding)
 if(WIN32)
     enable_language(RC)
     file(TO_CMAKE_PATH "${ASHFORD_BRANDING}/ashford.ico" ASHFORD_ICON_PATH)
+    file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/host/tr_table.inc" TR_TABLE_PATH)
     configure_file(src/host/ashford.rc.in "${CMAKE_CURRENT_BINARY_DIR}/ashford.rc" @ONLY)
     # Keep RC isolated from SDL/ImGui's include paths. windres reconstructs its
     # preprocessor command incorrectly for inherited paths with apostrophes.
     add_library(ashford_icon OBJECT "${CMAKE_CURRENT_BINARY_DIR}/ashford.rc")
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/ashford.rc" PROPERTIES OBJECT_DEPENDS
+        "${ASHFORD_BRANDING}/ashford.ico;${CMAKE_CURRENT_SOURCE_DIR}/src/host/tr_table.inc")
     set(RECVX_RES $<TARGET_OBJECTS:ashford_icon>)
 endif()
 if(NOT ASHFORD_PLATFORM_TESTS_ONLY)
@@ -387,6 +392,26 @@ add_executable(test_ntex tests/test_ntex.c src/gs/textures.c)
 target_compile_options(test_ntex PRIVATE -std=gnu11)
 add_test(NAME ntex COMMAND test_ntex)
 
+# GS memory (pc/src/gs/gs_mem.c): texture decodes, read_rect and CLUT loads against per-pixel reads
+# (it #includes gs_mem.c: built with -O3 to catch aggressive optimizer issues on i686)
+add_executable(test_gsmem tests/test_gsmem.c)
+target_compile_options(test_gsmem PRIVATE -std=gnu11 -fno-strict-aliasing -fwrapv -ffp-contract=off -msse2 -mfpmath=sse -O3)
+target_include_directories(test_gsmem PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/sdk ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME gsmem COMMAND test_gsmem)
+
+# SMAA's lookup textures computed at start (src/gs/smaa_tables.h): the bytes of SMAA's own tables
+add_executable(test_aa_tables tests/test_aa_tables.c)
+target_compile_options(test_aa_tables PRIVATE -std=gnu11 -msse2 -mfpmath=sse -ffp-contract=off)
+target_link_libraries(test_aa_tables PRIVATE m)
+add_test(NAME aa_tables COMMAND test_aa_tables)
+
+# checked file reading (include/pc_parse.h): PRS against the game's decoder, crafted AFS tables, .cvxm
+# models, DDS / PNG headers, message tables, language parts and start-kit scripts
+add_executable(test_parsers tests/test_parsers.c src/host/parse.c glue/script_rules.c)
+target_compile_options(test_parsers PRIVATE -std=gnu11)
+target_link_libraries(test_parsers PRIVATE m)
+add_test(NAME parsers COMMAND test_parsers)
+
 # "You appear as" list (pc/src/host/actors.c): event doubles hidden, indices kept
 add_executable(test_appear tests/test_appear.c src/host/actors.c)
 add_test(NAME appear COMMAND test_appear)
@@ -453,7 +478,40 @@ add_test(NAME renderer_snapshot COMMAND test_renderer_snapshot)
 add_executable(test_renderer_snapshot_codec tests/test_renderer_snapshot_codec.c)
 target_include_directories(test_renderer_snapshot_codec PRIVATE src)
 add_test(NAME renderer_snapshot_codec COMMAND test_renderer_snapshot_codec)
-set(AUDIO_SNAPSHOT_SOURCES src/audio/adx.c src/audio/snd_synth.c src/audio/snd_iop.c src/ps2/sif.c)
+# cutscene cast and voice-line randomizer (pc/src/host/cast.c, voices.c)
+add_executable(test_cast tests/test_cast.c src/host/cast.c src/host/voices.c src/host/actors.c glue/script_rules.c)
+target_compile_options(test_cast PRIVATE -std=gnu11)
+add_test(NAME cast COMMAND test_cast)
+
+# extra item boxes, blue herb planters and typewriter placements (pc/src/host/placer.c, extras.c)
+add_executable(test_placer tests/test_placer.c src/host/placer.c src/host/extras.c src/host/fileio.c)
+target_compile_options(test_placer PRIVATE -std=gnu11)
+target_link_libraries(test_placer PRIVATE m)
+add_test(NAME placer COMMAND test_placer)
+
+# BioRand options / seed string encoder-decoder (pc/src/host/biorand_opts.c)
+add_executable(test_biorand_opts tests/test_biorand_opts.c src/host/biorand_opts.c)
+target_compile_options(test_biorand_opts PRIVATE -std=gnu11)
+target_link_libraries(test_biorand_opts PRIVATE m)
+add_test(NAME biorand_opts COMMAND test_biorand_opts)
+
+# BioRand spoiler log parser (pc/src/host/spoiler.c)
+add_executable(test_spoiler tests/test_spoiler.c src/host/spoiler.c)
+target_compile_options(test_spoiler PRIVATE -std=gnu11)
+add_test(NAME spoiler COMMAND test_spoiler)
+
+# Outbreak File #2 & language disc import (pc/src/import/*)
+add_executable(test_import tests/test_import.c src/import/impmodel.c src/import/ob2.c src/import/import.c src/import/lang.c src/host/glyphs.c src/host/actors.c src/host/fileio.c src/host/parse.c)
+target_compile_options(test_import PRIVATE -std=gnu11)
+target_link_libraries(test_import PRIVATE SDL3::SDL3 m)
+add_test(NAME import COMMAND test_import ${CMAKE_CURRENT_BINARY_DIR})
+
+# Language fonts, Arabic shaping, CJK wrapping, and translation table (pc/src/host/glyphs.c, tr.c, tr_table.inc)
+add_executable(test_lang tests/test_lang.c src/host/glyphs.c src/host/tr.c ${RECVX_RES})
+target_compile_options(test_lang PRIVATE -std=gnu11)
+add_test(NAME lang COMMAND test_lang)
+
+set(AUDIO_SNAPSHOT_SOURCES src/audio/adx.c src/audio/snd_synth.c src/audio/snd_iop.c src/ps2/sif.c src/host/parse.c)
 add_executable(test_audio_snapshot tests/test_audio_snapshot.c src/audio/audio.c ${AUDIO_SNAPSHOT_SOURCES})
 add_executable(test_audio_snapshot_decoder tests/test_audio_snapshot_decoder.c ${AUDIO_SNAPSHOT_SOURCES})
 add_executable(test_audio_snapshot_synth tests/test_audio_snapshot_synth.c)

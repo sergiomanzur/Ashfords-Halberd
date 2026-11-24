@@ -5,6 +5,7 @@
 set(NOT_IN_TABLE
     tps_key      # CONTROLS bindings, "Third person on/off" (bindings.c, its first keyboard slot)
     borderless_extra   # ini only: the Windows borderless window's overhang past the monitor (settings.c), a driver workaround
+    dyn_res      # ini only: Internal resolution Auto drops when a slow GPU cannot keep the display rate (gs_gl.c drs_update)
     settings_preset   # Experience preset rows delegate their marker and validation to presets.c
 )
 file(READ "${SRC}/src/host/config.c" config)
