@@ -106,28 +106,42 @@ by construction.
 Android binaries are PIE with mandatory ASLR, so the image cannot be
 linked low. The mechanism is therefore:
 
-- **Game data window**: keep the identity layout by moving the game's
-  data/bss *image* into the mmap'd window at `0x30000000` (measured
-  viable on the RP6). Build the decomp + platform game state as a
-  separate linked data image with a build-generated relocation table;
-  at startup a small loader maps the window, copies the data image in,
-  and applies its relocations against the window base. Code stays in the
-  PIE at high addresses — only data needs window identity. This
-  generalizes the existing build-time manifest tooling (the PE-specific
-  `snapshot_manifest.py` gains an ELF/arm64 mode) rather than
-  mass-rewriting statics.
+- **Game data window**: keep the identity layout by loading the game as
+  its own library into the mmap'd window at `0x30000000` (measured
+  viable on the RP6). The decomp + glue build as `librecvx_game.so`
+  with a linker script: the game data/bss segment is placed first
+  (landing in `[0x30000000, 0x40000000)`), the code segment follows
+  (landing in `[0x40000000, 0x50000000)`, still below 32 bits so code
+  pointers stored in 32-bit fields survive). At startup the host
+  reserves the address range and loads the library with bionic's
+  `android_dlopen_ext` + `ANDROID_DLEXT_RESERVED_ADDRESS_RANGE` — the
+  system linker performs every relocation against our chosen base, so
+  every static and every function lands at a deterministic low address
+  and the `(int)&x | 0x30000000` idioms, DMA tags and manifest regions
+  all keep working unchanged. This generalizes the existing build-time
+  manifest tooling (the PE-specific `snapshot_manifest.py` gains an
+  ELF/arm64 mode) rather than mass-rewriting statics. A dedicated probe
+  verifies reserved-range loading on real devices before the full build
+  depends on it; the recorded fallback if a device rejects it is a small
+  custom segment-relocation loader over the same layout.
 - **Host pool**: host allocations whose addresses enter 32-bit fields
-  (DMA chain buffers, packet builders, snapshot regions) come from a
-  dedicated pool mmap'd at `0x50000000` (measured viable) — above the
-  game window, below the scratchpad, inside 31 bits. This gives one
-  coherent Android address map:
-  `[0x30000000, 0x40000000)` game window / PS2 identities (unchanged
-  semantics); `[0x50000000, 0x70000000)` host pool (today the x86 heap
-  happens to sit there by link luck; Android allocates it explicitly);
-  `0x70000000+` scratchpad; everything else high and never stored in
-  32-bit fields. `ps2_dma_ptr` and `memory.c`'s allocation guards are
-  updated to encode exactly this map, so misclassification cannot pass
-  silently.
+  (the DMA heap behind `ps2_dma_alloc`/`lang_glue.c`, packet buffers,
+  snapshot regions) come from a second reservation mmap'd at
+  `0x50000000` (measured viable) — above the game window, below the
+  scratchpad, inside 31 bits. This is mandatory, not hygiene: on arm64
+  `mmap(NULL)` returns addresses at or above 4 GB, and the port stores
+  the DMA heap base in a `uint32_t` (`dma_host[].base` in memory.c),
+  which would silently truncate. The pool gives one coherent Android
+  address map: `[0x30000000, 0x40000000)` game data window (unchanged
+  semantics); `[0x40000000, 0x50000000)` game code range;
+  `[0x50000000, 0x70000000)` host pool (today the x86 heap happens to
+  sit at equivalent low addresses by link luck; Android allocates it
+  explicitly); `0x70000000+` scratchpad; everything else high and never
+  stored in 32-bit fields. `ps2_dma_ptr`, `memory.c`'s allocation
+  guard, and `kernel.c`'s INTC-handler snapshot validation (code
+  pointers today must lie in `0x30000000..0x40000000`; on Android they
+  lie in the game code range) are updated to encode exactly this map,
+  so misclassification cannot pass silently.
 
 Implementation shape:
 
@@ -138,11 +152,14 @@ Implementation shape:
   pointer is widened to host width via the established
   `#ifdef TARGET_PC` patch mechanism, or routed through a low trampoline
   slot — decided per-site by the inventory, recorded with evidence.
-- An early milestone **spike**: build the decomp for arm64 with the
-  data-image loader and boot the New Game opening on the RP6, before the
-  renderer/packaging work. Fallback if segment-relocation loading proves
-  unworkable at a specific site: per-site migration of that object into
-  the window (the offline.patch pattern), not a wholesale redesign.
+- An early milestone **probe + spike**: verify `android_dlopen_ext`
+  reserved-range loading on the RP6 with a trivial library, then boot
+  the arm64 New Game opening once the renderer plan lands. Fallback if
+  reserved-range loading proves unworkable on a target device: a small
+  custom segment-relocation loader over the same linker-script layout;
+  if a specific data object defeats both: per-site migration of that
+  object into the window (the offline.patch pattern), not a wholesale
+  redesign.
 - Lift the `CMAKE_SIZEOF_VOID_P == 4` fatal guard behind the Android
   mode only; all other configurations keep the guard.
 - Clang layout parity: replace the reliance on GCC's 32-byte array
@@ -331,12 +348,14 @@ required subsystem, not an afterthought:
 
 - GLES 3.2 (not Vulkan, not ANGLE) as the Android GL path.
 - arm64-v8a only; `minSdk 26`.
-- The 64-bit memory mechanism: game data image loaded into the mmap'd
-  `0x30000000` window via a build-generated relocation table + small
-  runtime loader; host pool at `0x50000000`; code stays in the PIE.
-  Chosen over mass per-site static migration (the offline.patch pattern
-  reserved as per-site fallback) because it preserves the identity layout
-  the snapshot manifest, disc relocations and DMA tags all depend on.
+- The 64-bit memory mechanism: the game links as `librecvx_game.so`
+  with a window linker script and loads into a reservation at
+  `0x30000000` via `android_dlopen_ext` (bionic does the relocations);
+  game code lands in `[0x40000000, 0x50000000)`; the DMA-heap host pool
+  is a second reservation at `0x50000000`. Chosen over mass per-site
+  static migration (the offline.patch pattern reserved as per-site
+  fallback) because it preserves the identity layout the snapshot
+  manifest, disc relocations and DMA tags all depend on.
 - Windows auto-update applies **in-place from the running exe**
   (rename-running-image, staged swap, relaunch, cleanup on next start) —
   no new bootstrapper process and no change to the startup flow. Android
