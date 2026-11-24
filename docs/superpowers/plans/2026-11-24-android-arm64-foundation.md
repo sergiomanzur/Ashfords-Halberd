@@ -59,10 +59,10 @@
 - Create: `local/spikes/android-dlext-probe/probe.c`, `local/spikes/android-dlext-probe/lib.c` (throwaway, untracked — same convention as the mmap probe; the durable outcome is recorded in Task notes and drives Task 6)
 
 **Interfaces:**
-- Produces: a device-verified yes/no for `ANDROID_DLEXT_RESERVED_ADDRESS_RANGE` on the RP6. If NO: stop and escalate to the architect before Task 5/6 — the design's recorded fallback (custom segment-relocation loader) is a different build.
+- Produces: a device-verified yes/no for `ANDROID_DLEXT_RESERVED_ADDRESS` on the RP6. If NO: stop and escalate to the architect before Task 5/6 — the design's recorded fallback (custom segment-relocation loader) is a different build.
 
 - [ ] **Step 1: Write a trivial library `libprobe.so`** exporting one function and one initialized global; build it arm64 with the NDK and a linker script putting its data at a fixed low segment offset (a miniature of the Task 5 layout).
-- [ ] **Step 2: Write `probe.c`** — mmap `MAP_FIXED_NOREPLACE` a reservation, `android_dlopen_ext` the library into it with `ANDROID_DLEXT_RESERVED_ADDRESS_RANGE`, then assert: dlopen handle non-NULL; `dladdr(func)` and the global's address both inside the reservation at the expected offsets; calling the function returns its sentinel.
+- [ ] **Step 2: Write `probe.c`** — mmap `MAP_FIXED_NOREPLACE` a reservation, `android_dlopen_ext` the library into it with `ANDROID_DLEXT_RESERVED_ADDRESS`, then assert: dlopen handle non-NULL; `dladdr(func)` and the global's address both inside the reservation at the expected offsets; calling the function returns its sentinel.
 - [ ] **Step 3: Run on the RP6** — push via adb, `chmod 755`, run. Expected: all assertions pass and print `PROBE RESULT: RESERVED LOAD OK`. Record the output verbatim in task notes.
 - [ ] **Step 4: Record the spike outcome** — append one line to the plan's task (implementation notes) and, if it passed, proceed; there is nothing to commit (untracked scratch).
 
@@ -141,7 +141,7 @@
 
 - [ ] **Step 1: Write `test_window_load.c`** (Android-only build) — asserts: `ashford_window_init()==0`; `dladdr` of the dlsym'd `Ps2_malloc_mem` inside `[0x30000000,0x40000000)`; game `.so` program-header walk: data PT_LOAD inside the window, exec PT_LOAD inside the code range; pool alloc at each slot lands in `[0x50000000,0x70000000)` and its truncated `uint32_t` value equals the pointer's low 32 bits. Register ctest `window_load`.
 - [ ] **Step 2: Run on device — expect FAIL** — the loader doesn't exist yet; verify the test reports FAIL honestly via the Task 3 runner.
-- [ ] **Step 3: Implement `window_load.c`** — two `MAP_FIXED_NOREPLACE` reservations with returned-address checks; `android_dlopen_ext(..., ANDROID_DLEXT_RESERVED_ADDRESS_RANGE)` over `ASHFORD_RESERVE_BASE/SIZE`; load-bias verification by symbol address (Review Focus #2); 256 MB bump pool with the 4-slot `ps2_dma_alloc` contract.
+- [ ] **Step 3: Implement `window_load.c`** — two `MAP_FIXED_NOREPLACE` reservations with returned-address checks; `android_dlopen_ext(..., ANDROID_DLEXT_RESERVED_ADDRESS)` over `ASHFORD_RESERVE_BASE/SIZE`; load-bias verification by symbol address (Review Focus #2); 256 MB bump pool with the 4-slot `ps2_dma_alloc` contract.
 - [ ] **Step 4: Run on device — expect PASS** — Run: `python tools/run-android-ctest.py --test window_load`. Expected: PASS.
 - [ ] **Step 5: Windows non-regression + commit** — Run: `tools/build-campaign.ps1 -PlatformTestsOnly`; expected green (files are Android-guarded). Message `feat(android): window loader with reserved-range game library`.
 

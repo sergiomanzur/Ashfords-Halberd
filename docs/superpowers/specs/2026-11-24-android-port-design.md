@@ -114,7 +114,7 @@ linked low. The mechanism is therefore:
   (landing in `[0x40000000, 0x50000000)`, still below 32 bits so code
   pointers stored in 32-bit fields survive). At startup the host
   reserves the address range and loads the library with bionic's
-  `android_dlopen_ext` + `ANDROID_DLEXT_RESERVED_ADDRESS_RANGE` — the
+  `android_dlopen_ext` + `ANDROID_DLEXT_RESERVED_ADDRESS` — the
   system linker performs every relocation against our chosen base, so
   every static and every function lands at a deterministic low address
   and the `(int)&x | 0x30000000` idioms, DMA tags and manifest regions
