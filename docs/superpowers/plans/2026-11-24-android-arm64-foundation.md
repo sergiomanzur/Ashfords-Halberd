@@ -15,7 +15,7 @@
 - Decommit pin unchanged: `upstream/recvx-campaign-decomp` at `4aac5133901da3821fe443b79d6cdd1e3b29e6da`; decomp edits only via `campaign/patches/offline.patch` additions (TARGET_PC ifdefs, idempotent `git apply`).
 - Dependency pins unchanged: SDL3 `release-3.4.16`, ImGui `v1.92.9b`, xxHash `v0.8.3`, bcdec `80859ed3b7afb1c527a2a99d70c61457bea72d0c`.
 - Android targets: `arm64-v8a` only, `minSdk 26`, NDK r26+ (installed: `26.2.11394342`), PIE (no `-no-pie`, no `-Ttext-segment`).
-- Address map constants (single source: `window_load.h`): window `[0x30000000,0x40000000)`, game code `[0x40000000,0x50000000)`, host pool `[0x50000000,0x70000000)` (256 MB reservation), scratchpad `0x70000000` size `0x4000` (existing `PS2_SPR_*`).
+- Address map constants (single source: `window_load.h`): window `[0x30000000,0x40000000)`, game code `[0x40000000,0x50000000)`, host pool guard range `[0x50000000,0x70000000)` — 256 MB actually reserved at `[0x50000000,0x60000000)` — scratchpad `0x70000000` size `0x4000` (existing `PS2_SPR_*`).
 - All fixed mappings use `MAP_FIXED_NOREPLACE` and verify the returned address; failure is fatal with a clear message, never a silent fallthrough.
 - The Windows x86 campaign build and its test suite must keep passing: after any task touching shared code, run `tools/build-campaign.ps1 -PlatformTestsOnly` (default WinLibs toolchain) and confirm green.
 - No retail data, no SDK headers, no network code in any package or test; the offline-identity contract (`tests/offline_identity_tests.py`) keeps passing unchanged in this plan.
@@ -47,7 +47,7 @@
 - [ ] **Step 1: Write `campaign/cmake/android-arm64.cmake`** — sets `ANDROID_ABI=arm64-v8a`, `ANDROID_PLATFORM=android-26`, then `include("${ANDROID_NDK}/build/cmake/android.toolchain.cmake")`; header comment documents GCC-layout parity being handled by explicit alignment (Task 8), not the compiler.
 - [ ] **Step 2: Write `tools/build-campaign-android.ps1`** — NDK discovery/validation (`<ndk>/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe` must exist), same decomp-pin check as `build-campaign.ps1`, `cmake -S <root> -B build/campaign-android -G Ninja -DASHFORD_CAMPAIGN=ON -DASHFORD_PLATFORM_TESTS_ONLY=ON -DCMAKE_TOOLCHAIN_FILE=campaign/cmake/android-arm64.cmake -DANDROID_NDK=<ndk>`, then `cmake --build`. No ctest call (host cannot execute arm64 tests; on-device runs are Task 3).
 - [ ] **Step 3: Run it and capture the failure modes** — Run: `./tools/build-campaign-android.ps1 -PlatformTestsOnly`. Expected: FAIL at the sizeof guard, then (after Step 4) at `-msse2 -mfpmath=sse` on arm64, then at `ashford_campaign_disc` (`windows.h`/`bcrypt`).
-- [ ] **Step 4: Guard each failure** — guard becomes `if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Android")` with the comment updated to name the windowed loader; the four test-flag sites (`vu`, `vu_portable`, `gsmem`, `aa_tables`) and the `recvx_game` compile options lose `-msse2 -mfpmath=sse` when `CMAKE_SYSTEM_NAME STREQUAL "Android"` (vu.c already guards SSE by architecture); `ashford_campaign_disc` compiles only off-Android, with a temporary `ashford_validate_disc` stub under `#ifdef __ANDROID__` in `campaign/pc/src/host/ashford_disc.cpp` returning "unavailable on this platform until Plan 2" (replaced by a real hash port in Plan 2).
+- [ ] **Step 4: Guard each failure** — guard becomes `if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Android")` with the comment updated to name the windowed loader; the `-msse2 -mfpmath=sse` options are dropped for Android at **six** sites: the four test targets (`vu`, `vu_portable`, `gsmem`, `aa_tables`), the `recvx_game` compile options, and **`recvx_platform`'s compile options (pc/CMakeLists.txt:153 — built even in tests-only mode, so this is the first site the build actually hits)** (vu.c already guards SSE by architecture); `ashford_campaign_disc` compiles only off-Android, **and the `test_ashford_disc` target (pc/CMakeLists.txt:234-237, links bcrypt) is excluded from Android builds entirely**, with a temporary `ashford_validate_disc` stub under `#ifdef __ANDROID__` in `campaign/pc/src/host/ashford_disc.cpp` returning "unavailable on this platform until Plan 2" (replaced by a real hash port in Plan 2).
 - [ ] **Step 5: Verify the cross-compile** — Run: `./tools/build-campaign-android.ps1 -PlatformTestsOnly`. Expected: configure+build green; `llvm-readelf -h build/campaign-android/campaign/pc/test_vu_portable` shows `Machine: AArch64`.
 - [ ] **Step 6: Verify Windows non-regression** — Run: `tools/build-campaign.ps1 -PlatformTestsOnly`. Expected: green (guard changes must not touch the x86 path's behavior).
 - [ ] **Step 7: Commit** — `git add` the four files; message `feat(android): arm64 NDK toolchain and tests-only cross-compile`.
@@ -92,7 +92,7 @@
 
 - [ ] **Step 1: Extend the runner's default list and run the full portable set** — Expected: a bounded failure list; classify each as compile-time (missing header/API) or runtime (behavior).
 - [ ] **Step 2: Fix each failure at its root** — bionic lacks `execinfo.h` (use `<unwind.h>` under `__ANDROID__`); the rest are the POSIX dual-paths already present in `test_fileio`/`test_snapshot_core` (`MAP_FIXED` at `0x31000000` — verified viable by the mmap probe) plus whatever the run surfaces. No `#ifdef __ANDROID__` may alter the Windows/Linux branches.
-- [ ] **Step 3: Full portable suite green on device** — Run: `python tools/run-android-ctest.py --build-dir build/campaign-android`. Expected: all PASS/SKIP, runner exits 0. Record the final list in the task notes.
+- [ ] **Step 3: Full portable suite green on device** — Run: `python tools/run-android-ctest.py --build-dir build/campaign-android`. Expected: all PASS/SKIP, runner exits 0 — **or every failure carries a recorded disposition** (must-fix if platform-layer related; deferred with reason if it fails only for Android-Java-lifecycle/SDL-init reasons no headless test can satisfy, mirroring Task 10's rule; never silently dropped). Record the final list and dispositions in the task notes.
 - [ ] **Step 4: Windows non-regression** — Run: `tools/build-campaign.ps1 -PlatformTestsOnly`. Expected: green.
 - [ ] **Step 5: Commit** — message `feat(android): portable test suite green on arm64 device`.
 
@@ -101,7 +101,7 @@
 **Files:**
 - Create: `campaign/cmake/android-window.ld`
 - Modify: `campaign/pc/CMakeLists.txt` (Android target: `recvx_game`+glue as a shared library; platform stays out)
-- Modify: `campaign/CMakeLists.txt` (Android full-build mode: skip the PE-only POST_BUILD; keep patch+pin checks)
+- Modify: `campaign/CMakeLists.txt` (Android full-build mode: keep patch+pin checks). The PE-only snapshot-manifest POST_BUILD lives at `campaign/pc/CMakeLists.txt:202-206` and is already `WIN32`-gated — Android skips it automatically; no work there beyond confirming the gate.
 
 **Interfaces:**
 - Consumes: `GAME_SOURCES` + `GLUE_SOURCES` glob lists (unchanged), `pc_prelude.h` force-include (unchanged).
@@ -136,7 +136,7 @@
   void* ashford_pool_alloc(int slot, uint32_t len); /* one block per slot, replaces the slot's last; NULL outside the pool */
   void  ashford_pool_free(int slot);
   ```
-  Failure contract: every failure is fatal with a message naming the range/API that failed (probe-verified behavior only; no silent fallbacks). Off-Android builds compile nothing from this pair (whole files guarded).
+  Failure contract: every failure is fatal with a message naming the range/API that failed (probe-verified behavior only; no silent fallbacks). Off-Android builds compile nothing from this pair (whole files guarded). Symbol resolution: the game `.so`'s undefined platform symbols (`pc_*`, `host_fatal`, SDL-backed hooks) resolve from the loading process — so the on-device test harness links with `-rdynamic` (`--export-dynamic`) so bionic's dlopen can bind them; the Plan 2 app does the same via its normal exported surface.
 
 - [ ] **Step 1: Write `test_window_load.c`** (Android-only build) — asserts: `ashford_window_init()==0`; `dladdr` of the dlsym'd `Ps2_malloc_mem` inside `[0x30000000,0x40000000)`; game `.so` program-header walk: data PT_LOAD inside the window, exec PT_LOAD inside the code range; pool alloc at each slot lands in `[0x50000000,0x70000000)` and its truncated `uint32_t` value equals the pointer's low 32 bits. Register ctest `window_load`.
 - [ ] **Step 2: Run on device — expect FAIL** — the loader doesn't exist yet; verify the test reports FAIL honestly via the Task 3 runner.
@@ -168,7 +168,7 @@
 - Modify: `campaign/pc/tests/test_window_load.c` (alignment audit)
 
 **Interfaces:**
-- Produces: `ASHFORD_ALIGN32` (`__attribute__((aligned(32)))`) applied to every game buffer GCC's 32-byte rule currently covers implicitly; an audited symbol list (`Ps2_malloc_mem`, `Ps2_tex_mem`, `Ps2_PBUFF`, `Ps2_ot_list`, `tbuf`, `ene`, `EnemyInfo`, `RequestList`, plus each newly found symbol) asserted 32-byte aligned on device.
+- Produces: `ASHFORD_ALIGN32` (`__attribute__((aligned(32)))`) applied to every game buffer GCC's 32-byte rule currently covers implicitly; an audited symbol list (`Ps2_malloc_mem`, `Ps2_tex_mem`, `Ps2_PBUFF`, `Ps2_ot_list`, `tbuf`, `ene`, `EnemyInfo`, `RequestList`, plus each newly found symbol) asserted 32-byte aligned on device. Spec note: the spec's "compile-time offset asserts" sub-element is superseded by this stronger on-device per-symbol alignment audit (runtime truth beats a host-side static check that cannot see the loaded `.so` layout); the supersession is recorded here.
 
 - [ ] **Step 1: Add the failing alignment audit** — for each audited symbol (dlsym'd), assert `(addr & 31) == 0`. Run on device. Expected: FAIL on at least one GCC-implicitly-aligned buffer (the mingw toolchain comment predicts them); the failing set is this task's work list.
 - [ ] **Step 2: Fix each failing buffer via offline.patch** — append idempotent hunks adding explicit alignment (default visibility of the symbols is unchanged); re-apply patch check is the configure step's job (`apply-campaign-patch.py` reverses cleanly only when applied).
