@@ -146,12 +146,16 @@ linked low. The mechanism is therefore:
 Implementation shape:
 
 - A one-time **pointer-field inventory** of every 32-bit field receiving
-  a pointer, now including **code pointers** (function-pointer tables in
-  game data): PC survives them only because PC code also lives under
-  `0x40000000`; Android code will not. Any field found holding a code
-  pointer is widened to host width via the established
-  `#ifdef TARGET_PC` patch mechanism, or routed through a low trampoline
-  slot — decided per-site by the inventory, recorded with evidence.
+  a pointer, now including **code pointers**: with the reserved-range
+  mechanism, both game data and game code are inside 32-bit-friendly
+  ranges by construction, so the inventory's deliverable is a
+  checked-in audit confirming no site can receive a pointer from
+  outside the reserved map (decomp+glue statics and functions; host
+  pool; scratchpad; IOP RAM) — any site that cannot be shown safe is
+  widened or re-pointed per-site via the established `#ifdef TARGET_PC`
+  patch mechanism. The inventory ships with a runtime debug-mode trap
+  at the `ps2_dma_ptr`/DMA choke points that halts on any address
+  outside the known map, so misclassification cannot pass silently.
 - An early milestone **probe + spike**: verify `android_dlopen_ext`
   reserved-range loading on the RP6 with a trivial library, then boot
   the arm64 New Game opening once the renderer plan lands. Fallback if
