@@ -43,4 +43,11 @@ try {
     if ($ConfigureOnly) { return }
     & $campaignCMake --build $campaignBuild --parallel $Jobs
     if ($LASTEXITCODE) { throw 'Android campaign build failed.' }
+
+    # Run the on-device test suite.
+    $runner = Join-Path $PSScriptRoot 'run-android-ctest.py'
+    $runnerArgs = @($runner, '--build-dir', $campaignBuild)
+    if ($Serial) { $runnerArgs += @('--serial', $Serial) }
+    & python @runnerArgs
+    if ($LASTEXITCODE) { throw 'On-device ctest run reported failures.' }
 } finally { $env:ANDROID_NDK = $envOldAndroidNdk }
