@@ -37,7 +37,8 @@
 **Files:**
 - Create: `campaign/cmake/android-arm64.cmake`
 - Modify: `campaign/CMakeLists.txt:5-10` (sizeof guard)
-- Modify: `campaign/pc/CMakeLists.txt` (guard x86-only flags; guard `ashford_campaign_disc`)
+- Modify: `campaign/pc/CMakeLists.txt` (guard x86-only flags; guard `ashford_campaign_disc` and `test_ashford_disc`)
+- Modify: `campaign/pc/src/host/ashford_disc.cpp` (Android stub of `ashford_validate_disc`)
 - Create: `tools/build-campaign-android.ps1`
 
 **Interfaces:**
@@ -50,7 +51,7 @@
 - [ ] **Step 4: Guard each failure** — guard becomes `if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Android")` with the comment updated to name the windowed loader; the `-msse2 -mfpmath=sse` options are dropped for Android at **six** sites: the four test targets (`vu`, `vu_portable`, `gsmem`, `aa_tables`), the `recvx_game` compile options, and **`recvx_platform`'s compile options (pc/CMakeLists.txt:153 — built even in tests-only mode, so this is the first site the build actually hits)** (vu.c already guards SSE by architecture); `ashford_campaign_disc` compiles only off-Android, **and the `test_ashford_disc` target (pc/CMakeLists.txt:234-237, links bcrypt) is excluded from Android builds entirely**, with a temporary `ashford_validate_disc` stub under `#ifdef __ANDROID__` in `campaign/pc/src/host/ashford_disc.cpp` returning "unavailable on this platform until Plan 2" (replaced by a real hash port in Plan 2).
 - [ ] **Step 5: Verify the cross-compile** — Run: `./tools/build-campaign-android.ps1 -PlatformTestsOnly`. Expected: configure+build green; `llvm-readelf -h build/campaign-android/campaign/pc/test_vu_portable` shows `Machine: AArch64`.
 - [ ] **Step 6: Verify Windows non-regression** — Run: `tools/build-campaign.ps1 -PlatformTestsOnly`. Expected: green (guard changes must not touch the x86 path's behavior).
-- [ ] **Step 7: Commit** — `git add` the four files; message `feat(android): arm64 NDK toolchain and tests-only cross-compile`.
+- [ ] **Step 7: Commit** — `git add` the five files; message `feat(android): arm64 NDK toolchain and tests-only cross-compile`.
 
 ### Task 2: android_dlopen_ext reserved-range probe (mechanism gate)
 
