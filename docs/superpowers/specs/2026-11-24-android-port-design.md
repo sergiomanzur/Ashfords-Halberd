@@ -320,10 +320,10 @@ required subsystem, not an afterthought:
   from the user's ISO, New Game opening 2400-frame run via touch and via
   built-in gamepad, settings changes persist, all video settings visibly
   function, saves round-trip, and both updaters update from a fixture
-  release. **S24 Ultra acceptance is pending a user answer** on device
-  availability: if the user can supply it, on-device acceptance runs
-  there too; if not, Adreno 750 acceptance is capability-based (like
-  Mali) rather than pretending a device was verified. Full campaign
+  release. The user owns an S24 Ultra (not connected at design time; to
+  be connected for on-device acceptance), so Adreno 750 is verified on
+  real hardware like the RP6 — only Mali remains capability-based until a
+  device is available. Full campaign
   completion remains a playthrough claim beyond automated gates, same as
   PC.
 
@@ -343,11 +343,12 @@ required subsystem, not an afterthought:
   asks with one tap because the OS forces a confirmation anyway.
 - Android lifecycle: full GL re-init on surface/context loss + auto-
   quicksave on `onPause`; an OS-killed session resumes from the last
-  pause quicksave, not mid-frame.
+  pause quicksave, not mid-frame (user-confirmed behavior).
 - Parity is proven by GS command-stream equality plus tolerant raster
   comparison (criteria above), not cross-GPU byte-exact dumps.
-- 60 fps on RP6 is a measured target; the NEON contingency requires
-  explicit user authorization and cannot be spent silently.
+- 60 fps on RP6 is a measured target; NEON VU work stays a non-goal —
+  the user confirmed it is authorized only by an explicit later decision,
+  never spent silently to chase the target.
 - ISO imported once via SAF into app-private storage (no persistent SAF
   permission juggling, no external-storage requirement).
 - Touch overlay rendered with ImGui in the shared style layer.
