@@ -7,6 +7,9 @@
 *.bin
 *.BIN
 __pycache__/
+/.superpowers/
+/.zcode/
+/.swarm/
 .pytest_cache/
 /.codex-remote-attachments/
 /scratch/
