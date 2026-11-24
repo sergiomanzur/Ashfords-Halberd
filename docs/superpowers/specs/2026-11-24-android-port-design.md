@@ -62,9 +62,11 @@ both menus, and both apps keep themselves current from GitHub Releases.
 ## Measured facts (spike, 2026-11-24, Retroid Pocket 6)
 
 - `mmap(MAP_FIXED_NOREPLACE)` at `0x30000000` (256 MB), `0x10000000`
-  (256 MB) and `0x70000000` (16 MB) all succeed and are writable; a plain
-  address hint at `0x30000000` is honored; `mmap_min_addr` is 32 KB.
-  **The identity-mapped PS2 memory window is viable on arm64 Android.**
+  (256 MB), `0x50000000` (64 MB) and `0x70000000` (16 MB) all succeed and
+  are writable; a plain address hint at `0x30000000` is honored;
+  `mmap_min_addr` is 32 KB.
+  **The identity-mapped game window at `0x30000000` and the host pool at
+  `0x50000000` are both viable on arm64 Android.**
   Probe: `local/spikes/android-mmap-probe/probe.c` (throwaway, untracked).
 - OpenGL ES 3.2 (Adreno 740). S24 Ultra (Adreno 750) and recent Mali
   G-series also support GLES 3.2 + `EXT_color_buffer_float`.
@@ -90,41 +92,66 @@ are impossible on Android regardless).
 
 ### Memory model (the core 64-bit change)
 
-The decomp's 32-bit contract splits into two pointer populations:
+On PC the identity trick is total: the whole executable is linked at image
+base `0x30000000`, and **all game working memory is the image's own
+`.data`/`.bss`** — the room arena, texture heap, spawn pool, the entire
+256 MB window (memory.c asserts statics end below `0x40000000`, and even
+contains a runtime probe that a platform static carries the `0x30000000`
+bit). Disc pointers are relocated in place into that window, `dma.c`
+stores window/heap addresses into 32-bit DMA tags, and the quicksave
+manifest enumerates statics by fixed address from the post-link image.
+This is not "a few host allocations"; the decomp's statics are dual-natured
+by construction.
 
-- **EE-space identities** — pointers into PS2 memory (disc data pointers,
-  scratchpad, uncached aliases). Keep the existing identity trick: mmap the
-  PS2 regions at their literal addresses with `MAP_FIXED_NOREPLACE`
-  (measured viable). A startup check verifies each mapping landed at its
-  requested address and fails loudly with a clear message if a future
-  device/kernel refuses.
-- **Host-space pointers stored in 32-bit fields** (DMA tags, packet
-  builders, snapshot regions; today valid because the x86 exe is linked at
-  image base `0x30000000`). On Android every binary is PIE and ASLR is
-  mandatory, so the exe cannot be linked low. Instead: a dedicated **low
-  host pool**, mmap'd at `0x10000000` (measured viable), owned by
-  `ps2/memory.c`, from which every host allocation whose address is stored
-  into a 32-bit field is allocated.
+Android binaries are PIE with mandatory ASLR, so the image cannot be
+linked low. The mechanism is therefore:
+
+- **Game data window**: keep the identity layout by moving the game's
+  data/bss *image* into the mmap'd window at `0x30000000` (measured
+  viable on the RP6). Build the decomp + platform game state as a
+  separate linked data image with a build-generated relocation table;
+  at startup a small loader maps the window, copies the data image in,
+  and applies its relocations against the window base. Code stays in the
+  PIE at high addresses — only data needs window identity. This
+  generalizes the existing build-time manifest tooling (the PE-specific
+  `snapshot_manifest.py` gains an ELF/arm64 mode) rather than
+  mass-rewriting statics.
+- **Host pool**: host allocations whose addresses enter 32-bit fields
+  (DMA chain buffers, packet builders, snapshot regions) come from a
+  dedicated pool mmap'd at `0x50000000` (measured viable) — above the
+  game window, below the scratchpad, inside 31 bits. This gives one
+  coherent Android address map:
+  `[0x30000000, 0x40000000)` game window / PS2 identities (unchanged
+  semantics); `[0x50000000, 0x70000000)` host pool (today the x86 heap
+  happens to sit there by link luck; Android allocates it explicitly);
+  `0x70000000+` scratchpad; everything else high and never stored in
+  32-bit fields. `ps2_dma_ptr` and `memory.c`'s allocation guards are
+  updated to encode exactly this map, so misclassification cannot pass
+  silently.
 
 Implementation shape:
 
-- A one-time **pointer-field inventory** of every 32-bit field that receives
-  a host pointer (`pc/src/ps2/dma.c`, `gs/stream.c`, glue files, snapshot
-  code). Each site either switches its allocation to the low pool, or is
-  proven EE-space-only. The inventory is recorded as a checked-in audit
-  document with per-site evidence, plus a runtime debug-mode trap that
-  verifies no out-of-window pointer enters a 32-bit DMA field.
-- Lift the `CMAKE_SIZEOF_VOID_P == 4` fatal guard behind a new
-  `ASHFORD_ANDROID`/windowed-memory mode; the 32-bit guard stays for all
-  other configurations.
+- A one-time **pointer-field inventory** of every 32-bit field receiving
+  a pointer, now including **code pointers** (function-pointer tables in
+  game data): PC survives them only because PC code also lives under
+  `0x40000000`; Android code will not. Any field found holding a code
+  pointer is widened to host width via the established
+  `#ifdef TARGET_PC` patch mechanism, or routed through a low trampoline
+  slot — decided per-site by the inventory, recorded with evidence.
+- An early milestone **spike**: build the decomp for arm64 with the
+  data-image loader and boot the New Game opening on the RP6, before the
+  renderer/packaging work. Fallback if segment-relocation loading proves
+  unworkable at a specific site: per-site migration of that object into
+  the window (the offline.patch pattern), not a wholesale redesign.
+- Lift the `CMAKE_SIZEOF_VOID_P == 4` fatal guard behind the Android
+  mode only; all other configurations keep the guard.
 - Clang layout parity: replace the reliance on GCC's 32-byte array
-  alignment with explicit alignment attributes (via `pc_prelude.h`, which is
-  force-included into every decomp TU) plus compile-time offset asserts on
-  the affected packet/EE buffers, so the NDK's required Clang toolchain
-  produces the same layout GCC does.
-- If the inventory finds decomp statics whose addresses leak into 32-bit
-  fields, migrate those specific objects into the low pool through the
-  established `#ifdef TARGET_PC` patch mechanism (`offline.patch` pattern).
+  alignment with explicit alignment attributes (via `pc_prelude.h`,
+  force-included into every decomp TU) plus compile-time offset asserts,
+  so the NDK's required Clang toolchain reproduces GCC's layout.
+- A runtime debug-mode trap verifies no out-of-window pointer enters a
+  32-bit DMA field, and a startup check verifies every fixed mapping
+  landed at its requested address, failing loudly otherwise.
 
 ### Renderer
 
@@ -158,6 +185,27 @@ GLES 3.2 backend in the same `gs_gl.c`/`picture_shader.h` code paths:
   S24 Ultra's 1440p-class panel and the RP6's 1080p panel are both handled
   by the existing auto path.
 
+### Android lifecycle
+
+The PC build never faces GL context loss; Android does, and it is a
+required subsystem, not an afterthought:
+
+- **Backgrounding** destroys the EGL surface (often the context). The
+  render layer gains a re-init path: all GL objects become rebuildable
+  state — per-address framebuffer targets, native texture definitions,
+  HD-pack uploads — reconstructed from the GS memory model on resume,
+  which stays authoritative on the CPU side. This is verified by a test
+  that forces surface destruction mid-run and requires identical frames
+  before/after.
+- **`onPause` auto-quicksave**: when the system takes the app away
+  during player control, the existing quicksave system writes a safety
+  snapshot (respecting its existing restrictions; when quicksave is not
+  legal, only the re-init path protects the session).
+- **Process death**: recovery is via that auto-quicksave on next launch
+  — i.e., an OS kill resumes from the last pause point, not mid-frame.
+  This consequence is accepted as the Android behavior (the alternative,
+  surviving arbitrary process death mid-frame, is not feasible).
+
 ### Input and touch controls
 
 - Touch events (SDL3) feed a virtual gamepad overlay drawn with ImGui in the
@@ -185,11 +233,16 @@ GLES 3.2 backend in the same `gs_gl.c`/`picture_shader.h` code paths:
   timeout, pick the highest-version tagged release (betas included — they
   are the project's release line), compare against `ASHFORD_VERSION`.
   Failures never block play; the game stays fully playable offline.
-- **Windows**: check on every launcher open. If newer: download the
-  `AshfordsHalberd-Campaign-Windows-x86.zip` asset, verify the asset
-  digest from the release API, extract to a staged directory, swap the
-  install (the launcher performs this before spawning the game so no exe is
-  running), and restart into the new version automatically.
+- **Windows**: the launcher menu and game are one exe (there is no
+  separate launcher process), so the update applies **in-place from the
+  running exe**: check on every open (before/at the launcher menu); if
+  newer, download the `AshfordsHalberd-Campaign-Windows-x86.zip` asset,
+  verify the asset digest from the release API, extract to a staged
+  directory, rename the running exe (Windows permits renaming a running
+  image), swap the install tree (settings/saves live in the per-user
+  SDL pref dir, never in the install tree), and relaunch into the new
+  version automatically; the old image is cleaned up on next start. No
+  new bootstrapper process, no change to the user's startup flow.
 - **Android**: check on every app open (launcher/main menu). If newer APK
   asset: inline prompt `Install update 0.9.x?` → one tap → download with
   progress → package-installer intent. Requires the
@@ -226,8 +279,14 @@ GLES 3.2 backend in the same `gs_gl.c`/`picture_shader.h` code paths:
 - `scale=0` auto + `dyn_res` adapt to device load; the existing Performance
   Graph HUD measures on-device.
 - adb-driven benchmark smoke on RP6 and S24 Ultra records frame times for
-  the opening run; performance parity target: 60 fps sustained on RP6 at
-  auto scale with the Enhanced preset minus float targets if needed.
+  the opening run. **60 fps sustained on RP6 at auto scale with the
+  Enhanced preset is a measured target, not a hard acceptance gate**; if
+  on-device measurement lands below it, the plan's contingency ladder is
+  (1) lower auto-scale threshold, (2) targeted optimization of measured
+  hot spots, and only then (3) a NEON VU kernel for the measured hot
+  path — which reopens the no-NEON non-goal and requires explicit user
+  authorization. The performance spike runs early (before the full
+  memory-model investment) so this decision is evidence-based.
 
 ### Testing and acceptance
 
@@ -236,18 +295,35 @@ GLES 3.2 backend in the same `gs_gl.c`/`picture_shader.h` code paths:
 - Portable test binaries (`vu_portable`, `gsmem`, `bindings`, `parsers`,
   `presets`, ...) cross-compile for arm64 and run on the RP6 via an
   adb-driven ctest wrapper.
-- Frame-dump golden comparison: the existing `campaign-smoke` harness gains
-  an Android mode — `RECVX_DUMP_FRAMES` on device, pulled via adb, compared
-  against PC goldens for the opening scene across all video settings.
+- **Parity gate, defined**: byte-exact frame dumps across different GPUs
+  are not attainable (the determinism section of ARCHITECTURE.md already
+  notes retail stale reads that shift with layout). Parity is proven in
+  layers, each with a concrete pass criterion:
+  1. **GS command-stream equality** (primary automated gate): the
+     existing frame stream recorder (`gs/stream.c`) records the game's GS
+     command stream on PC and Android; the opening-scene streams must
+     match after removing stream-embedded host addresses. Divergence
+     triggers a targeted arm64 stale-read hunt before any other work.
+  2. **Raster comparison with tolerance**: `RECVX_DUMP_FRAMES` dumps on
+     device, pulled via adb, compared against PC goldens for the opening
+     scene across all video settings, passing when per-pixel deltas stay
+     within a recorded tolerance and perceptual/histogram metrics match;
+     the comparison tool and thresholds are a deliverable.
+  3. **Golden-byte checks stay on PC**, where the GPU and layout are
+     fixed; Android inherits correctness through layers 1–2.
 - Touch UI verification: scripted show/hide from all three menus, gameplay
   via injected touch, gamepad-connect auto-hide.
 - Updater verification: staged local release fixture (no live GitHub in
   tests) covering check, compare, download, swap/restart on Windows and
   prompt→install intent on Android.
-- Acceptance: the app installs on RP6 and S24 Ultra, boots from the user's
-  ISO, New Game opening 2400-frame run via touch and via built-in gamepad,
-  settings changes persist, all video settings visibly function, saves
-  round-trip, and both updaters update from a fixture release. Full campaign
+- Acceptance: the app installs and passes the layers above on RP6, boots
+  from the user's ISO, New Game opening 2400-frame run via touch and via
+  built-in gamepad, settings changes persist, all video settings visibly
+  function, saves round-trip, and both updaters update from a fixture
+  release. **S24 Ultra acceptance is pending a user answer** on device
+  availability: if the user can supply it, on-device acceptance runs
+  there too; if not, Adreno 750 acceptance is capability-based (like
+  Mali) rather than pretending a device was verified. Full campaign
   completion remains a playthrough claim beyond automated gates, same as
   PC.
 
@@ -255,9 +331,23 @@ GLES 3.2 backend in the same `gs_gl.c`/`picture_shader.h` code paths:
 
 - GLES 3.2 (not Vulkan, not ANGLE) as the Android GL path.
 - arm64-v8a only; `minSdk 26`.
-- Windows auto-update applies without asking (launcher-era swap), with the
-  update reported in the UI; Android asks with one tap because the OS
-  forces a confirmation anyway.
+- The 64-bit memory mechanism: game data image loaded into the mmap'd
+  `0x30000000` window via a build-generated relocation table + small
+  runtime loader; host pool at `0x50000000`; code stays in the PIE.
+  Chosen over mass per-site static migration (the offline.patch pattern
+  reserved as per-site fallback) because it preserves the identity layout
+  the snapshot manifest, disc relocations and DMA tags all depend on.
+- Windows auto-update applies **in-place from the running exe**
+  (rename-running-image, staged swap, relaunch, cleanup on next start) —
+  no new bootstrapper process and no change to the startup flow. Android
+  asks with one tap because the OS forces a confirmation anyway.
+- Android lifecycle: full GL re-init on surface/context loss + auto-
+  quicksave on `onPause`; an OS-killed session resumes from the last
+  pause quicksave, not mid-frame.
+- Parity is proven by GS command-stream equality plus tolerant raster
+  comparison (criteria above), not cross-GPU byte-exact dumps.
+- 60 fps on RP6 is a measured target; the NEON contingency requires
+  explicit user authorization and cannot be spent silently.
 - ISO imported once via SAF into app-private storage (no persistent SAF
   permission juggling, no external-storage requirement).
 - Touch overlay rendered with ImGui in the shared style layer.
@@ -267,12 +357,17 @@ GLES 3.2 backend in the same `gs_gl.c`/`picture_shader.h` code paths:
 
 ## Left to the builder
 
-- The pointer-field inventory itself (mechanism specified above; the sites
-  and their dispositions are findings to produce and record).
+- The pointer-field inventory itself (mechanism specified above; the
+  sites, including code-pointer fields, and their dispositions are
+  findings to produce and record).
+- The data-image loader's build tooling details (ELF relocation table
+  generation, arm64 manifest mode for `snapshot_manifest.py`).
 - Exact GLES capability fallback thresholds (which devices get float
   targets) tuned against the device matrix as evidence accumulates.
 - Touch layout details (button placement/size defaults) within the described
   shape, plus the touch automation hook design.
 - Gradle/NDK integration specifics for SDL3 FetchContent on Android.
-- Mali on-device verification is capability-based until a Mali device is
-  available; the design does not block on owning one.
+- The tolerance thresholds and comparison tool for the raster parity gate.
+- Mali (and S24 Ultra if unavailable) on-device verification is
+  capability-based until a device is available; the design does not block
+  on owning one.
