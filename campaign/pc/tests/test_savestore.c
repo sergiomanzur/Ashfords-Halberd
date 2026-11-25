@@ -18,12 +18,23 @@ static int test_remove(const char* path) { return remove(path) == 0 || errno == 
 static int test_mkdir(const char* path)
 {
     char tmp[512];
+    struct stat st;
+    if (!path || !path[0]) return 0;
     size_t len = strlen(path);
     if (len >= sizeof(tmp)) return 0;
     memcpy(tmp, path, len + 1);
+    while (len > 1 && tmp[len - 1] == '/') tmp[--len] = '\0';
     for (char* p = tmp + 1; *p; p++) {
-        if (*p == '/') { *p = '\0'; if (mkdir(tmp, 0770) < 0 && errno != EEXIST) return 0; *p = '/'; }
+        if (*p == '/') {
+            *p = '\0';
+            if (!(stat(tmp, &st) == 0 && S_ISDIR(st.st_mode))) {
+                if (mkdir(tmp, 0770) < 0 && errno != EEXIST && errno != EROFS && errno != EACCES)
+                    return 0;
+            }
+            *p = '/';
+        }
     }
+    if (stat(tmp, &st) == 0 && S_ISDIR(st.st_mode)) return 1;
     return mkdir(tmp, 0770) == 0 || errno == EEXIST;
 }
 static int test_get_path_info(const char* path, SDL_PathInfo* info)
@@ -40,7 +51,7 @@ static int test_enumerate(const char* path, SDL_EnumerateDirectoryCallback cb, v
     if (!d) return 0;
     while ((ent = readdir(d)) != NULL) {
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
-        if (cb(ud, path, ent->d_name) == SDL_ENUM_FAILURE) break;
+        if (cb(ud, path, ent->d_name) != SDL_ENUM_CONTINUE) break;
     }
     closedir(d);
     return 1;

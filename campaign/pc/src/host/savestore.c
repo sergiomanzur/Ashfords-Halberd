@@ -48,7 +48,7 @@ static int android_enumerate_directory(const char* path, SDL_EnumerateDirectoryC
     }
     while ((ent = readdir(d)) != NULL) {
         if (SDL_strcmp(ent->d_name, ".") == 0 || SDL_strcmp(ent->d_name, "..") == 0) continue;
-        if (cb(userdata, dirsep, ent->d_name) == SDL_ENUM_FAILURE) break;
+        if (cb(userdata, dirsep, ent->d_name) != SDL_ENUM_CONTINUE) break;
     }
     closedir(d);
     return 1;

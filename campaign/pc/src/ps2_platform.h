@@ -105,6 +105,9 @@ int  RemoveIntcHandler(int cause, int id);
 void  ps2_memory_init(void);
 void* ps2_dma_alloc(int slot, uint32_t len);
 void* ps2_dma_ptr(uint32_t addr);
+#if defined(__ANDROID__)
+void  ps2_dma_audit_refresh(void);
+#endif
 int   sceDmaSendN(void* chan, void* addr, int qwc);
 
 /* dma.c / vif.c / gs */

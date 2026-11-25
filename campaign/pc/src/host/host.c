@@ -214,6 +214,18 @@ static _Unwind_Reason_Code watchdog_bt_trace(struct _Unwind_Context* uc, void* u
     if (c->n < 64) c->frames[c->n++] = (void*)_Unwind_GetIP(uc);
     return c->n >= 64 ? _URC_END_OF_STACK : _URC_NO_REASON;
 }
+static void watchdog_write_all(int fd, const char* p, size_t n)
+{
+    while (n) { ssize_t k = write(fd, p, n); if (k <= 0) return; p += k; n -= (size_t)k; }
+}
+static char* watchdog_put_u(char* p, unsigned long v, unsigned base)
+{
+    char t[24];
+    int n = 0;
+    do t[n++] = "0123456789abcdef"[v % base]; while (v /= base);
+    while (n) *p++ = t[--n];
+    return p;
+}
 #endif
 /* debugging aid: RECVX_WATCHDOG=<seconds> prints a backtrace and exits (headless runs) */
 static void watchdog(int sig)
@@ -221,15 +233,22 @@ static void watchdog(int sig)
 #if defined(__ANDROID__)
     struct watchdog_bt_ctx ctx = { .n = 0 };
     _Unwind_Backtrace(watchdog_bt_trace, &ctx);
+    (void)sig;
+    watchdog_write_all(2, "watchdog: backtrace\n", 20);
+    for (int i = 0; i < ctx.n; i++) {
+        char line[64], *p = line;
+        *p++ = '#';
+        p = watchdog_put_u(p, (unsigned long)i, 10);
+        *p++ = ' '; *p++ = '0'; *p++ = 'x';
+        p = watchdog_put_u(p, (unsigned long)(uintptr_t)ctx.frames[i], 16);
+        *p++ = '\n';
+        watchdog_write_all(2, line, (size_t)(p - line));
+    }
 #else
     void* frames[64];
     int n = backtrace(frames, 64);
-#endif
     (void)sig;
     fprintf(stderr, "watchdog: backtrace\n");
-#if defined(__ANDROID__)
-    for (int i = 0; i < ctx.n; i++) fprintf(stderr, "#%d %p\n", i, ctx.frames[i]);
-#else
     backtrace_symbols_fd(frames, n, 2);
 #endif
     if (getenv("RECVX_PROFILE")) exit(3);   /* run atexit: profile dump */

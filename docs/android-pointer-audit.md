@@ -24,14 +24,14 @@ This document records the checked-in inventory of every 32-bit field or choke po
 - **`campaign/pc/glue/lang_glue.c:946-967`** (`0x30000000u..0x40000000u` checks on `sys->mes_sp`, `rom->mesp`, `sys->rdtp`) — Covered by **Game data window**; non-window host tables (`sys_mes_fixed[]`) are explicitly detected and rebuilt on snapshot restore.
 
 ### 2. EE DMA Channel Registers, Tag Chains, and Host Pool
-- **`campaign/pc/src/ps2/memory.c:128` (`dma_host[4].base`, `uint32_t`) & `ps2_dma_alloc()`** — **Fixed in Task 7**: on Android arm64, `mmap(NULL)` returns `>= 4 GiB` addresses which would truncate in `dma_host[].base`. Android delegates `ps2_dma_alloc()` to `ashford_pool_alloc()` in the **DMA host pool** `[0x50000000, 0x60000000)` and asserts `(uintptr_t)(uint32_t)(uintptr_t)p == (uintptr_t)p` (fatal otherwise).
+- **`campaign/pc/src/ps2/memory.c:199` (`dma_host[4].base`, `uint32_t`) & `ps2_dma_alloc()`** — **Fixed in Task 7**: on Android arm64, `mmap(NULL)` returns `>= 4 GiB` addresses which would truncate in `dma_host[].base`. Android delegates `ps2_dma_alloc()` to `ashford_pool_alloc()` in the **DMA host pool** `[0x50000000, 0x60000000)` and asserts `(uintptr_t)(uint32_t)(uintptr_t)p == (uintptr_t)p` (fatal otherwise).
 - **`campaign/pc/glue/lang_glue.c:419, 442, 604, 652`** — All four host-buffer DMA callers allocate through `ps2_dma_alloc()` -> covered by **DMA host pool** `[0x50000000, 0x60000000)`.
 - **`campaign/pc/src/ps2/dma.c:38-97` (`run_chain`, `tag[1]` 32-bit `ADDR`, `tadr`, `stack[2]`)** — Resolves every 32-bit address via `ps2_dma_ptr()`:
   - Active `dma_host[i]` slot -> **DMA host pool** `[0x50000000, 0x60000000)`.
   - `addr & 0x80000000` or `(addr & 0xF0000000) == 0x70000000` -> **PS2 scratchpad** `[0x70000000, 0x70004000)`.
   - `addr < 0x10000000` -> ORed with `0x30000000` into **Game data window** `[0x30000000, 0x40000000)`.
   - `0x30000000 <= addr < 0x40000000` -> identity in **Game data window**.
-- **`campaign/pc/src/ps2/dma.c:102-113` (`sceDmaSend`, `sceDmaSendN`) & `ps2_loadtim2.c:732` (`DPUT_D2_TADR((int)tags)`)**:
+- **`campaign/pc/src/ps2/dma.c:102-121` (`sceDmaSend`, `sceDmaSendN`) & `ps2_loadtim2.c:732` (`DPUT_D2_TADR((int)tags)`)**:
   - `ps2_NinjaCnk.c:2225, 2518, 2746, 3039` pass scratchpad `0xF0003E80` or `ulpP | 0x80000000` -> **PS2 scratchpad**.
   - `ps2_dummy.c:1981, 2768, 2776` pass `Ps2_PBUFF` / `shadow_head` / `shadow_tail` -> **Game data window**.
   - **`ps2_dummy.c:2806-2828` (`Ps2Vu0ProgSend`, `Ps2Vu1ProgSend`) -> `ps2_vu0sub0`, `ps2_vu1sub0`, `ps2_vu1sub1`** — **Audit finding, fixed in Task 7**: previously defined in `campaign/pc/src/ps2/stubs.c` (`recvx_platform`), which sits at a high 64-bit ASLR address on Android and would have truncated in `sceDmaSend()`. Moved on Android into `campaign/pc/src/ps2/vu_stubs_android.c` linked directly into `librecvx_game.so` (**Game data window** `[0x30000000, 0x40000000)`), verified by `test_window_load`.
@@ -44,10 +44,14 @@ This document records the checked-in inventory of every 32-bit field or choke po
 
 ### 4. Code Pointers (INTC Handlers & Snapshot Validation)
 - **`ps2_NaSystem.c:162` (`AddIntcHandler(2, vsync_func, 0)`)** — `vsync_func` is compiled into `librecvx_game.so` -> **Game code range** `[0x40000000, 0x50000000)`.
-- **`campaign/pc/src/ps2/kernel.c:203-222` (`snapshot_platform_validate`)** — **Fixed in Task 7**: on 64-bit (`UINTPTR_MAX > 0xFFFFFFFFu`), validates non-NULL INTC handler pointers against `[ASHFORD_CODE_BASE, ASHFORD_CODE_LIMIT)` (`[0x40000000, 0x50000000)`), rejecting both data-window pointers and high ASLR pointers. 32-bit builds retain `[0x30000000, 0x40000000)` unchanged.
+- **`campaign/pc/src/ps2/kernel.c:203-226` (`snapshot_platform_validate`)** — **Fixed in Task 7**: on 64-bit (`UINTPTR_MAX > 0xFFFFFFFFu`), validates non-NULL INTC handler pointers against `[ASHFORD_CODE_BASE, ASHFORD_CODE_LIMIT)` (`[0x40000000, 0x50000000)`), rejecting both data-window pointers and high ASLR pointers. 32-bit builds retain `[0x30000000, 0x40000000)` unchanged.
 
 ### 5. Snapshot Manifest Regions
 - **`campaign/pc/src/host/snapshot_core.c` (`SnapshotRegion { uint32_t address, size; }`)** — Every region address is in `[0x30000000, 0x40000000)` (**Game data window**), validated against both bounds and CRC32 before capture/restore.
+
+### 6. Struct-Punning & On-Disc 32-Bit Struct Overlays
+- **`sub1.c:2290-2336` (`ItemSort`)** — **Audit finding, fixed in Task 10**: cast `&st->pip[num1]` to `NJS_TEXNAME*` and accessed `->texaddr`, relying on 32-bit `offsetof(NJS_TEXNAME, texaddr) == 8` (`st->pip[num1 + 2]`). Under LP64 `void* filename` widens to 8 bytes (offset 12), corrupting inventory sorting and failing `test_reload`. Fixed under `TARGET_PC` in `campaign/patches/offline.patch` to index `st->pip[num1 + 2]` directly; all 42,720 reload cases pass on device.
+- **Plan 2 follow-up (on-disc binary overlays):** `binfunc.c`, `map.c`, `dread.c`, and `room.c` overlay C structs containing pointer members (`NJS_TEXNAME`, `NJS_TEXLIST`, `ROM_WORK`, `NJS_CNK_OBJECT`) directly onto 32-bit PS2 disc data loaded into `Ps2_malloc_mem`. Those sites do not run in Plan 1's headless suite and must be addressed when bringing up retail ISO boot in Plan 2.
 
 ## Runtime Debug Trap (`RECVX_DMA_MAP_AUDIT`)
 Setting `RECVX_DMA_MAP_AUDIT=1` enables a strict choke-point check in `ps2_dma_ptr()` (`campaign/pc/src/ps2/memory.c`) that halts via `host_fatal()` if any DMA address resolves outside the known Android map (game data window, game code range, active DMA host pool slot, or PS2 scratchpad). Together with the unconditional `> UINT32_MAX` guard in `sceDmaSend()` / `sceDmaSendN()`, out-of-window pointers cannot pass silently. Verified on device by `test_window_load`.

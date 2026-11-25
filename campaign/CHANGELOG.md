@@ -1,5 +1,14 @@
 # Ashford's Halberd changes
 
+## Unreleased — Android arm64 Foundation (2026-11-24)
+
+Added the native `arm64-v8a` Android backend foundation alongside the existing Windows x86 campaign (zero Windows regressions):
+
+- **Toolchain & on-device test runner:** Added `campaign/cmake/android-arm64.cmake` (NDK r26+, `arm64-v8a`, `minSdk 26`, 16 KiB max page size), `tools/build-campaign-android.ps1`, and `tools/run-android-ctest.py` (echoed exit-code verification over `adb` with explicit dispositions for Java-lifecycle-gated tests).
+- **Windowed memory model (`librecvx_game.so` + `window_load`):** Linked the decomp and glue as `librecvx_game.so` with `campaign/cmake/android-window.ld` (data/bss in `[0x30000000, 0x40000000)`, code in `[0x40000000, 0x50000000)`), loaded via `MAP_FIXED_NOREPLACE` + `android_dlopen_ext(ANDROID_DLEXT_RESERVED_ADDRESS)` in `campaign/pc/src/host/window_load.{h,c}` with a 256 MiB 4-slot DMA host pool in `[0x50000000, 0x60000000)`.
+- **64-bit memory/DMA/snapshot fixes:** Updated `memory.c`, `kernel.c`, and `dma.c` for Android segment auditing, DMA pool delegation, 64-bit INTC handler code-range validation, and the `RECVX_DMA_MAP_AUDIT` runtime trap; moved `ps2_vu0sub0`/`ps2_vu1sub0`/`ps2_vu1sub1` into `librecvx_game.so` (`vu_stubs_android.c`); fixed 64-bit `NJS_TEXNAME` offset punning in `sub1.c` `ItemSort()` via `offline.patch`; recorded the checked-in pointer inventory in `docs/android-pointer-audit.md`.
+- **Clang 32-byte alignment parity & ELF64 snapshot manifest:** Added `ASHFORD_ALIGN32` to 14 EE/DMA game buffers via `offline.patch` and extended `snapshot_manifest.py` with `--so` ELF64 patching wired as an Android `POST_BUILD` step, verified on the Retroid Pocket 6 (`38` passed, `0` failed, `6` Java-lifecycle skipped). See `docs/android-backend.md`.
+
 ## 0.9.3b Beta (2026-11-24)
 
 Complete offline single-player upstream sync through `recvx-enhanced-port` 0.8.0

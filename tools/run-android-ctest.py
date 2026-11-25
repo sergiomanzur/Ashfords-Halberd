@@ -67,6 +67,14 @@ GAME_SO_TESTS = {
 # Full-build tests appended automatically when librecvx_game.so is present in build_dir.
 FULL_BUILD_TESTS = [
     "window_load",
+    "rules",
+    "modern_glue",
+    "tps_pad",
+    "reload",
+    "quicksave",
+    "weapon_switch",
+    "movie_return",
+    "options_mouse",
 ]
 
 # Per-test arguments that ctest registers in campaign/pc/CMakeLists.txt.
@@ -123,6 +131,9 @@ def run_adb(adb, serial, cmd, **kwargs):
     if serial:
         prefix += ["-s", serial]
     full = prefix + cmd
+    if kwargs.get("text"):
+        kwargs.setdefault("encoding", "utf-8")
+        kwargs.setdefault("errors", "replace")
     return subprocess.run(full, **kwargs)
 
 
@@ -228,14 +239,19 @@ def run_test(adb, serial, build_dir, name, timeout):
     test_args = substitute_args(TEST_ARGS.get(name, []))
 
     start = time.monotonic()
-    result = run_adb(
-        adb,
-        serial,
-        shell_command(remote_dir, binary_name, timeout, test_args),
-        capture_output=True,
-        text=True,
-        timeout=timeout + 30,  # extra slack for adb itself
-    )
+    try:
+        result = run_adb(
+            adb,
+            serial,
+            shell_command(remote_dir, binary_name, timeout, test_args),
+            capture_output=True,
+            text=True,
+            timeout=timeout + 30,  # extra slack for adb itself
+        )
+    except subprocess.TimeoutExpired:
+        rm_targets = " ".join(shlex.quote(p) for p in [remote_path] + pushed_extras)
+        run_adb(adb, serial, ["shell", f"rm -f {rm_targets}"], capture_output=True)
+        return "FAIL", f"adb timeout ({timeout}s)"
     elapsed = time.monotonic() - start
 
     stdout = result.stdout or ""
@@ -284,6 +300,8 @@ def main(argv=None):
     parser.add_argument("--serial", default=None, help="adb serial (default: first device)")
     parser.add_argument("--test", action="append", dest="tests", help="Specific test name(s) to run")
     parser.add_argument("--list", action="store_true", help="List selected tests and exit")
+    parser.add_argument("--platform-tests-only", action="store_true",
+                        help="Run only PORTABLE_TESTS (ignore any stale librecvx_game.so in build-dir)")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="Per-test timeout in seconds")
     args = parser.parse_args(argv)
 
@@ -297,7 +315,7 @@ def main(argv=None):
         selected = args.tests
     else:
         selected = list(PORTABLE_TESTS)
-        if (build_dir / "campaign" / "pc" / "librecvx_game.so").exists():
+        if not args.platform_tests_only and (build_dir / "campaign" / "pc" / "librecvx_game.so").exists():
             for name in FULL_BUILD_TESTS:
                 if name not in selected:
                     selected.append(name)

@@ -160,6 +160,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Android")
     )
     target_link_options(recvx_game_so PRIVATE
         "LINKER:-T,${_android_window_ld}"
+        "-Wl,-O0"
         "-Wl,-z,max-page-size=16384"
         "-Wl,-z,norelro"
         "-Wl,-Bsymbolic"

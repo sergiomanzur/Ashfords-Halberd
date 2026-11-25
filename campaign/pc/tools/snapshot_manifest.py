@@ -113,6 +113,8 @@ def parse_lld_map(text: str, base: int = BASE) -> list[Region]:
         if not m_in:
             continue
         origin = m_in.group(1).strip()
+        if origin == '<internal>' and cur_output == '.rodata':
+            raise ValueError('merged <internal> .rodata detected; link librecvx_game.so with -Wl,-O0 to prevent cross-TU literal folding')
         if not allowed_origin(origin):
             continue
         addr = base + vma if vma < LIMIT - BASE else vma

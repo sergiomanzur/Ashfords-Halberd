@@ -80,6 +80,7 @@ static int resolve_game_lib_path(char* out, size_t out_cap)
 
 typedef struct {
     uintptr_t fbase;
+    uintptr_t probe_addr;
     int found;
     int data_segs;
     int exec_segs;
@@ -89,13 +90,25 @@ typedef struct {
     char error[256];
 } LoadVerifyCtx;
 
+static int phdr_contains_addr(const struct dl_phdr_info* info, uintptr_t addr)
+{
+    for (int i = 0; i < info->dlpi_phnum; i++) {
+        const ElfW(Phdr)* ph = &info->dlpi_phdr[i];
+        if (ph->p_type != PT_LOAD) continue;
+        uintptr_t lo = (uintptr_t)info->dlpi_addr + (uintptr_t)ph->p_vaddr;
+        uintptr_t hi = lo + (uintptr_t)ph->p_memsz;
+        if (addr >= lo && addr < hi) return 1;
+    }
+    return 0;
+}
+
 static int verify_loaded_phdrs(struct dl_phdr_info* info, size_t sz, void* ud)
 {
     LoadVerifyCtx* v = (LoadVerifyCtx*)ud;
     (void)sz;
     if ((uintptr_t)info->dlpi_addr != v->fbase)
         return 0;
-    if (!info->dlpi_name || !strstr(info->dlpi_name, "librecvx_game.so"))
+    if (!phdr_contains_addr(info, v->probe_addr))
         return 0;
 
     v->found = 1;
@@ -149,20 +162,22 @@ int ashford_window_init(void)
     void* game_res = mmap((void*)(uintptr_t)ASHFORD_RESERVE_BASE, ASHFORD_RESERVE_SIZE,
                           PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
     if (game_res != (void*)(uintptr_t)ASHFORD_RESERVE_BASE) {
+        const char* reason = (game_res == MAP_FAILED) ? strerror(errno) : "unexpected address";
         host_fatal("window_load: mmap(MAP_FIXED_NOREPLACE) failed for game reservation "
                    "[0x%08X, 0x%08X): got %p (%s)",
                    ASHFORD_RESERVE_BASE, ASHFORD_RESERVE_BASE + ASHFORD_RESERVE_SIZE,
-                   game_res, strerror(errno));
+                   game_res, reason);
     }
 
     /* 2. Reserve [0x50000000, 0x60000000) (256 MiB) for the DMA host pool. */
     void* pool_res = mmap((void*)(uintptr_t)ASHFORD_POOL_BASE, ASHFORD_POOL_RESERVE_SIZE,
                           PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
     if (pool_res != (void*)(uintptr_t)ASHFORD_POOL_BASE) {
+        const char* reason = (pool_res == MAP_FAILED) ? strerror(errno) : "unexpected address";
         host_fatal("window_load: mmap(MAP_FIXED_NOREPLACE) failed for DMA pool reservation "
                    "[0x%08X, 0x%08X): got %p (%s)",
                    ASHFORD_POOL_BASE, ASHFORD_POOL_BASE + ASHFORD_POOL_RESERVE_SIZE,
-                   pool_res, strerror(errno));
+                   pool_res, reason);
     }
     g_pool_ready = 1;
 
@@ -207,6 +222,7 @@ int ashford_window_init(void)
     LoadVerifyCtx verify;
     memset(&verify, 0, sizeof(verify));
     verify.fbase = (uintptr_t)dli.dli_fbase;
+    verify.probe_addr = probe_addr;
     dl_iterate_phdr(verify_loaded_phdrs, &verify);
     if (!verify.found)
         host_fatal("window_load: dl_iterate_phdr did not find librecvx_game.so at 0x%08X",

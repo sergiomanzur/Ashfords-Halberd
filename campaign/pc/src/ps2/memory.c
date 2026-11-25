@@ -39,6 +39,7 @@ Ps2FakeRegs ps2_regs;
 #if defined(__ANDROID__)
 typedef struct {
     uintptr_t fbase;
+    uintptr_t probe_addr;
     int found;
     uintptr_t end;
 } AndroidGameAudit;
@@ -48,7 +49,15 @@ static int android_audit_cb(struct dl_phdr_info* info, size_t sz, void* data)
     AndroidGameAudit* a = (AndroidGameAudit*)data;
     (void)sz;
     if ((uintptr_t)info->dlpi_addr != a->fbase) return 0;
-    if (!info->dlpi_name || !strstr(info->dlpi_name, "librecvx_game.so")) return 0;
+    int contains_probe = 0;
+    for (int i = 0; i < info->dlpi_phnum; i++) {
+        const ElfW(Phdr)* ph = &info->dlpi_phdr[i];
+        if (ph->p_type != PT_LOAD) continue;
+        uintptr_t lo = (uintptr_t)info->dlpi_addr + (uintptr_t)ph->p_vaddr;
+        uintptr_t hi = lo + (uintptr_t)ph->p_memsz;
+        if (a->probe_addr >= lo && a->probe_addr < hi) { contains_probe = 1; break; }
+    }
+    if (!contains_probe) return 0;
     a->found = 1;
     uintptr_t page = (uintptr_t)sysconf(_SC_PAGESIZE);
     for (int i = 0; i < info->dlpi_phnum; i++) {
@@ -146,6 +155,7 @@ void ps2_memory_init(void)
             host_fatal("This Android build has an invalid game load bias (%p).", dli.dli_fbase);
         memset(&audit, 0, sizeof(audit));
         audit.fbase = (uintptr_t)dli.dli_fbase;
+        audit.probe_addr = (uintptr_t)probe;
         dl_iterate_phdr(android_audit_cb, &audit);
         if (!audit.found || audit.end <= ASHFORD_WINDOW_BASE)
             host_fatal("This Android build could not audit librecvx_game.so segments.");
@@ -239,6 +249,15 @@ void* ps2_dma_alloc(int slot, uint32_t len)
 #endif
 }
 
+#if defined(__ANDROID__)
+static int dma_map_audit_flag = -1;
+void ps2_dma_audit_refresh(void)
+{
+    const char* env = getenv("RECVX_DMA_MAP_AUDIT");
+    dma_map_audit_flag = (env && env[0] && strcmp(env, "0") != 0) ? 1 : 0;
+}
+#endif
+
 /* DMA MADR/TADR/ADDR field -> host pointer */
 void* ps2_dma_ptr(uint32_t addr)
 {
@@ -247,17 +266,15 @@ void* ps2_dma_ptr(uint32_t addr)
     if ((addr & 0xF0000000u) == 0x70000000u) return (void*)(uintptr_t)(PS2_SPR_BASE | (addr & (PS2_SPR_SIZE - 1)));
     if (addr < 0x10000000u) addr |= 0x30000000u; /* physical address (masked with 0x0FFFFFFF) */
 #if defined(__ANDROID__)
-    {
-        const char* audit = getenv("RECVX_DMA_MAP_AUDIT");
-        if (audit && audit[0] && strcmp(audit, "0") != 0) {
-            int in_window = (addr >= ASHFORD_WINDOW_BASE && addr < ASHFORD_WINDOW_LIMIT);
-            int in_code   = (addr >= ASHFORD_CODE_BASE   && addr < ASHFORD_CODE_LIMIT);
-            if (!in_window && !in_code) {
-                host_fatal("ps2_dma_ptr: address 0x%08X outside Android address map "
-                           "(window [0x%08X,0x%08X), code [0x%08X,0x%08X), active pool, scratchpad)",
-                           addr, ASHFORD_WINDOW_BASE, ASHFORD_WINDOW_LIMIT,
-                           ASHFORD_CODE_BASE, ASHFORD_CODE_LIMIT);
-            }
+    if (dma_map_audit_flag < 0) ps2_dma_audit_refresh();
+    if (dma_map_audit_flag) {
+        int in_window = (addr >= ASHFORD_WINDOW_BASE && addr < ASHFORD_WINDOW_LIMIT);
+        int in_code   = (addr >= ASHFORD_CODE_BASE   && addr < ASHFORD_CODE_LIMIT);
+        if (!in_window && !in_code) {
+            host_fatal("ps2_dma_ptr: address 0x%08X outside Android address map "
+                       "(window [0x%08X,0x%08X), code [0x%08X,0x%08X), active pool, scratchpad)",
+                       addr, ASHFORD_WINDOW_BASE, ASHFORD_WINDOW_LIMIT,
+                       ASHFORD_CODE_BASE, ASHFORD_CODE_LIMIT);
         }
     }
 #endif

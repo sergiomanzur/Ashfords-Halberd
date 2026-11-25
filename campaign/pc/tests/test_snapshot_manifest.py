@@ -130,4 +130,12 @@ class ManifestTests(unittest.TestCase):
             buf, _ = self._elf_fixture(**kwargs)
             with self.assertRaises(ValueError):
                 m.patch_elf_image(bytes(buf), regions, symbols)
+
+    def test_lld_map_rejects_merged_internal_rodata(self):
+        lld = (
+            '           10000            10000      100    16 .rodata\n'
+            '           10000            10000       40     1         <internal>:(.rodata)\n'
+        )
+        with self.assertRaises(ValueError):
+            m.parse_lld_map(lld)
 if __name__=='__main__':unittest.main()

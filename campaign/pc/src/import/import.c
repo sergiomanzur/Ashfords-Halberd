@@ -18,17 +18,24 @@ void host_log(const char* fmt, ...);
 static int android_mkdir_p(const char* path)
 {
     char tmp[1100];
+    struct stat st;
+    if (!path || !path[0]) return -1;
     size_t len = SDL_strlen(path);
     if (len >= sizeof(tmp)) return -1;
     SDL_strlcpy(tmp, path, sizeof(tmp));
+    while (len > 1 && tmp[len - 1] == '/') tmp[--len] = '\0';
     for (char* p = tmp + 1; *p; p++) {
         if (*p == '/') {
             *p = '\0';
-            if (mkdir(tmp, 0770) < 0 && errno != EEXIST) return -1;
+            if (!(stat(tmp, &st) == 0 && S_ISDIR(st.st_mode))) {
+                if (mkdir(tmp, 0770) < 0 && errno != EEXIST && errno != EROFS && errno != EACCES)
+                    return -1;
+            }
             *p = '/';
         }
     }
-    return mkdir(tmp, 0770) < 0 && errno != EEXIST ? -1 : 0;
+    if (stat(tmp, &st) == 0 && S_ISDIR(st.st_mode)) return 0;
+    return (mkdir(tmp, 0770) == 0 || errno == EEXIST) ? 0 : -1;
 }
 static int android_path_exists(const char* path)
 {

@@ -17,12 +17,23 @@
 static int test_mkdir(const char* path)
 {
     char tmp[1024];
+    struct stat st;
+    if (!path || !path[0]) return 0;
     size_t len = strlen(path);
     if (len >= sizeof(tmp)) return 0;
     memcpy(tmp, path, len + 1);
+    while (len > 1 && tmp[len - 1] == '/') tmp[--len] = '\0';
     for (char* p = tmp + 1; *p; p++) {
-        if (*p == '/') { *p = '\0'; if (mkdir(tmp, 0770) < 0 && errno != EEXIST) return 0; *p = '/'; }
+        if (*p == '/') {
+            *p = '\0';
+            if (!(stat(tmp, &st) == 0 && S_ISDIR(st.st_mode))) {
+                if (mkdir(tmp, 0770) < 0 && errno != EEXIST && errno != EROFS && errno != EACCES)
+                    return 0;
+            }
+            *p = '/';
+        }
     }
+    if (stat(tmp, &st) == 0 && S_ISDIR(st.st_mode)) return 1;
     return mkdir(tmp, 0770) == 0 || errno == EEXIST;
 }
 #else

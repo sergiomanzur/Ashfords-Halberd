@@ -21,6 +21,7 @@
 
 typedef struct {
     uintptr_t target_base;
+    uintptr_t probe_addr;
     int found;
     uintptr_t load_bias;
     int data_seg_count;
@@ -36,8 +37,15 @@ static int audit_game_phdr_cb(struct dl_phdr_info* info, size_t sz, void* ud)
     (void)sz;
     if ((uintptr_t)info->dlpi_addr != a->target_base)
         return 0;
-    /* Match only the object whose name ends in librecvx_game.so (or contains our base). */
-    if (!info->dlpi_name || !strstr(info->dlpi_name, "librecvx_game.so"))
+    int contains_probe = 0;
+    for (int i = 0; i < info->dlpi_phnum; i++) {
+        const ElfW(Phdr)* ph = &info->dlpi_phdr[i];
+        if (ph->p_type != PT_LOAD) continue;
+        uintptr_t lo = (uintptr_t)info->dlpi_addr + (uintptr_t)ph->p_vaddr;
+        uintptr_t hi = lo + (uintptr_t)ph->p_memsz;
+        if (a->probe_addr >= lo && a->probe_addr < hi) { contains_probe = 1; break; }
+    }
+    if (!contains_probe)
         return 0;
 
     a->found = 1;
@@ -128,6 +136,7 @@ int main(void)
     PhdrAudit audit;
     memset(&audit, 0, sizeof(audit));
     audit.target_base = (uintptr_t)dli.dli_fbase;
+    audit.probe_addr = a_malloc;
     dl_iterate_phdr(audit_game_phdr_cb, &audit);
     CHECK(audit.found);
     CHECK(!audit.seg_error);
@@ -253,6 +262,7 @@ int main(void)
         CHECK(pid >= 0);
         if (pid == 0) {
             setenv("RECVX_DMA_MAP_AUDIT", "1", 1);
+            ps2_dma_audit_refresh();
             if (ps2_dma_ptr(0x30123456u) != (void*)(uintptr_t)0x30123456u) _exit(2);
             if (ps2_dma_ptr(0x00123456u) != (void*)(uintptr_t)0x30123456u) _exit(3);
             if (ps2_dma_ptr(0x70000100u) != (void*)(uintptr_t)0x70000100u) _exit(4);
@@ -268,6 +278,7 @@ int main(void)
         CHECK(pid >= 0);
         if (pid == 0) {
             setenv("RECVX_DMA_MAP_AUDIT", "1", 1);
+            ps2_dma_audit_refresh();
             (void)ps2_dma_ptr(0x65000000u);
             _exit(0);
         }
@@ -280,6 +291,7 @@ int main(void)
         CHECK(pid >= 0);
         if (pid == 0) {
             setenv("RECVX_DMA_MAP_AUDIT", "1", 1);
+            ps2_dma_audit_refresh();
             void* high_buf = malloc(64);
             if (!high_buf || (uintptr_t)high_buf <= UINT32_MAX) _exit(99);
             sceDmaSendN((void*)(uintptr_t)0x1000a000u, high_buf, 1);

@@ -2201,10 +2201,75 @@ index 22cb48fc..9c3118a2 100644
      if ((MovieType & 0x2))
      {
 diff --git a/src/ps2/veronica/prog/sub1.c b/src/ps2/veronica/prog/sub1.c
-index 53f4752a..5c00e17a 100644
+index 53f4752a..ba66be54 100644
 --- a/src/ps2/veronica/prog/sub1.c
 +++ b/src/ps2/veronica/prog/sub1.c
-@@ -3734,9 +3734,21 @@ void StatusMain()
+@@ -2287,11 +2287,21 @@ void ItemSort()
+     
+     for (num1 = 0; num1 < 10; num1++)
+     {
++#ifdef TARGET_PC
++        /* On 32-bit EE, offsetof(NJS_TEXNAME, texaddr) == 8 (st->pip[num1 + 2]);
++           on 64-bit LP64 the pointer field widens to 8 bytes (offset 12). */
++        wpn = (st->pip[num1 + 2] >> 16) & 0xFF;
++#else
+         wpn = (((NJS_TEXNAME *)&st->pip[num1])->texaddr >> 16) & 0xFF;
++#endif
+         
+         if ((itemdata[wpn].type & 0x100))
+         {
++#ifdef TARGET_PC
++            itmbk[num2] = st->pip[num1 + 2];
++#else
+             itmbk[num2] = ((NJS_TEXNAME*)&st->pip[num1])->texaddr;
++#endif
+             
+             if ((swork.flgchk & 0x10)) 
+             {
+@@ -2304,11 +2314,19 @@ void ItemSort()
+     
+     for (num1 = 0; num1 < 10; num1++)
+     {
++#ifdef TARGET_PC
++        wpn = (st->pip[num1 + 2] >> 16) & 0xFF;
++#else
+         wpn = (((NJS_TEXNAME*)&st->pip[num1])->texaddr >> 16) & 0xFF;
++#endif
+         
+         if ((!(itemdata[wpn].type & 0x100)) && (wpn != 0))
+         {
++#ifdef TARGET_PC
++            itmbk[num2] = st->pip[num1 + 2];
++#else
+             itmbk[num2] = ((NJS_TEXNAME*)&st->pip[num1])->texaddr;
++#endif
+             
+             if ((((itemdata[wpn].type & 0x1)) || ((itemdata[wpn].type & 0x10))) && ((swork.flgchk & 0x10)))
+             {
+@@ -2326,14 +2344,22 @@ void ItemSort()
+     
+     for (num1 = 0; num1 < 10; num1++)
+     {
++#ifdef TARGET_PC
++        st->pip[num1 + 2] = itmbk[num1];
++#else
+         ((NJS_TEXNAME*)&st->pip[num1])->texaddr = itmbk[num1];
++#endif
+     }
+     
+     num1 = 0;
+     
+     do
+     {
++#ifdef TARGET_PC
++        wpn = (st->pip[num1 + 2] >> 16) & 0xFF;
++#else
+         wpn = (((NJS_TEXNAME*)&st->pip[num1])->texaddr >> 16) & 0xFF;
++#endif
+         
+         if (!(itemdata[wpn].type & 0x100))
+         {
+@@ -3734,9 +3760,21 @@ void StatusMain()
      }
  }
  
@@ -2226,7 +2291,7 @@ index 53f4752a..5c00e17a 100644
      unsigned short num1, num2;     
      unsigned short bullet1; 
      unsigned int bullettype;
-@@ -3794,7 +3806,14 @@ void GetItem(S_WORK* st)
+@@ -3794,7 +3832,14 @@ void GetItem(S_WORK* st)
                      {
                          st->gb = (unsigned int*)&getbulletmax[sys->sb_id][sys->gm_mode];
                          
@@ -2242,7 +2307,7 @@ index 53f4752a..5c00e17a 100644
                      }
                      
                      if (bullet1 > 999) 
-@@ -3905,6 +3924,9 @@ void GetItem(S_WORK* st)
+@@ -3905,6 +3950,9 @@ void GetItem(S_WORK* st)
                  break; 
              case 101:                              
                  st->testmode = 3;
@@ -2252,7 +2317,7 @@ index 53f4752a..5c00e17a 100644
                  break;
              }
          }
-@@ -3922,6 +3944,9 @@ void GetItem(S_WORK* st)
+@@ -3922,6 +3970,9 @@ void GetItem(S_WORK* st)
      case 3:                                         
          if ((!(swork.statusflg & 0x40)) && (!(sys->st_flg & 0x200)))
          {
@@ -2262,7 +2327,7 @@ index 53f4752a..5c00e17a 100644
              if ((swork.statusflg & 0x100))
              {
                  StatusCancel(st);
-@@ -4009,6 +4034,15 @@ void GetItem(S_WORK* st)
+@@ -4009,6 +4060,15 @@ void GetItem(S_WORK* st)
                          {
                              st->gb = (unsigned int*)&getbulletmax[sys->sb_id][sys->gm_mode];
                              
@@ -2278,7 +2343,7 @@ index 53f4752a..5c00e17a 100644
                              if (sys->sb_id == 31) 
                              {
                                  if (roomno == 1) 
-@@ -4037,6 +4071,10 @@ void GetItem(S_WORK* st)
+@@ -4037,6 +4097,10 @@ void GetItem(S_WORK* st)
                          }
                          
                          st->pip[amari + 1] = (itemid1 << 16) | bullet1;
@@ -2289,7 +2354,7 @@ index 53f4752a..5c00e17a 100644
  
                          if (!num1)
                          {
-@@ -4086,6 +4124,16 @@ void GetItem(S_WORK* st)
+@@ -4086,6 +4150,16 @@ void GetItem(S_WORK* st)
                  } 
                  else 
                  {
@@ -2306,7 +2371,7 @@ index 53f4752a..5c00e17a 100644
                      if ((sys->sb_id == 4) && ((roomno == 926) || (roomno == 706))) 
                      {
                          st->pip[amari + 1] = (sys->sb_id << 16) | (unsigned char)sys->itm[224]; 
-@@ -4159,6 +4207,7 @@ void GetItem(S_WORK* st)
+@@ -4159,6 +4233,7 @@ void GetItem(S_WORK* st)
          
          st->gb = (unsigned int*)&getbulletmax[sys->sb_id][sys->gm_mode];
          
@@ -2314,7 +2379,7 @@ index 53f4752a..5c00e17a 100644
          st->pip[1] = (sys->sb_id << 16) | *st->gb;
          
          if (*st->pip == 1)
-@@ -4175,6 +4224,8 @@ void GetItem(S_WORK* st)
+@@ -4175,6 +4250,8 @@ void GetItem(S_WORK* st)
          sys->cb_flg &= ~0x1000000;
      }
  #ifdef TARGET_PC
@@ -2323,7 +2388,7 @@ index 53f4752a..5c00e17a 100644
      if (pc_given && (swork.statusflg & 0x100))
      {
          coop_item_granted(sys->sb_id);
-@@ -7805,7 +7856,12 @@ void ItemBoxChange(S_WORK* st, unsigned short ibcsr)
+@@ -7805,7 +7882,12 @@ void ItemBoxChange(S_WORK* st, unsigned short ibcsr)
   
  	if (sys->ply_id == 0) 
      {
@@ -2336,7 +2401,7 @@ index 53f4752a..5c00e17a 100644
          {
              swork.statusflg &= ~0x100000;
              
-@@ -7813,7 +7869,12 @@ void ItemBoxChange(S_WORK* st, unsigned short ibcsr)
+@@ -7813,7 +7895,12 @@ void ItemBoxChange(S_WORK* st, unsigned short ibcsr)
              return;
          }
  
@@ -2349,7 +2414,7 @@ index 53f4752a..5c00e17a 100644
          {
              swork.statusflg &= ~0x100000;
                  
-@@ -8929,9 +8990,14 @@ int bhSearchBullet()
+@@ -8929,9 +9016,14 @@ int bhSearchBullet()
      unsigned int z;  
      unsigned short bullettype; 
  

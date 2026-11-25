@@ -13,10 +13,10 @@ $campaignRoot = Split-Path $PSScriptRoot -Parent
 $campaignBuild = if ([IO.Path]::IsPathRooted($BuildDirectory)) { $BuildDirectory } else { Join-Path $campaignRoot $BuildDirectory }
 $campaignDecomp = Join-Path $campaignRoot 'upstream/recvx-campaign-decomp'
 
-# Discover the newest installed NDK (e.g. 26.2.11394342 beats 26.1.10909125).
+# Discover the newest installed NDK by semantic version (e.g. 26.10 beats 26.2).
 if (!$NdkDir) {
     $ndkRoots = Get-ChildItem "$env:LOCALAPPDATA/Android/Sdk/ndk/*" -Directory -ErrorAction SilentlyContinue |
-                Sort-Object Name -Descending
+                Sort-Object { $v = $null; if ([version]::TryParse($_.Name, [ref]$v)) { $v } else { [version]'0.0' } }, Name -Descending
     if (!$ndkRoots) { throw "No Android NDK found under `$env:LOCALAPPDATA/Android/Sdk/ndk. Install the NDK or pass -NdkDir." }
     $NdkDir = $ndkRoots[0].FullName
 }
@@ -57,6 +57,7 @@ try {
     # Run the on-device test suite.
     $runner = Join-Path $PSScriptRoot 'run-android-ctest.py'
     $runnerArgs = @($runner, '--build-dir', $campaignBuild)
+    if ($PlatformTestsOnly) { $runnerArgs += '--platform-tests-only' }
     if ($Serial) { $runnerArgs += @('--serial', $Serial) }
     & python @runnerArgs
     if ($LASTEXITCODE) { throw 'On-device ctest run reported failures.' }
