@@ -1,20 +1,7 @@
 // Reuse Ashford's existing ISO identity/inventory checks before the campaign starts.
 #include "ashford_disc.h"
-#include <cstdio>
-
-#ifdef __ANDROID__
-
-extern "C" int ashford_validate_disc(const char* path, char* error, size_t capacity) {
-    (void)path;
-    if (error && capacity) {
-        std::snprintf(error, capacity, "%s", "Disc validation is unavailable on this platform until Plan 2.");
-    }
-    return 0;
-}
-
-#else
-
 #include "core.hpp"
+#include <cstdio>
 #include <exception>
 
 extern "C" int ashford_validate_disc(const char* path, char* error, size_t capacity) {
@@ -28,5 +15,3 @@ extern "C" int ashford_validate_disc(const char* path, char* error, size_t capac
         return 0;
     }
 }
-
-#endif

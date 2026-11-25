@@ -47,6 +47,7 @@ PORTABLE_TESTS = [
     "spoiler",
     "import",
     "lang",
+    "ashford_disc",
     "ashford_panel",
     "test_audio_snapshot",
     "test_audio_snapshot_decoder",

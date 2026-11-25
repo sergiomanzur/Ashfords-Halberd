@@ -305,18 +305,16 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND TARGET recvx)
 endif()
 
 # ---------------------------------------------------------------- tests
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
-    # bcrypt/windows.h disc validation is not available on Android; the host stub
-    # in ashford_disc.cpp returns "unavailable" until the platform hash is ready.
-    add_library(ashford_campaign_disc STATIC ${CMAKE_CURRENT_SOURCE_DIR}/../../src/core.cpp)
-    target_compile_features(ashford_campaign_disc PUBLIC cxx_std_17)
-    target_include_directories(ashford_campaign_disc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../src)
+add_library(ashford_campaign_disc STATIC ${CMAKE_CURRENT_SOURCE_DIR}/../../src/core.cpp)
+target_compile_features(ashford_campaign_disc PUBLIC cxx_std_17)
+target_include_directories(ashford_campaign_disc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../src)
+if(WIN32)
     target_link_libraries(ashford_campaign_disc PUBLIC bcrypt)
-    add_executable(test_ashford_disc tests/test_ashford_disc.cpp src/host/ashford_disc.cpp)
-    target_include_directories(test_ashford_disc PRIVATE src)
-    target_link_libraries(test_ashford_disc PRIVATE ashford_campaign_disc)
-    add_test(NAME ashford_disc COMMAND test_ashford_disc)
 endif()
+add_executable(test_ashford_disc tests/test_ashford_disc.cpp src/host/ashford_disc.cpp)
+target_include_directories(test_ashford_disc PRIVATE src)
+target_link_libraries(test_ashford_disc PRIVATE ashford_campaign_disc)
+add_test(NAME ashford_disc COMMAND test_ashford_disc)
 
 add_executable(test_ashford_panel tests/test_ashford_panel.cpp src/host/ashford_panel.cpp)
 target_include_directories(test_ashford_panel PRIVATE src)
@@ -637,7 +635,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Android" AND NOT ASHFORD_PLATFORM_TESTS_ONLY)
         "-Wl,-u,SDL_GetTicks"
         "-Wl,-u,SDL_GetTicksNS"
     )
-    target_link_libraries(test_window_load PRIVATE SDL3::SDL3 imgui m dl)
+    target_link_libraries(test_window_load PRIVATE ashford_campaign_disc SDL3::SDL3 imgui m dl)
     add_dependencies(test_window_load recvx_game_so)
     add_test(NAME window_load COMMAND test_window_load)
 endif()

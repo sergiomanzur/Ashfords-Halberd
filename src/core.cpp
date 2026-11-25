@@ -1,14 +1,17 @@
 #include "core.hpp"
 #include "usa_inventory.hpp"
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
 #include <bcrypt.h>
+#endif
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstring>
 #include <fstream>
 #include <map>
 #include <set>
@@ -83,6 +86,7 @@ std::vector<unsigned char> read_at(std::ifstream& stream, std::uint64_t offset, 
     if (size) stream.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
     check(bool(stream), "Cannot read ISO data."); return bytes;
 }
+#ifdef _WIN32
 class Hash {
     BCRYPT_ALG_HANDLE algorithm = nullptr;
     BCRYPT_HASH_HANDLE handle = nullptr;
@@ -100,20 +104,75 @@ public:
         }
     }
     ~Hash() { if (handle) BCryptDestroyHash(handle); if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0); }
-    void add(unsigned char* data, ULONG size) { check(BCryptHashData(handle, data, size, 0) >= 0, "Hashing failed."); }
+    void add(unsigned char* data, std::size_t size) { check(BCryptHashData(handle, data, static_cast<ULONG>(size), 0) >= 0, "Hashing failed."); }
     std::string finish() {
         unsigned char result[20]; check(BCryptFinishHash(handle, result, 20, 0) >= 0, "Hashing failed.");
         const char* hex = "0123456789abcdef"; std::string text;
         for (unsigned char c : result) { text += hex[c >> 4]; text += hex[c & 15]; } return text;
     }
 };
+#else
+// RFC 3174 SHA-1 for non-Windows platforms (Android / Linux).
+class Hash {
+    std::uint32_t h[5] = { 0x67452301u, 0xEFCDAB89u, 0x98BADCFEu, 0x10325476u, 0xC3D2E1F0u };
+    std::uint64_t total_bytes = 0;
+    unsigned char block[64] = {};
+    std::size_t used = 0;
+
+    static std::uint32_t rol(std::uint32_t v, unsigned s) { return (v << s) | (v >> (32u - s)); }
+
+    void process(const unsigned char p[64]) {
+        std::uint32_t w[80];
+        for (unsigned i = 0; i < 16; ++i) {
+            w[i] = (std::uint32_t(p[i * 4]) << 24) | (std::uint32_t(p[i * 4 + 1]) << 16) |
+                   (std::uint32_t(p[i * 4 + 2]) << 8) | std::uint32_t(p[i * 4 + 3]);
+        }
+        for (unsigned i = 16; i < 80; ++i) w[i] = rol(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
+        std::uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4];
+        for (unsigned i = 0; i < 80; ++i) {
+            std::uint32_t f, k;
+            if (i < 20)      { f = (b & c) | ((~b) & d);          k = 0x5A827999u; }
+            else if (i < 40) { f = b ^ c ^ d;                     k = 0x6ED9EBA1u; }
+            else if (i < 60) { f = (b & c) | (b & d) | (c & d);   k = 0x8F1BBCDCu; }
+            else             { f = b ^ c ^ d;                     k = 0xCA62C1D6u; }
+            std::uint32_t tmp = rol(a, 5) + f + e + k + w[i];
+            e = d; d = c; c = rol(b, 30); b = a; a = tmp;
+        }
+        h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e;
+    }
+public:
+    void add(const unsigned char* data, std::size_t size) {
+        total_bytes += size;
+        while (size) {
+            std::size_t n = std::min<std::size_t>(64 - used, size);
+            std::memcpy(block + used, data, n);
+            used += n; data += n; size -= n;
+            if (used == 64) { process(block); used = 0; }
+        }
+    }
+    std::string finish() {
+        std::uint64_t bits = total_bytes * 8u;
+        unsigned char tail[128] = { 0x80 };
+        std::size_t pad = used < 56 ? (56 - used) : (120 - used);
+        for (unsigned i = 0; i < 8; ++i) tail[pad + i] = static_cast<unsigned char>(bits >> (56 - i * 8));
+        add(tail, pad + 8);
+        const char* hex = "0123456789abcdef";
+        std::string text;
+        text.reserve(40);
+        for (unsigned i = 0; i < 5; ++i) {
+            for (int shift = 28; shift >= 0; shift -= 4) text += hex[(h[i] >> shift) & 15u];
+        }
+        return text;
+    }
+};
+#endif
 std::string hash_range(std::ifstream& input, std::uint64_t offset, std::uint64_t size) {
     input.clear(); input.seekg(static_cast<std::streamoff>(offset)); Hash hash;
     std::array<unsigned char, 65536> buffer;
     while (size) {
-        auto amount = static_cast<ULONG>(std::min<std::uint64_t>(size, buffer.size()));
-        input.read(reinterpret_cast<char*>(buffer.data()), amount);
-        check(input.gcount() == amount, "Truncated executable data."); hash.add(buffer.data(), amount); size -= amount;
+        auto amount = static_cast<std::size_t>(std::min<std::uint64_t>(size, buffer.size()));
+        input.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(amount));
+        check(static_cast<std::size_t>(input.gcount()) == amount, "Truncated executable data."); hash.add(buffer.data(), amount); size -= amount;
     }
     return hash.finish();
 }
@@ -122,6 +181,7 @@ const DiscFile& find_file(const Disc& disc, const char* name) {
     check(found != disc.files.end(), "This disc is not CVX USA (SLUS-20184)."); return *found;
 }
 void rename_cache_directory(const fs::path& from, const fs::path& to) {
+#ifdef _WIN32
     for (int attempt = 0; attempt <= 10; ++attempt) {
         // No REPLACE_EXISTING: an unexpectedly present destination stays intact.
         if (MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_WRITE_THROUGH)) return;
@@ -133,13 +193,28 @@ void rename_cache_directory(const fs::path& from, const fs::path& to) {
         }
         Sleep(50);
     }
+#else
+    if (fs::exists(to)) {
+        throw fs::filesystem_error("Cannot move asset-cache directory", from, to,
+            std::make_error_code(std::errc::file_exists));
+    }
+    fs::rename(from, to);
+#endif
 }
 }
 
 Settings load_settings(const fs::path& path) {
     Settings result; if (!fs::exists(path)) return result;
     bool healthy; auto values = read_configuration(path, healthy);
-    if (!healthy) { std::error_code error; fs::copy_file(path, fs::path(path.wstring() + L".damaged"), fs::copy_options::overwrite_existing, error); }
+    if (!healthy) {
+        std::error_code error;
+#ifdef _WIN32
+        fs::path damaged(path.wstring() + L".damaged");
+#else
+        fs::path damaged(path.string() + ".damaged");
+#endif
+        fs::copy_file(path, damaged, fs::copy_options::overwrite_existing, error);
+    }
     result.iso_path = values["GameData.iso_path"];
     result.width = bounded(values["Display.width"], 1120, 640, 7680);
     result.height = bounded(values["Display.height"], 720, 480, 4320);
@@ -158,7 +233,11 @@ void save_settings(const fs::path& path, const Settings& value) {
     check(value.effects_volume>=0 && value.effects_volume<=100,"Invalid effects volume.");
     check(value.viewer_room>=0 && value.viewer_room<=9999 && value.viewer_cut>=0 && value.viewer_cut<=4095 && value.viewer_variant>=0 && value.viewer_variant<=1,"Invalid viewer selection.");
     fs::create_directories(path.parent_path());
-    fs::path temporary(path.wstring() + L".tmp"), backup(path.wstring() + L".bak");
+#ifdef _WIN32
+    fs::path temporary(path.wstring() + L".tmp"), backup(path.wstring() + L".bak"), damaged(path.wstring() + L".damaged");
+#else
+    fs::path temporary(path.string() + ".tmp"), backup(path.string() + ".bak"), damaged(path.string() + ".damaged");
+#endif
     { std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
       output << "; Ashford's Halberd - user settings\n[General]\nschema_version=1\n\n[GameData]\niso_path=" << value.iso_path
              << "\n\n[Display]\nwidth=" << value.width << "\nheight=" << value.height
@@ -168,10 +247,17 @@ void save_settings(const fs::path& path, const Settings& value) {
       output.flush(); check(bool(output), "Cannot write settings. Check available disk space and folder permissions."); }
     if (fs::exists(path)) {
         bool healthy; read_configuration(path, healthy);
+#ifdef _WIN32
         if (healthy) check(CopyFileW(path.c_str(), backup.c_str(), FALSE) != 0, "Cannot back up settings.");
-        else check(CopyFileW(path.c_str(), fs::path(path.wstring() + L".damaged").c_str(), FALSE) != 0, "Cannot preserve damaged settings.");
+        else check(CopyFileW(path.c_str(), damaged.c_str(), FALSE) != 0, "Cannot preserve damaged settings.");
+#else
+        std::error_code ec;
+        if (healthy) check(fs::copy_file(path, backup, fs::copy_options::overwrite_existing, ec) && !ec, "Cannot back up settings.");
+        else check(fs::copy_file(path, damaged, fs::copy_options::overwrite_existing, ec) && !ec, "Cannot preserve damaged settings.");
+#endif
     }
     bool saved = false;
+#ifdef _WIN32
     for (int attempt = 0; attempt <= 10; ++attempt) {
         if (MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
             saved = true;
@@ -184,6 +270,11 @@ void save_settings(const fs::path& path, const Settings& value) {
             error != ERROR_LOCK_VIOLATION && error != ERROR_ACCESS_DENIED)) break;
         Sleep(50);
     }
+#else
+    std::error_code ec;
+    fs::rename(temporary, path, ec);
+    saved = !ec;
+#endif
     check(saved, "Cannot save settings. Check folder permissions.");
 }
 Disc read_disc(const fs::path& path) {
