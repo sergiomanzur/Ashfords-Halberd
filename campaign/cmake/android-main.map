@@ -1,0 +1,58 @@
+/* LLD version script for Android libmain.so.
+ * Export every platform, SDL3 (JNI_OnLoad, SDL_main, SDL_GetTicks...), and
+ * JNI symbol for librecvx_game.so and ART, while keeping all runtime game-bridge
+ * thunks, pointer slots, and static-table sentinels strictly local so they never
+ * shadow librecvx_game.so's fixed-window definitions.
+ */
+{
+    global:
+        *;
+    local:
+        ashford_ptr_*;
+        ashford_sent_*;
+        appear_frame;
+        biorand_frame;
+        cheat_frame;
+        cheat_room_snapshot_capture;
+        cheat_room_snapshot_restore;
+        cheat_room_snapshot_validate;
+        enemy_opts;
+        enemy_rate_at;
+        enemy_rate_count;
+        enemy_rate_name;
+        enemy_rate_preset;
+        enemy_rates_ini;
+        enemy_rates_load;
+        enemy_rates_text;
+        glue_debug_frame;
+        hud_icons;
+        hud_item_info;
+        lang_frame;
+        lang_has_subtitles;
+        lang_has_voices;
+        lang_installed;
+        lang_old_import;
+        lang_scan;
+        lang_sub;
+        pc_frame_fade;
+        pc_frame_view;
+        pc_in_game;
+        pc_insn_len_raw;
+        pc_keytype;
+        pc_keytype_mask;
+        pc_lang_disc_parts;
+        pc_lang_file_dir;
+        pc_lang_file_opened;
+        pc_menu_smooth;
+        pc_rifle_stack;
+        pc_tex_invalidate;
+        pc_view_changed;
+        recvx_game_main;
+        reload_combo_ok;
+        room_snapshot_busy;
+        RoomNameSwitch;
+        spawn_count;
+        spawn_name;
+        spoiler_key;
+        tps_frame;
+};

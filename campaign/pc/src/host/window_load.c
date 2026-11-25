@@ -35,6 +35,21 @@ static size_t page_size_bytes(void)
     return (ps > 0) ? (size_t)ps : 4096u;
 }
 
+static void log_low4g_maps(void)
+{
+    FILE* f = fopen("/proc/self/maps", "r");
+    if (!f) return;
+    char line[512];
+    host_log("window_load: /proc/self/maps entries below 4 GiB:\n");
+    while (fgets(line, sizeof(line), f)) {
+        unsigned long long lo = 0, hi = 0;
+        if (sscanf(line, "%llx-%llx", &lo, &hi) == 2 && lo < 0x100000000ULL) {
+            host_log("  %s", line);
+        }
+    }
+    fclose(f);
+}
+
 static int resolve_game_lib_path(char* out, size_t out_cap)
 {
     const char* env_path = getenv("ASHFORD_GAME_LIB");
@@ -169,6 +184,7 @@ int ashford_window_init(void)
                           PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
     if (game_res != (void*)(uintptr_t)ASHFORD_RESERVE_BASE) {
         const char* reason = (game_res == MAP_FAILED) ? strerror(errno) : "unexpected address";
+        log_low4g_maps();
         host_fatal("window_load: mmap(MAP_FIXED_NOREPLACE) failed for game reservation "
                    "[0x%08X, 0x%08X): got %p (%s)",
                    ASHFORD_RESERVE_BASE, ASHFORD_RESERVE_BASE + ASHFORD_RESERVE_SIZE,
@@ -180,6 +196,7 @@ int ashford_window_init(void)
                           PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
     if (pool_res != (void*)(uintptr_t)ASHFORD_POOL_BASE) {
         const char* reason = (pool_res == MAP_FAILED) ? strerror(errno) : "unexpected address";
+        log_low4g_maps();
         host_fatal("window_load: mmap(MAP_FIXED_NOREPLACE) failed for DMA pool reservation "
                    "[0x%08X, 0x%08X): got %p (%s)",
                    ASHFORD_POOL_BASE, ASHFORD_POOL_BASE + ASHFORD_POOL_RESERVE_SIZE,

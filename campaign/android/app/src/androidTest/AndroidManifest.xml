@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Built-in framework runner (zero external Maven deps) executing
+         com.ashfordshalberd.app.NativeSDLTests in the target app process. -->
+    <instrumentation
+        android:name="android.test.InstrumentationTestRunner"
+        android:targetPackage="com.ashfordshalberd.app"
+        android:label="Ashford native SDL tests" />
+</manifest>

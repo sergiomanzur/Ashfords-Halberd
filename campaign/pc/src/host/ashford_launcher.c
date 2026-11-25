@@ -1,6 +1,9 @@
 /* Original Ashford campaign launcher. No game data is opened here. */
 #include "ashford_launcher.h"
 #include "ps2_platform.h"
+#if defined(__ANDROID__)
+#include "android_saf.h"
+#endif
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <string.h>
@@ -81,20 +84,37 @@ int ashford_launcher(char *iso,size_t capacity)
     Uint32 wave_length=0;
     SDL_AudioSpec spec;
     SDL_Surface *surface;
+    SDL_Gamepad *pad = NULL;
     DiscDialog dialog={0};
     SDL_Event event;
-    int running=1, result=0, focus=CHOOSE, muted=0, pending=0, exit_requested=0;
+    int running=1, result=0, focus=CHOOSE, muted=0, pending=0, exit_requested=0, saf_pct=-1;
     int dragging=0;
     unsigned frame=0;
     const char *capture=SDL_getenv("ASHFORD_LAUNCHER_CAPTURE");
     const char *test_action=SDL_getenv("ASHFORD_LAUNCHER_TEST_ACTION");
     char path[2048], label[128], status[160]="Select your game disc to begin the campaign.";
+#if !defined(__ANDROID__)
     const SDL_DialogFileFilter filters[]={{"PlayStation 2 disc image","iso"}};
+#endif
     if (!iso || capacity == 0) return 0;
     focus=iso[0]?PLAY:CHOOSE;
+#if defined(__ANDROID__)
+    window=SDL_CreateWindow("Ashford's Halberd | Campaign",1100,720,SDL_WINDOW_FULLSCREEN);
+#else
     window=SDL_CreateWindow("Ashford's Halberd | Campaign",1100,720,SDL_WINDOW_RESIZABLE);
+#endif
     if(!window) goto cleanup;
+#if !defined(__ANDROID__)
     SDL_SetWindowMinimumSize(window,825,540);
+#else
+    android_set_immersive(g_config.fullscreen);
+#endif
+    {
+        int n_pads = 0;
+        SDL_JoystickID *ids = SDL_GetGamepads(&n_pads);
+        if (ids && n_pads > 0) pad = SDL_OpenGamepad(ids[0]);
+        SDL_free(ids);
+    }
     renderer=SDL_CreateRenderer(window,NULL);
     if(!renderer) goto cleanup;
     SDL_SetRenderVSync(renderer,1);
@@ -122,6 +142,19 @@ int ashford_launcher(char *iso,size_t capacity)
         int action=-1, hover=-1;
         float mx,my,lx,ly;
         ++frame;
+#if defined(__ANDROID__)
+        {
+            char saf_path[1024] = {0}, saf_err[256] = {0};
+            int st = android_saf_poll(saf_path, sizeof saf_path, saf_err, sizeof saf_err, &saf_pct);
+            pending = (st == ASHFORD_SAF_PENDING);
+            if (st == ASHFORD_SAF_DONE) {
+                if (SDL_strlen(saf_path) >= capacity) SDL_strlcpy(status, "The selected path is too long. Choose a shorter location.", sizeof status);
+                else { SDL_strlcpy(iso, saf_path, capacity); SDL_strlcpy(status, "Disc imported. Ready to begin.", sizeof status); focus = PLAY; }
+            } else if (st == ASHFORD_SAF_ERROR) {
+                SDL_strlcpy(status, saf_err[0] ? saf_err : "The file picker could not open. Please try again.", sizeof status);
+            }
+        }
+#else
         SDL_LockMutex(dialog.lock);
         pending=dialog.pending;
         if(dialog.selected) {
@@ -131,11 +164,25 @@ int ashford_launcher(char *iso,size_t capacity)
         }
         if(dialog.error) { SDL_strlcpy(status,dialog.error==2?"The selected path is too long. Choose a shorter location.":"The file picker could not open. Please try again.",sizeof status); dialog.error=0; }
         SDL_UnlockMutex(dialog.lock);
+#endif
         if(exit_requested && !pending) break;
         while(SDL_PollEvent(&event)) {
             SDL_ConvertEventToRenderCoordinates(renderer,&event);
             if(event.type==SDL_EVENT_QUIT || (event.type==SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID==SDL_GetWindowID(window))) exit_requested=1;
+            if(event.type==SDL_EVENT_GAMEPAD_ADDED && !pad) pad = SDL_OpenGamepad(event.gdevice.which);
+            if(event.type==SDL_EVENT_GAMEPAD_REMOVED && pad && SDL_GetGamepadID(pad)==event.gdevice.which) { SDL_CloseGamepad(pad); pad=NULL; }
             if(pending) continue;
+            if(event.type==SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+                switch(event.gbutton.button) {
+                case SDL_GAMEPAD_BUTTON_DPAD_DOWN: focus=(focus+1)%BUTTON_COUNT; break;
+                case SDL_GAMEPAD_BUTTON_DPAD_UP: focus=(focus+BUTTON_COUNT-1)%BUTTON_COUNT; break;
+                case SDL_GAMEPAD_BUTTON_DPAD_LEFT: action=QUIETER; break;
+                case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: action=LOUDER; break;
+                case SDL_GAMEPAD_BUTTON_SOUTH: action=focus; break;
+                case SDL_GAMEPAD_BUTTON_EAST: exit_requested=1; break;
+                default: break;
+                }
+            }
             if(event.type==SDL_EVENT_KEY_DOWN && !event.key.repeat) {
                 switch(event.key.key) {
                 case SDLK_ESCAPE: exit_requested=1; break;
@@ -169,11 +216,21 @@ int ashford_launcher(char *iso,size_t capacity)
         if(!exit_requested) switch(action) {
         case PLAY: if(iso[0]) {result=1;running=0;} break;
         case CHOOSE:
+#if defined(__ANDROID__)
+            if (android_saf_pick_iso()) { pending = 1; saf_pct = -1; }
+            else SDL_strlcpy(status, "The file picker could not open. Please try again.", sizeof status);
+#else
             SDL_LockMutex(dialog.lock); dialog.pending=1; SDL_UnlockMutex(dialog.lock);
             pending=1;
             SDL_ShowOpenFileDialog(disc_chosen,&dialog,window,filters,1,iso[0]?iso:NULL,false);
+#endif
             break;
-        case DISPLAY: g_config.fullscreen=!g_config.fullscreen; break;
+        case DISPLAY:
+            g_config.fullscreen=!g_config.fullscreen;
+#if defined(__ANDROID__)
+            android_set_immersive(g_config.fullscreen);
+#endif
+            break;
         case MUSIC: muted=!muted; break;
         case QUIETER: g_config.music_volume=SDL_max(0,g_config.music_volume-10); break;
         case LOUDER: g_config.music_volume=SDL_min(100,g_config.music_volume+10); break;
@@ -197,10 +254,20 @@ int ashford_launcher(char *iso,size_t capacity)
         text(renderer,64,112,4,"ASHFORD'S",232,220,191);
         text(renderer,64,153,4,"HALBERD",232,220,191);
         box(renderer,64,204,84,2,159,51,51,255);
+#if defined(__ANDROID__)
+        text(renderer,64,227,1,"THE CAMPAIGN  /  ANDROID EDITION",174,169,156);
+#else
         text(renderer,64,227,1,"THE CAMPAIGN  /  WINDOWS EDITION",174,169,156);
+#endif
         button(renderer,PLAY,focus,hover,!pending&&iso[0],"PLAY CAMPAIGN");
-        button(renderer,CHOOSE,focus,hover,!pending,pending?"CHOOSING DISC...":"CHOOSE ISO");
+        if (pending && saf_pct >= 0) SDL_snprintf(label, sizeof label, "IMPORTING %d%%...", saf_pct);
+        else SDL_snprintf(label, sizeof label, "%s", pending ? "CHOOSING DISC..." : "CHOOSE ISO");
+        button(renderer,CHOOSE,focus,hover,!pending,label);
+#if defined(__ANDROID__)
+        SDL_snprintf(label,sizeof label,"DISPLAY: %s",g_config.fullscreen?"IMMERSIVE":"LETTERBOX");
+#else
         SDL_snprintf(label,sizeof label,"DISPLAY: %s",g_config.fullscreen?"FULLSCREEN":"WINDOWED");
+#endif
         button(renderer,DISPLAY,focus,hover,!pending,label);
         button(renderer,MUSIC,focus,hover,!pending,muted?"MUSIC: OFF":"MUSIC: ON");
         button(renderer,QUIETER,focus,hover,!pending,"-");
@@ -219,8 +286,17 @@ int ashford_launcher(char *iso,size_t capacity)
             text(renderer,64,399,1,iso[0]?short_name:"No ISO selected",156,151,137);
         }
         /* Long status is wrapped explicitly, independent of UTF-8 path length. */
+#if defined(__ANDROID__)
+        if (pending && saf_pct >= 0) {
+            SDL_snprintf(label, sizeof label, "Importing disc image into app storage... %d%%", saf_pct);
+            text(renderer,64,641,1,label,167,156,132);
+        } else {
+            text(renderer,64,641,1,pending?"Waiting for the Android document picker...":(iso[0]?"Ready. Tap Play or press A to launch.":"Choose a legally owned disc image to begin."),167,156,132);
+        }
+#else
         text(renderer,64,641,1,pending?"Waiting for the disc picker...":(iso[0]?"Ready. Enter to launch; Tab to navigate.":"Choose a legally owned disc image to begin."),167,156,132);
-        if(strstr(status,"long") || strstr(status,"could")) text(renderer,64,658,1,status,223,143,126);
+#endif
+        if(strstr(status,"long") || strstr(status,"could") || strstr(status,"failed")) text(renderer,64,658,1,status,223,143,126);
         text(renderer,560,648,1,"AN ORIGINAL FAN PROJECT",198,179,142);
         text(renderer,560,667,1,"A quiet threshold. A familiar nightmare.",166,160,148);
         if(frame==5 && capture && capture[0]) {
@@ -231,6 +307,7 @@ int ashford_launcher(char *iso,size_t capacity)
         SDL_Delay(12);
     }
 cleanup:
+    if(pad) SDL_CloseGamepad(pad);
     if(dialog.lock) SDL_DestroyMutex(dialog.lock);
     if(music) SDL_DestroyAudioStream(music);
     SDL_free(wave);

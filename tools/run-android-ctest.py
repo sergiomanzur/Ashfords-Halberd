@@ -151,7 +151,7 @@ def shell_command(test_dir, binary_name, timeout, args):
     arg_str = ""
     if args:
         arg_str = " " + " ".join(shlex.quote(a) for a in args)
-    inner = f"cd {test_dir} && timeout {timeout} ./{binary_name}{arg_str}; echo EXIT_CODE:$?"
+    inner = f"cd {test_dir} && LD_LIBRARY_PATH=. timeout {timeout} ./{binary_name}{arg_str}; echo EXIT_CODE:$?"
     return ["shell", inner]
 
 
@@ -233,11 +233,12 @@ def run_test(adb, serial, build_dir, name, timeout):
 
     pushed_extras = []
     if name in GAME_SO_TESTS:
-        game_so = build_dir / "campaign" / "pc" / "librecvx_game.so"
-        if not game_so.exists():
-            return "FAIL", f"game library not found: {game_so}"
-        push_binary(adb, serial, game_so, remote_dir, "librecvx_game.so")
-        pushed_extras.append(f"{remote_dir}/librecvx_game.so")
+        for so_name in ("libmain.so", "librecvx_game.so"):
+            so_path = build_dir / "campaign" / "pc" / so_name
+            if not so_path.exists():
+                return "FAIL", f"shared library not found: {so_path}"
+            push_binary(adb, serial, so_path, remote_dir, so_name)
+            pushed_extras.append(f"{remote_dir}/{so_name}")
 
     test_args = substitute_args(TEST_ARGS.get(name, []))
 

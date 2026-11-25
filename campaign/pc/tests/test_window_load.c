@@ -2,12 +2,7 @@
 #define _GNU_SOURCE
 #include "../src/host/window_load.h"
 #include "../src/host/android_game_bridge.h"
-#include "../src/host/cheat.h"
-#include "../src/host/enemies.h"
-#include "../src/host/lang.h"
 #include "../src/host/room_snapshot.h"
-#include "../src/host/settings.h"
-#include "../src/host/tps.h"
 #include "../src/ps2_platform.h"
 #include <dlfcn.h>
 #include <link.h>
@@ -20,7 +15,6 @@
 #include <unistd.h>
 
 extern int snapshot_hash_android_path(const char* path, unsigned char out[32]);
-extern unsigned int RoomNameSwitch(unsigned int name);
 
 static void wr16(unsigned char* p, uint16_t v) { p[0] = (unsigned char)v; p[1] = (unsigned char)(v >> 8); }
 static void wr32(unsigned char* p, uint32_t v) { p[0] = (unsigned char)v; p[1] = (unsigned char)(v >> 8); p[2] = (unsigned char)(v >> 16); p[3] = (unsigned char)(v >> 24); }
@@ -257,8 +251,8 @@ int main(void)
     CHECK((uintptr_t)(uint32_t)dma_addr == dma_addr);
     CHECK(ps2_dma_ptr((uint32_t)dma_addr) == dma_blk);
     CHECK(ps2_dma_ptr((uint32_t)dma_addr + 4096u) == (void*)(dma_addr + 4096u));
-    CHECK(ps2_dma_ptr(0x30123456u) == (void*)(uintptr_t)0x30123456u);
-    CHECK(ps2_dma_ptr(0x00123456u) == (void*)(uintptr_t)0x30123456u);
+    CHECK(ps2_dma_ptr(0x33123456u) == (void*)(uintptr_t)0x33123456u);
+    CHECK(ps2_dma_ptr(0x03123456u) == (void*)(uintptr_t)0x33123456u);
     CHECK(ps2_dma_ptr(0x70000120u) == (void*)(uintptr_t)0x70000120u);
     CHECK(ps2_dma_ptr(0x80000120u) == (void*)(uintptr_t)0x70000120u);
 
@@ -295,8 +289,8 @@ int main(void)
         blob.data = NULL; blob.size = 0;
         RemoveIntcHandler(2, id);
 
-        /* Data-window address [0x30000000, 0x40000000) must also be rejected as code on 64-bit. */
-        int (*data_handler)(int) = (int (*)(int))(uintptr_t)0x30010000u;
+        /* Data-window address [0x33000000, 0x40000000) must also be rejected as code on 64-bit. */
+        int (*data_handler)(int) = (int (*)(int))(uintptr_t)0x33010000u;
         id = AddIntcHandler(2, data_handler, 0);
         CHECK(id > 0);
         CHECK(snapshot_platform_capture(&blob));
@@ -315,8 +309,8 @@ int main(void)
         if (pid == 0) {
             setenv("RECVX_DMA_MAP_AUDIT", "1", 1);
             ps2_dma_audit_refresh();
-            if (ps2_dma_ptr(0x30123456u) != (void*)(uintptr_t)0x30123456u) _exit(2);
-            if (ps2_dma_ptr(0x00123456u) != (void*)(uintptr_t)0x30123456u) _exit(3);
+            if (ps2_dma_ptr(0x33123456u) != (void*)(uintptr_t)0x33123456u) _exit(2);
+            if (ps2_dma_ptr(0x03123456u) != (void*)(uintptr_t)0x33123456u) _exit(3);
             if (ps2_dma_ptr(0x70000100u) != (void*)(uintptr_t)0x70000100u) _exit(4);
             if (ps2_dma_ptr((uint32_t)dma_addr) != dma_blk) _exit(5);
             _exit(0);
@@ -422,46 +416,9 @@ int main(void)
         CHECK(ba.ready == 1);
         CHECK(ba.data_count == 16 && ba.data_in_window == 16);
         CHECK(ba.func_count == 45 && ba.func_in_code == 45);
-
-        /* Direct bridged data access must alias librecvx_game.so's live objects. */
-        TpsConfig* raw_tps = (TpsConfig*)dlsym(handle, "g_tps");
-        EnemyOpts* raw_eo = (EnemyOpts*)dlsym(handle, "g_enemy_opts");
-        CheatState* raw_cheat = (CheatState*)dlsym(handle, "g_cheat");
-        CHECK(raw_tps != NULL && raw_eo != NULL && raw_cheat != NULL);
-        CHECK(&g_tps == raw_tps);
-        CHECK(&g_enemy_opts == raw_eo);
-        CHECK(&g_cheat == raw_cheat);
-
-        int saved_fov = g_tps.fov;
-        g_tps.fov = 93;
-        CHECK(raw_tps->fov == 93);
-        g_tps.fov = saved_fov;
-
-        /* Live calls through hidden forwarding thunks into librecvx_game.so. */
-        CHECK(enemy_opts() == raw_eo);
-        CHECK(spawn_count() > 0);
-        CHECK(spawn_name(0) != NULL && spawn_name(0)[0] != '\0');
-        lang_scan();
-        CHECK(lang_installed(LANG_EN) == 1);
-        CHECK(pc_in_game() == 0);
-        CHECK(room_snapshot_busy() == 0);
-        CHECK(RoomNameSwitch(0) == 0);
-
-        /* Rebased settings table pointers must target live librecvx_game.so fields (never sentinels). */
-        int checked_variety = 0, checked_fov = 0, checked_inf_hp = 0;
-        for (int i = 0; i < g_settings_n; i++) {
-            if (!strcmp(g_settings[i].label, "Randomizer variety")) {
-                CHECK(g_settings[i].val == &raw_eo->variety);
-                checked_variety = 1;
-            } else if (!strcmp(g_settings[i].label, "Field of view")) {
-                CHECK(g_settings[i].val == &raw_tps->fov);
-                checked_fov = 1;
-            } else if (!strcmp(g_settings[i].label, "Infinite health")) {
-                CHECK(g_settings[i].val == (int*)&raw_cheat->inf_health);
-                checked_inf_hp = 1;
-            }
-        }
-        CHECK(checked_variety && checked_fov && checked_inf_hp);
+        int st = ashford_game_bridge_self_test(handle);
+        printf("  bridge_selftest = %d\n", st);
+        CHECK(st == 0);
     }
 
     /* 13. Plan 2 Task 4: snapshot_executable_hash() hashes librecvx_game.so (not /proc/self/exe),

@@ -85,10 +85,11 @@
 - Modify: `campaign/pc/src/host/host.c`, `campaign/pc/src/host/ashford_launcher.c`, `campaign/pc/src/host/settings.c` (Android GLES 3.2 context creation, `ashford_window_init()` at startup, SAF disc picker integration, Android launcher text/touch/gamepad navigation, honest Android display/presentation settings mapping)
 - Modify: `tools/build-campaign-android.ps1` (support building the debug APK via Gradle alongside CMake native tests)
 
-- [ ] **Step 1:** Scaffold `campaign/android/` Gradle project wiring SDL3 `release-3.4.16` Java sources, `version.cmake` `versionName`/`versionCode`, `assets/branding/`, `libmain.so` + `librecvx_game.so` + `libSDL3.so`, `arm64-v8a`, `minSdk 26`, 16 KiB zip-aligned uncompressed native libs.
-- [ ] **Step 2:** Implement `AshfordActivity.java` + `android_saf.c` SAF ISO import and Android display/launcher wiring.
-- [ ] **Step 3:** Assemble APK with Gradle, install on Retroid Pocket 6 (`adb install -r`), verify APK launches cleanly to the Ashford launcher, AND run an Android instrumentation/activity test harness verifying `test_picture_gl`, `test_renderer_snapshot`, `test_gl_context_loss`, and the 6 Java/JNI-dependent tests on the RP6!
-- [ ] **Step 4:** Commit (`feat(android): Gradle APK shell, SAF ISO import, and Android display mapping`).
+- [x] **Step 1:** Scaffold `campaign/android/` Gradle project wiring SDL3 `release-3.4.16` Java sources, `version.cmake` `versionName`/`versionCode`, `assets/branding/`, `libmain.so` + `librecvx_game.so` + `libSDL3.so`, `arm64-v8a`, `minSdk 26`, 16 KiB zip-aligned uncompressed native libs.
+- [x] **Step 2:** Implement `AshfordActivity.java` + `android_saf.c` SAF ISO import and Android display/launcher wiring.
+- [x] **Step 3:** Assembled APK with Gradle (`aapt2 dump badging`: `com.ashfordshalberd.app`, versionCode `90300`, `0.9.3b`, `minSdk 26`, `arm64-v8a`, GLES 3.2; `zipalign -c -P 16 4` OK for both APKs), installed on Retroid Pocket 6 (`cf916605`), verified live boot to the immersive `1920x1080` Ashford Launcher, AND built an `androidTest` instrumentation harness (framework `android.test.runner`, zero Maven deps, `libjni_test_*.so` staged ONLY in the androidTest APK) verifying live on the RP6: `pad_weapon_switch`, `pad_quicksave`, `rumble`, `test_audio_snapshot`, `test_audio_snapshot_decoder`, `test_audio_snapshot_synth` (7/7 PASS, 4.5s) plus the `bindings` virtual-gamepad block (dead in headless runs). Full on-device ctest roster: 41 passed, 0 failed, 6 skipped (47 total); Windows x86 `-PlatformTestsOnly`: 41/41; `tests/offline_identity_tests.py` 3/3 OK; `campaign/pc/tests/test_snapshot_manifest.py` 12/12 OK.
+    - Found & fixed en route: `tmpfile()` is unusable in Android app processes (`test_bindings.c` now uses a cwd scratch file); the bindings reconnect block now numbers virtual pads relative to the first free SDL player index (the RP6's built-in gamepad holds player 0); the harness needs a headless `NativeTestActivity` context for SDL's Android file/audio JNI bridges.
+- [x] **Step 4:** Commit (`feat(android): Gradle APK shell, SAF ISO import, and Android display mapping`).
 
 ---
 

@@ -10,6 +10,11 @@
 #include <stdio.h>
 #include <string.h>
 
+/* tmpfile() is unusable in Android app processes (no writable legacy temp
+   dir there, while the adb shell has one); a scratch file in the working
+   directory works in every domain this test runs in. */
+static FILE* scratch_ini(void) { return fopen("bindings-test.ini.tmp", "w+"); }
+
 TpsConfig g_tps = { .key = SDL_SCANCODE_F5 };
 MenuMouse g_menu_mouse;
 SDL_Window* g_window;
@@ -58,7 +63,7 @@ static int weapon_bindings(void)
         bind_set(row, BIND_PAD, 0, BIND_L3 + 1 + SDL_GAMEPAD_BUTTON_GUIDE);
         CHECK(bind_get(row, BIND_PAD, 1) == 1 + SDL_GAMEPAD_BUTTON_MISC1);
         {
-            FILE* f = tmpfile();
+            FILE* f = scratch_ini();
             char line[256], k[64], v[128];
             CHECK(f);
             bind_ini_write(f);
@@ -95,7 +100,7 @@ static int quicksave_bindings(void)
         bind_set(row, BIND_KB, 1, SDL_SCANCODE_F15 + i);
         bind_set(row, BIND_PAD, 0, BIND_L3 + 1 + SDL_GAMEPAD_BUTTON_GUIDE);
         bind_set(row, BIND_PAD, 1, BIND_L3 + 1 + SDL_GAMEPAD_BUTTON_MISC1);
-        FILE* f = tmpfile();
+        FILE* f = scratch_ini();
         char line[256], k[64], v[128];
         CHECK(f); bind_ini_write(f); bind_reset(BIND_KB); bind_reset(BIND_PAD); rewind(f);
         while (fgets(line, sizeof(line), f))
@@ -276,9 +281,10 @@ int main(void)
     CHECK(bind_ini_line("pad_tps_knife", "leftshoulder") && !bind_ini_line("pad_tps_forward", "dpup"));
     /* recvx.ini round trip */
     {
-        FILE* f = tmpfile();
+        FILE* f = scratch_ini();
         char line[256], k[64], v[128];
         int n = 0;
+        CHECK(f);
         bind_ini_write(f);
         bind_reset(BIND_KB); bind_reset(BIND_PAD);
         CHECK(held(B_CROSS, SDL_SCANCODE_Z) && g_tps.key == SDL_SCANCODE_F5);
@@ -519,23 +525,43 @@ int main(void)
         SDL_UpdateGamepads();
         SDL_CloseGamepad(g);
         bind_set_gamepad(NULL);
-        {   /* which gamepad: SDL's player numbers, kept by a pad that reconnects */
-            SDL_JoystickID id2, id1;
+        {   /* which gamepad: SDL's player numbers, kept by a pad that reconnects.
+               A handheld's built-in controls already hold player 0 when the test runs
+               on the device itself (the androidTest harness does), so number the
+               virtual pads relative to the first free player index instead of
+               assuming an empty set, and let "any" pick whatever is listed first. */
+            SDL_JoystickID id2, id1, first;
+            char pad2[32], pad3[32];
+            int nphys = 0, base;
+            SDL_JoystickID* existing = SDL_GetGamepads(&nphys);
+            CHECK(existing && nphys >= 1);
+            first = existing[0];
+            SDL_free(existing);
+            base = SDL_GetGamepadPlayerIndexForID(id);
+            CHECK(base >= 0);
             id2 = SDL_AttachVirtualJoystick(&d);
-            CHECK(SDL_GetGamepadPlayerIndexForID(id) == 0 && SDL_GetGamepadPlayerIndexForID(id2) == 1);
-            CHECK(bind_pick_pad() == id);                                   /* Auto, any: the first */
-            g_input_pad = 2; CHECK(bind_pick_pad() == id2);
-            CHECK(!strcmp(bind_pad_choice(2, buf, sizeof(buf)), "2: test pad")   /* the gamepad mapping's name (same VID/PID) */ && !strcmp(bind_pad_choice(0, buf, sizeof(buf)), "Any"));
-            CHECK(!strcmp(bind_pad_choice(3, buf, sizeof(buf)), "3: not connected"));
-            g_input_pad = 3; CHECK(bind_pick_pad() == 0);
+            CHECK(SDL_GetGamepadPlayerIndexForID(id2) == base + 1);
+            snprintf(pad2, sizeof(pad2), "%d: test pad", base + 2);
+            snprintf(pad3, sizeof(pad3), "%d: not connected", base + 3);
+            CHECK(bind_pick_pad() == first);                             /* Auto, any: the first listed */
+            g_input_pad = base + 2; CHECK(bind_pick_pad() == id2);
+            CHECK(!strcmp(bind_pad_choice(base + 2, buf, sizeof(buf)), pad2)   /* the gamepad mapping's name (same VID/PID) */ && !strcmp(bind_pad_choice(0, buf, sizeof(buf)), "Any"));
+            CHECK(!strcmp(bind_pad_choice(base + 3, buf, sizeof(buf)), pad3));
+            g_input_pad = base + 3; CHECK(bind_pick_pad() == 0);
             g_input_source = INPUT_KBM; g_input_pad = 0; CHECK(bind_pick_pad() == 0);
-            g_input_source = INPUT_PAD; g_input_pad = 1; CHECK(bind_pick_pad() == id);
-            SDL_DetachVirtualJoystick(id);                                  /* player 1 unplugged: nobody else takes its number */
+            g_input_source = INPUT_PAD; g_input_pad = base + 1; CHECK(bind_pick_pad() == id);
+            SDL_DetachVirtualJoystick(id);                                /* player 1 unplugged: nobody else takes its number */
             CHECK(bind_pick_pad() == 0);
-            g_input_pad = 2; CHECK(bind_pick_pad() == id2);
-            id1 = SDL_AttachVirtualJoystick(&d);                            /* back: player 1 again, though listed after pad 2 */
-            g_input_pad = 1; CHECK(id1 != id && bind_pick_pad() == id1);
-            g_input_pad = 0; CHECK(bind_pick_pad() == id2);                 /* any: the first listed */
+            g_input_pad = base + 2; CHECK(bind_pick_pad() == id2);
+            id1 = SDL_AttachVirtualJoystick(&d);                          /* back: player 1 again, though listed after pad 2 */
+            g_input_pad = base + 1; CHECK(id1 != id && bind_pick_pad() == id1);
+            g_input_pad = 0;
+            {   /* any: the first listed, whoever that is by now (a handheld's
+                   built-in pad, or else the virtual pad attached earliest) */
+                SDL_JoystickID *now = SDL_GetGamepads(&nphys);
+                CHECK(now && nphys >= 1 && bind_pick_pad() == now[0]);
+                SDL_free(now);
+            }
             /* Gamepad only lets SDL deliver gamepad input while the window is in the background */
             bind_apply_source(); CHECK(SDL_GetHintBoolean(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, false));
             g_input_source = INPUT_AUTO;
@@ -547,7 +573,7 @@ int main(void)
     CHECK(!weapon_bindings());
     CHECK(!quicksave_bindings());
     {
-        FILE* f = tmpfile();
+        FILE* f = scratch_ini();
         char line[256], k[64], v[128];
         CHECK(f);
         bind_set(fps_row, BIND_KB, 0, SDL_SCANCODE_F16);

@@ -147,7 +147,7 @@ void ps2_memory_init(void)
         void* probe = handle ? dlsym(handle, "Ps2_malloc_mem") : NULL;
         Dl_info dli;
         AndroidGameAudit audit;
-        if (!probe || ((uintptr_t)probe & ASHFORD_WINDOW_BASE) != ASHFORD_WINDOW_BASE ||
+        if (!probe || ((uintptr_t)probe & UINT32_C(0x30000000)) != UINT32_C(0x30000000) ||
             (uintptr_t)probe < ASHFORD_WINDOW_BASE || (uintptr_t)probe >= ASHFORD_WINDOW_LIMIT)
             host_fatal("This Android build has an invalid game window layout (Ps2_malloc_mem=%p).", probe);
         memset(&dli, 0, sizeof(dli));

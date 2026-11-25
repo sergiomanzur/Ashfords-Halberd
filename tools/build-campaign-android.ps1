@@ -4,6 +4,9 @@ param(
     [switch]$PlatformTestsOnly,
     [switch]$ConfigureOnly,
     [switch]$SkipDeviceTests,
+    [switch]$SkipInstrumentationTests,
+    [switch]$SkipApk,
+    [switch]$InstallApk,
     [string]$BuildDirectory = 'build/campaign-android',
     [int]$Jobs = 4,
     [string]$Serial
@@ -53,6 +56,46 @@ try {
     & $campaignCMake --build $campaignBuild --parallel $Jobs
     if ($LASTEXITCODE) { throw 'Android campaign build failed.' }
 
+    if (!$PlatformTestsOnly -and !$SkipApk) {
+        $androidAppDir = Join-Path $campaignRoot 'campaign/android'
+        $gradleExe = $null
+        $wrapperBat = Join-Path $androidAppDir 'gradlew.bat'
+        if (Test-Path -LiteralPath $wrapperBat) {
+            $gradleExe = $wrapperBat
+        } else {
+            $cachedGradle = Get-ChildItem "$env:USERPROFILE/.gradle/wrapper/dists/gradle-8.9-bin/*/gradle-8.9/bin/gradle.bat" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($cachedGradle) { $gradleExe = $cachedGradle.FullName }
+            else { $gradleExe = (Get-Command gradle -ErrorAction Stop).Source }
+        }
+        $envOldJavaHome = $env:JAVA_HOME
+        $envOldAndroidHome = $env:ANDROID_HOME
+        try {
+            if (!$env:JAVA_HOME -or !(Test-Path -LiteralPath (Join-Path $env:JAVA_HOME 'bin/javac.exe'))) {
+                $zulu = "$env:USERPROFILE/scoop/apps/zulu21-jdk/current"
+                if (Test-Path -LiteralPath (Join-Path $zulu 'bin/javac.exe')) { $env:JAVA_HOME = $zulu }
+            }
+            if (!$env:ANDROID_HOME) {
+                $sdkRoot = "$env:LOCALAPPDATA/Android/Sdk"
+                if (Test-Path -LiteralPath $sdkRoot) { $env:ANDROID_HOME = $sdkRoot }
+            }
+            & $gradleExe -p $androidAppDir assembleDebug assembleDebugAndroidTest "-PashfordNativeDir=$campaignBuild"
+            if ($LASTEXITCODE) { throw 'Android APK assembly failed.' }
+            $apkPath = Join-Path $androidAppDir 'app/build/outputs/apk/debug/app-debug.apk'
+            Write-Host "Built Android APK: $apkPath"
+            if ($InstallApk) {
+                $adb = "$env:LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe"
+                $adbArgs = @()
+                if ($Serial) { $adbArgs += @('-s', $Serial) }
+                $adbArgs += @('install', '-r', $apkPath)
+                & $adb @adbArgs
+                if ($LASTEXITCODE) { throw 'adb install failed.' }
+            }
+        } finally {
+            $env:JAVA_HOME = $envOldJavaHome
+            $env:ANDROID_HOME = $envOldAndroidHome
+        }
+    }
+
     if ($SkipDeviceTests) { return }
     # Run the on-device test suite.
     $runner = Join-Path $PSScriptRoot 'run-android-ctest.py'
@@ -61,4 +104,14 @@ try {
     if ($Serial) { $runnerArgs += @('--serial', $Serial) }
     & python @runnerArgs
     if ($LASTEXITCODE) { throw 'On-device ctest run reported failures.' }
+
+    # The Java-lifecycle-dependent SDL tests run through the androidTest
+    # instrumentation harness (they segfault headless in adb shell).
+    if (-not $SkipInstrumentationTests -and -not $PlatformTestsOnly -and -not $SkipApk) {
+        $instrRunner = Join-Path $PSScriptRoot 'run-android-instrumentation.py'
+        $instrArgs = @($instrRunner)
+        if ($Serial) { $instrArgs += @('--serial', $Serial) }
+        & python @instrArgs
+        if ($LASTEXITCODE) { throw 'On-device instrumentation run reported failures.' }
+    }
 } finally { $env:ANDROID_NDK = $envOldAndroidNdk }

@@ -16,7 +16,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#pragma GCC visibility push(hidden)
 #include "actors.h"
 #include "biorand.h"
 #include "cheat.h"
@@ -31,33 +30,33 @@
 #include "../gs/stream.h"
 
 /* ---------------------------------------------------------------- 16 data slots */
-int* ashford_ptr_g_appear_chr;
-CheatState* ashford_ptr_g_cheat;
-EnemyOpts* ashford_ptr_g_enemy_opts;
-int* ashford_ptr_g_lang;
-int* ashford_ptr_g_subtitles;
-int* ashford_ptr_g_lang_pictures;
-int* ashford_ptr_g_lang_voices;
-TpsConfig* ashford_ptr_g_tps;
-TpsHud* ashford_ptr_g_hud;
-int* ashford_ptr_tps_cam_active;
-char* (*ashford_ptr_rdx_files)[205];
-const unsigned char (*ashford_ptr_FontSz)[126];
-unsigned int (*ashford_ptr_fstbl)[24];
-unsigned int (*ashford_ptr_fsheader)[24];
-unsigned int (*ashford_ptr_wallpaper)[24];
-void* (*ashford_ptr_comevt_message_tab)[8];
+__attribute__((visibility("hidden"))) int* ashford_ptr_g_appear_chr;
+__attribute__((visibility("hidden"))) CheatState* ashford_ptr_g_cheat;
+__attribute__((visibility("hidden"))) EnemyOpts* ashford_ptr_g_enemy_opts;
+__attribute__((visibility("hidden"))) int* ashford_ptr_g_lang;
+__attribute__((visibility("hidden"))) int* ashford_ptr_g_subtitles;
+__attribute__((visibility("hidden"))) int* ashford_ptr_g_lang_pictures;
+__attribute__((visibility("hidden"))) int* ashford_ptr_g_lang_voices;
+__attribute__((visibility("hidden"))) TpsConfig* ashford_ptr_g_tps;
+__attribute__((visibility("hidden"))) TpsHud* ashford_ptr_g_hud;
+__attribute__((visibility("hidden"))) int* ashford_ptr_tps_cam_active;
+__attribute__((visibility("hidden"))) char* (*ashford_ptr_rdx_files)[205];
+__attribute__((visibility("hidden"))) const unsigned char (*ashford_ptr_FontSz)[126];
+__attribute__((visibility("hidden"))) unsigned int (*ashford_ptr_fstbl)[24];
+__attribute__((visibility("hidden"))) unsigned int (*ashford_ptr_fsheader)[24];
+__attribute__((visibility("hidden"))) unsigned int (*ashford_ptr_wallpaper)[24];
+__attribute__((visibility("hidden"))) void* (*ashford_ptr_comevt_message_tab)[8];
 
 /* Hidden sentinel storage referenced only by compile-time table initializers in
  * config.c (keys[]) and settings.c (g_settings[]), rebased in-place before use. */
-int ashford_sent_g_appear_chr;
-CheatState ashford_sent_g_cheat;
-EnemyOpts ashford_sent_g_enemy_opts;
-int ashford_sent_g_lang;
-int ashford_sent_g_lang_pictures;
-int ashford_sent_g_lang_voices;
-int ashford_sent_g_subtitles;
-TpsConfig ashford_sent_g_tps;
+__attribute__((visibility("hidden"))) int ashford_sent_g_appear_chr;
+__attribute__((visibility("hidden"))) CheatState ashford_sent_g_cheat;
+__attribute__((visibility("hidden"))) EnemyOpts ashford_sent_g_enemy_opts;
+__attribute__((visibility("hidden"))) int ashford_sent_g_lang;
+__attribute__((visibility("hidden"))) int ashford_sent_g_lang_pictures;
+__attribute__((visibility("hidden"))) int ashford_sent_g_lang_voices;
+__attribute__((visibility("hidden"))) int ashford_sent_g_subtitles;
+__attribute__((visibility("hidden"))) TpsConfig ashford_sent_g_tps;
 
 /* ---------------------------------------------------------------- 45 function pointers */
 static void (*fn_appear_frame)(void);
@@ -162,7 +161,6 @@ int  spawn_count(void) { return fn_spawn_count(); }
 const char* spawn_name(int i) { return fn_spawn_name(i); }
 void spoiler_key(int k) { fn_spoiler_key(k); }
 void tps_frame(void) { fn_tps_frame(); }
-#pragma GCC visibility pop
 
 typedef struct {
     const char* name;
@@ -338,5 +336,53 @@ void ashford_game_bridge_audit(AshfordBridgeAudit* out)
         if (a >= ASHFORD_CODE_BASE && a < ASHFORD_CODE_LIMIT)
             out->func_in_code++;
     }
+}
+
+int ashford_game_bridge_self_test(void* game_handle)
+{
+    if (!g_bridge_ready || !game_handle)
+        return 1;
+
+    TpsConfig* raw_tps = (TpsConfig*)dlsym(game_handle, "g_tps");
+    EnemyOpts* raw_eo = (EnemyOpts*)dlsym(game_handle, "g_enemy_opts");
+    CheatState* raw_cheat = (CheatState*)dlsym(game_handle, "g_cheat");
+    if (!raw_tps || !raw_eo || !raw_cheat)
+        return 2;
+    if (&g_tps != raw_tps || &g_enemy_opts != raw_eo || &g_cheat != raw_cheat)
+        return 3;
+
+    int saved_fov = g_tps.fov;
+    g_tps.fov = 93;
+    int alias_ok = (raw_tps->fov == 93);
+    g_tps.fov = saved_fov;
+    if (!alias_ok)
+        return 4;
+
+    if (enemy_opts() != raw_eo) return 5;
+    if (spawn_count() <= 0) return 6;
+    const char* sn = spawn_name(0);
+    if (!sn || !sn[0]) return 7;
+    lang_scan();
+    if (lang_installed(LANG_EN) != 1) return 8;
+    if (pc_in_game() != 0) return 9;
+    if (room_snapshot_busy() != 0) return 10;
+    if (RoomNameSwitch(0) != 0) return 11;
+
+    int checked_variety = 0, checked_fov = 0, checked_inf_hp = 0;
+    for (int i = 0; i < g_settings_n; i++) {
+        if (!strcmp(g_settings[i].label, "Randomizer variety")) {
+            if (g_settings[i].val != &raw_eo->variety) return 12;
+            checked_variety = 1;
+        } else if (!strcmp(g_settings[i].label, "Field of view")) {
+            if (g_settings[i].val != &raw_tps->fov) return 13;
+            checked_fov = 1;
+        } else if (!strcmp(g_settings[i].label, "Infinite health")) {
+            if (g_settings[i].val != (int*)&raw_cheat->inf_health) return 14;
+            checked_inf_hp = 1;
+        }
+    }
+    if (!checked_variety || !checked_fov || !checked_inf_hp)
+        return 15;
+    return 0;
 }
 #endif /* defined(__ANDROID__) && defined(ASHFORD_ANDROID_GAME_BRIDGE) */

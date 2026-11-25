@@ -1,0 +1,157 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Single source of truth for versionName and versionCode: campaign/cmake/version.cmake
+def repoRoot = rootProject.projectDir.parentFile.parentFile
+def versionFile = new File(repoRoot, 'campaign/cmake/version.cmake')
+def parsedVersionName = '0.0.0'
+def parsedVersionCode = 1
+if (versionFile.exists()) {
+    def text = versionFile.getText('UTF-8')
+    def mName = (text =~ /set\(ASHFORD_VERSION\s+"([^"]+)"\)/)
+    if (mName.find()) {
+        parsedVersionName = mName.group(1)
+    }
+    def mNum = (text =~ /set\(ASHFORD_VERSION_NUMERIC\s+"(\d+),(\d+),(\d+),(\d+)"\)/)
+    if (mNum.find()) {
+        int maj = Integer.parseInt(mNum.group(1))
+        int min = Integer.parseInt(mNum.group(2))
+        int pat = Integer.parseInt(mNum.group(3))
+        int bld = Integer.parseInt(mNum.group(4))
+        parsedVersionCode = maj * 1000000 + min * 10000 + pat * 100 + bld
+        if (parsedVersionCode < 1) parsedVersionCode = 1
+    }
+}
+
+// Native build output directory (default: <repo>/build/campaign-android).
+// Override with -PashfordNativeDir=/abs/or/rel/path when invoking Gradle directly.
+def nativeBuildDir = project.hasProperty('ashfordNativeDir')
+    ? file(project.property('ashfordNativeDir'))
+    : new File(repoRoot, 'build/campaign-android')
+
+def sdlJavaDir = new File(nativeBuildDir, '_deps/sdl3-src/android-project/app/src/main/java')
+def nativeLibsOutDir = new File(nativeBuildDir, 'campaign/pc')
+def brandingSrcDir = new File(repoRoot, 'assets/branding')
+
+def stagedJniDir = layout.buildDirectory.dir('generated/ashfordJniLibs').get().asFile
+def stagedTestJniDir = layout.buildDirectory.dir('generated/ashfordTestJniLibs').get().asFile
+def stagedAssetsDir = layout.buildDirectory.dir('generated/ashfordAssets').get().asFile
+
+tasks.register('stageAshfordNativeLibs', Copy) {
+    doFirst {
+        def mainSo = new File(nativeLibsOutDir, 'libmain.so')
+        def gameSo = new File(nativeLibsOutDir, 'librecvx_game.so')
+        if (!mainSo.exists() || !gameSo.exists()) {
+            throw new GradleException(
+                "Missing Android native libraries in ${nativeLibsOutDir}. " +
+                "Build CMake targets 'main' and 'recvx_game_so' first (e.g. tools/build-campaign-android.ps1)."
+            )
+        }
+    }
+    from(nativeLibsOutDir) {
+        include 'libmain.so', 'librecvx_game.so'
+    }
+    into new File(stagedJniDir, 'arm64-v8a')
+}
+
+tasks.register('stageAshfordBrandingAssets', Copy) {
+    from(brandingSrcDir) {
+        include 'launcher.bmp', 'ashford-icon.bmp', 'launcher.wav'
+    }
+    into new File(stagedAssetsDir, 'assets/branding')
+}
+
+// Instrumentation test libraries for the Java-lifecycle-dependent SDL tests.
+// Staged ONLY into the androidTest APK so app-debug.apk stays lean.
+tasks.register('stageAshfordTestNativeLibs', Copy) {
+    doFirst {
+        def libs = [
+            'bindings', 'pad_weapon_switch', 'pad_quicksave', 'rumble',
+            'audio_snapshot', 'audio_snapshot_decoder', 'audio_snapshot_synth'
+        ].collect { "libjni_test_${it}.so" }
+        def missing = libs.findAll { !new File(nativeLibsOutDir, it).exists() }
+        if (!missing.isEmpty()) {
+            throw new GradleException(
+                "Missing Android instrumentation test libraries in ${nativeLibsOutDir}: " +
+                "${missing.join(', ')}. Build the CMake jni_test_* targets first " +
+                "(e.g. tools/build-campaign-android.ps1)."
+            )
+        }
+    }
+    from(nativeLibsOutDir) {
+        include 'libjni_test_*.so'
+    }
+    into new File(stagedTestJniDir, 'arm64-v8a')
+}
+
+android {
+    namespace = 'com.ashfordshalberd.app'
+    compileSdk = 34
+    buildToolsVersion = '34.0.0'
+    ndkVersion = '26.2.11394342'
+
+    defaultConfig {
+        applicationId = 'com.ashfordshalberd.app'
+        minSdk = 26
+        targetSdk = 34
+        versionCode = parsedVersionCode
+        versionName = parsedVersionName
+
+        // Built-in framework instrumentation runner for the on-device
+        // Java-lifecycle-dependent SDL tests (zero external Maven deps).
+        testInstrumentationRunner = 'android.test.InstrumentationTestRunner'
+        useLibrary 'android.test.base'
+        useLibrary 'android.test.runner'
+
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    packaging {
+        jniLibs {
+            // Store .so files uncompressed and 16 KiB zip-aligned for direct bionic
+            // android_dlopen_ext() loading from base.apk!/lib/arm64-v8a/.
+            useLegacyPackaging = false
+        }
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs += [sdlJavaDir]
+            jniLibs.srcDirs += [stagedJniDir]
+            assets.srcDirs += [stagedAssetsDir]
+        }
+        androidTest {
+            jniLibs.srcDirs += [stagedTestJniDir]
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = false
+        }
+    }
+
+    lint {
+        abortOnError = false
+    }
+}
+
+tasks.matching { it.name.startsWith('merge') && it.name.endsWith('JniLibFolders') && !it.name.contains('AndroidTest') }.configureEach {
+    dependsOn tasks.named('stageAshfordNativeLibs')
+}
+
+tasks.matching { it.name.startsWith('merge') && it.name.endsWith('JniLibFolders') && it.name.contains('AndroidTest') }.configureEach {
+    dependsOn tasks.named('stageAshfordTestNativeLibs')
+}
+
+tasks.matching { it.name.startsWith('merge') && it.name.endsWith('Assets') }.configureEach {
+    dependsOn tasks.named('stageAshfordBrandingAssets')
+}

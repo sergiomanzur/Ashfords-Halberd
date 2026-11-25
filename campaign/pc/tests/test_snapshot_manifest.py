@@ -88,8 +88,8 @@ class ManifestTests(unittest.TestCase):
         struct.pack_into('<IIQQQQQQ', buf, 64, 1, 4, 0, min_vaddr, min_vaddr, 0x1000, 0x1000, 0x4000)
         # PT_LOAD 1: data at 0x10000
         struct.pack_into('<IIQQQQQQ', buf, 64 + 56, 1, 7 if wx else 6, off_data, 0x10000, 0x10000, m.MANIFEST_BYTES + 0x1000, data_memsz, 0x4000)
-        # PT_LOAD 2: exec at 0x10000000
-        struct.pack_into('<IIQQQQQQ', buf, 64 + 112, 1, 5, off_data, 0x10000000, 0x10000000, 0x100, 0x100, 0x4000)
+        # PT_LOAD 2: exec at 0x0D000000 (runtime 0x40000000 with load_bias 0x33000000)
+        struct.pack_into('<IIQQQQQQ', buf, 64 + 112, 1, 5, off_data, 0x0D000000, 0x0D000000, 0x100, 0x100, 0x4000)
         # .ahsnap header
         buf[off_ahsnap:off_ahsnap + 24] = struct.pack('<8sIIII', b'AHSMAP02', 2, 0, 0, 0)
         buf[off_str:off_str + len(shstr)] = shstr
@@ -99,8 +99,8 @@ class ManifestTests(unittest.TestCase):
         struct.pack_into('<IIQQQQIIQQ', buf, off_sh + 128, 11, 1, 3, 0x10000, off_data, 0x1000, 0, 0, 16, 0)
         # Section 3: .ahsnap (vaddr 0x11000, size MANIFEST_BYTES)
         struct.pack_into('<IIQQQQIIQQ', buf, off_sh + 192, 17, 1, 2, 0x11000, off_ahsnap, m.MANIFEST_BYTES, 0, 0, 16, 0)
-        # Section 4: .text (vaddr 0x10000000, size 0x100)
-        struct.pack_into('<IIQQQQIIQQ', buf, off_sh + 256, 25, 1, 6, 0x10000000, off_data, 0x100, 0, 0, 16, 0)
+        # Section 4: .text (vaddr 0x0D000000, size 0x100)
+        struct.pack_into('<IIQQQQIIQQ', buf, off_sh + 256, 25, 1, 6, 0x0D000000, off_data, 0x100, 0, 0, 16, 0)
         return buf, off_ahsnap
 
     def test_lld_map_selection_and_elf_patch(self):
@@ -114,19 +114,19 @@ class ManifestTests(unittest.TestCase):
             '           11000            11000     8018    16         recvx_game_snapshot/snapshot_manifest.c.o:(.ahsnap)\n'
         )
         regions = m.parse_lld_map(lld)
-        self.assertEqual([(r.address, r.size) for r in regions], [(0x30010000, 0x30)])
+        self.assertEqual([(r.address, r.size) for r in regions], [(m.ELF_BASE + 0x10000, 0x30)])
         original, off_ahsnap = self._elf_fixture()
-        symbols = m.parse_nm('\n'.join(f'0000000000010000 B {n}' for n in m.REQUIRED_SYMBOLS), base=m.BASE)
+        symbols = m.parse_nm('\n'.join(f'0000000000010000 B {n}' for n in m.REQUIRED_SYMBOLS), base=m.ELF_BASE)
         patched = m.patch_elf_image(bytes(original), regions, symbols)
         self.assertEqual(len(patched), len(original))
         self.assertEqual(patched[:off_ahsnap], original[:off_ahsnap])
         self.assertEqual(struct.unpack_from('<IIII', patched, off_ahsnap + 8),
-                         (2, 1, 0x30, zlib.crc32(struct.pack('<II', 0x30010000, 0x30))))
+                         (2, 1, 0x30, zlib.crc32(struct.pack('<II', m.ELF_BASE + 0x10000, 0x30))))
 
     def test_elf_rejects_window_overflow_wrong_arch_and_wx(self):
-        regions = [m.Region(0x30010000, 0x10)]
-        symbols = {n: 0x30010000 for n in m.REQUIRED_SYMBOLS}
-        for kwargs in [{'data_memsz': 0x10000000}, {'machine': 62}, {'min_vaddr': 0x10000}, {'wx': True}]:
+        regions = [m.Region(m.ELF_BASE + 0x10000, 0x10)]
+        symbols = {n: m.ELF_BASE + 0x10000 for n in m.REQUIRED_SYMBOLS}
+        for kwargs in [{'data_memsz': 0x0D000000}, {'machine': 62}, {'min_vaddr': 0x10000}, {'wx': True}]:
             buf, _ = self._elf_fixture(**kwargs)
             with self.assertRaises(ValueError):
                 m.patch_elf_image(bytes(buf), regions, symbols)

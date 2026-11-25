@@ -1,7 +1,7 @@
 /* Android arm64 fixed-address window loader and DMA host pool.
  *
  * Single source of truth for the Android arm64 32-bit-compatible address map:
- *   [0x30000000, 0x40000000) game data window (PS2 identity + .rodata/.data/.bss/.ahsnap)
+ *   [0x33000000, 0x40000000) game data window (208 MiB inside 0x3xxxxxxx, clear of ART dalvik-main [0x12c00000, 0x32c00000))
  *   [0x40000000, 0x50000000) game code range (.plt/.text/.eh_frame)
  *   [0x50000000, 0x70000000) DMA host pool guard range (256 MiB reserved at [0x50000000, 0x60000000))
  *   [0x70000000, 0x70004000) PS2 scratchpad (PS2_SPR_BASE / PS2_SPR_SIZE)
@@ -15,9 +15,9 @@
 extern "C" {
 #endif
 
-#define ASHFORD_RESERVE_BASE      UINT32_C(0x30000000) /* reservation covers window + code */
-#define ASHFORD_RESERVE_SIZE      UINT32_C(0x20000000)
-#define ASHFORD_WINDOW_BASE       UINT32_C(0x30000000) /* game data + PS2 identities */
+#define ASHFORD_RESERVE_BASE      UINT32_C(0x33000000) /* reservation covers window + code, clear of ART 512 MiB heap */
+#define ASHFORD_RESERVE_SIZE      UINT32_C(0x1D000000) /* [0x33000000, 0x50000000) */
+#define ASHFORD_WINDOW_BASE       UINT32_C(0x33000000) /* game data + PS2 identities (all in 0x3xxxxxxx) */
 #define ASHFORD_WINDOW_LIMIT      UINT32_C(0x40000000)
 #define ASHFORD_CODE_BASE         UINT32_C(0x40000000) /* game code range */
 #define ASHFORD_CODE_LIMIT        UINT32_C(0x50000000)

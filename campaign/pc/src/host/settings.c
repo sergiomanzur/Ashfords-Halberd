@@ -18,6 +18,9 @@
 #include "biorand.h"
 #include "lang.h"
 #include "savestore.h"
+#if defined(__ANDROID__)
+#include "android_saf.h"
+#endif
 #include "../audio/audio.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -118,6 +121,16 @@ static void borderless_leave(void)
 
 void settings_apply_display(void)
 {
+#if defined(__ANDROID__)
+    int w = 0, h = 0;
+    android_set_immersive(g_config.fullscreen);
+    SDL_SetWindowFullscreen(g_window, g_config.fullscreen != 0);
+    SDL_GetWindowSizeInPixels(g_window, &w, &h);
+    host_log("display: android %s, surface %d x %d\n",
+             g_config.fullscreen ? (g_config.fullscreen_exclusive ? "active display mode (immersive)" : "immersive fullscreen") : "letterboxed presentation",
+             w, h);
+    return;
+#else
     SDL_DisplayID d = SDL_GetDisplayForWindow(g_window);
     SDL_DisplayMode m;
     int excl = g_config.fullscreen_exclusive && g_config.fullscreen;
@@ -151,8 +164,16 @@ void settings_apply_display(void)
         else snprintf(kind, sizeof(kind), "%s", !g_config.fullscreen ? "windowed" : bl ? "borderless window" : "borderless fullscreen");
         host_log("display: %s, window %d,%d %d x %d\n", kind, x, y, w, h);
     }
+#endif
 }
-void settings_apply_window(void) { if (!g_config.fullscreen) SDL_SetWindowSize(g_window, g_config.window_w, g_config.window_h); }
+void settings_apply_window(void)
+{
+#if defined(__ANDROID__)
+    /* Android surfaces always fill the activity window; presentation presets are kept in config. */
+#else
+    if (!g_config.fullscreen) SDL_SetWindowSize(g_window, g_config.window_w, g_config.window_h);
+#endif
+}
 static void apply_vsync(void) { SDL_GL_SetSwapInterval(g_config.vsync ? 1 : 0); }
 static void apply_volume(void) { audio_apply_volumes(); }
 
@@ -337,7 +358,11 @@ static void spawn_set(int v) { g_cheat.spawn_idx = v; }
 static const char* spawn_nm(int v, char* b, int n) { snprintf(b, n, "%s", spawn_name(v)); return b; }
 
 static const char* const onoff_auto[] = { "Auto", "Off", "On" };
+#if defined(__ANDROID__)
+static const char* const display_modes[] = { "Letterboxed (system bars)", "Immersive fullscreen", "Active display mode" };
+#else
 static const char* const display_modes[] = { "Windowed", "Borderless fullscreen", "Exclusive fullscreen" };
+#endif
 static const char* const modes3[] = { "Original (4:3)", "Stretch to width", "Off" };
 static const char* const fps_limits[] = { "Off (display rate)", "30", "60", "90", "120", "144" };   /* render.c present_hz */
 static const char* const aspects[] = { "4:3 (original)", "Stretch to window", "Widescreen (hor+)" };
@@ -392,10 +417,18 @@ const Setting g_settings[] = {
     { SP_DISPLAY, "Experience preset", NULL, 0, 2, 1, (const char* const[]){ "Original", "Enhanced", "Custom" }, .get = preset_get, .set = preset_set, .group = "QUICK SETUP",
       .help = "Original: 4:3, 30 FPS presentation and classic movement. Enhanced: widescreen, smooth frames, modern movement and convenience options. Custom keeps your choices. All settings remain available; bindings, saves, audio and camera tuning stay unchanged." },
     { SP_DISPLAY, "Display mode", NULL, 0, 2, 1, display_modes, .get = dmode_get, .set = dmode_set, .apply = settings_apply_display, .group = "WINDOW",
+#if defined(__ANDROID__)
+      .help = "Immersive fullscreen hides Android system bars. Letterboxed keeps system bars visible. Active display mode reports the panel refresh mode when available." },
+    { SP_DISPLAY, "Fullscreen resolution", NULL, 0, 0, 1, .get = fsres_get, .set = fsres_set, .name = fsres_name, .count = fsres_n, .shown = exclusive_on, .apply = settings_apply_display,
+      .help = "Android panel display modes reported by the OS. Mode switching is managed by Android; when unavailable, the active surface mode stays in use." },
+    { SP_DISPLAY, "Window size", NULL, 0, 5, 1, .get = size_get, .set = size_set, .name = size_name, .locked = fullscreen_on, .apply = settings_apply_window,
+      .help = "Output presentation preset kept for parity with desktop configs; Android always renders into the full activity surface (use Aspect ratio and Internal resolution to control framing)." },
+#else
       .help = "Borderless: a window covering the screen, quick to Alt+Tab. Exclusive: the screen switches to the Fullscreen resolution. F11: windowed and back." },
     { SP_DISPLAY, "Fullscreen resolution", NULL, 0, 0, 1, .get = fsres_get, .set = fsres_set, .name = fsres_name, .count = fsres_n, .shown = exclusive_on, .apply = settings_apply_display,
       .help = "Exclusive fullscreen: the screen's resolution and refresh rate. Desktop: as the desktop." },
     { SP_DISPLAY, "Window size", NULL, 0, 5, 1, .get = size_get, .set = size_set, .name = size_name, .locked = fullscreen_on, .apply = settings_apply_window },
+#endif
     { SP_DISPLAY, "VSync", V(g_config.vsync), 0, 1, 1, .apply = apply_vsync },
     { SP_DISPLAY, "Frame rate limit", V(g_config.fps_limit), 0, 5, 1, fps_limits, .help = "Caps the images shown per second (enhanced in-between frames included) below the display rate, e.g. 60 on a 175 Hz monitor. The game itself always runs at 30." },
     { SP_DISPLAY, "Frame rate HUD", V(g_config.show_fps), 0, 2, 1, (const char* const[]){ "Off", "FPS", "FPS + Graph" },

@@ -24,6 +24,7 @@ void render_loop(void);
 #endif
 #if defined(__ANDROID__)
 #include "window_load.h"
+#include "android_saf.h"
 #include <android/log.h>
 #endif
 #include <stdarg.h>
@@ -475,6 +476,19 @@ static void SDLCALL iso_picked(void* done, const char* const* files, int filter)
 
 static void pick_iso(void)
 {
+#if defined(__ANDROID__)
+    g_config.iso_path[0] = 0;
+    if (!android_saf_pick_iso()) return;
+    for (;;) {
+        char err[256] = {0};
+        int pct = -1;
+        int st = android_saf_poll(g_config.iso_path, sizeof(g_config.iso_path), err, sizeof(err), &pct);
+        if (st == ASHFORD_SAF_DONE || st == ASHFORD_SAF_CANCELLED) break;
+        if (st == ASHFORD_SAF_ERROR) { host_log("file selector: %s\n", err); break; }
+        SDL_Event ev;
+        SDL_WaitEventTimeout(&ev, 50);
+    }
+#else
     static const SDL_DialogFileFilter filters[] = { { "PS2 disc image (*.iso)", "iso" }, { "All files", "*" } };
     static SDL_AtomicInt done;
     SDL_PropertiesID props = SDL_CreateProperties();
@@ -485,6 +499,7 @@ static void pick_iso(void)
     SDL_ShowFileDialogWithProperties(SDL_FILEDIALOG_OPENFILE, iso_picked, &done, props);
     SDL_DestroyProperties(props);
     while (!SDL_GetAtomicInt(&done)) { SDL_Event ev; SDL_WaitEventTimeout(&ev, 50); }
+#endif
 }
 
 /* The game (the decomp's main loop, VU, GIF recording) runs on its own thread; the main
@@ -520,6 +535,9 @@ int main(int argc, char** argv)
 #ifndef _WIN32
     if (getenv("RECVX_WATCHDOG")) { signal(SIGALRM, watchdog); alarm((unsigned)atoi(getenv("RECVX_WATCHDOG"))); }
     { extern void profile_start(void); profile_start(); }
+#endif
+#if defined(__ANDROID__)
+    g_config.fullscreen = 1;   /* immersive fullscreen by default on Android; recvx.ini overrides */
 #endif
     config_load();
     parse_args(argc, argv);   /* command line overrides the saved settings */
@@ -565,7 +583,8 @@ int main(int argc, char** argv)
     if (!g_window) host_fatal("SDL_CreateWindow: %s", SDL_GetError());
     {
         char icon_path[2048];
-        SDL_snprintf(icon_path, sizeof icon_path, "%sassets/branding/ashford-icon.bmp", SDL_GetBasePath());
+        const char* base = SDL_GetBasePath();
+        SDL_snprintf(icon_path, sizeof icon_path, "%sassets/branding/ashford-icon.bmp", base ? base : "");
         SDL_Surface* icon = SDL_LoadBMP(icon_path);
         if (icon) { SDL_SetWindowIcon(g_window, icon); SDL_DestroySurface(icon); }
     }

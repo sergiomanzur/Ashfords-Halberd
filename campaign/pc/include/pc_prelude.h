@@ -217,7 +217,14 @@ void  actor_hands_back(void);                 /* game.c, before bhControlPlayer:
 /* PS2 budgets raised on the PC (docs/ENEMIES.md "Budgets on the PC"): the texture heap (the EE copies of the
    TIM2s the GS loads from; 10 MB on the PS2) and its entry table (256). Vanilla rooms use the same
    first entries and bytes as before; only what used to exit(0) now fits. */
+#if defined(__ANDROID__)
+/* Android ART reserves dalvik-main space at [0x12c00000, 0x32c00000) (512 MiB), so
+   librecvx_game.so loads in [0x33000000, 0x40000000) (208 MiB). These budgets still
+   provide ~4x the original PS2 retail capacities (10 MiB tex heap, 12.25 MiB arena). */
+#define PC_TEX_HEAP_SIZE (40 << 20)
+#else
 #define PC_TEX_HEAP_SIZE (64 << 20)
+#endif
 #define PC_TEX_ENTRIES 1024
 /* The room arena (freemem: persistent player data, then the room file and what it allocates;
    12.25 MB block on the PS2, ~11.7 MB of it arena) grows by this much (docs/modding/ROOM_FORMAT.md "Limits and budgets"). The
@@ -230,7 +237,11 @@ void  actor_hands_back(void);                 /* game.c, before bhControlPlayer:
    bhSetEnemy takes the first free one, so vanilla rooms use the same slots. Enemy sound requests of an
    effect (zonzon1.c, 127 on the PS2) use index PC_ENE_SLOTS. */
 #define PC_ENE_SLOTS 255
+#if defined(__ANDROID__)
+#define PC_ARENA_EXTRA (36 << 20)
+#else
 #define PC_ARENA_EXTRA (64 << 20)
+#endif
 /* The vertex work buffer above it (vwbmemp, njInit3D: 64-byte entries, one per vertex of the node
    being drawn): 5120 entries fit on the PS2 although njInit3D is told 8192; the PC adds the rest. */
 #define PC_VERTEX_EXTRA ((8192 - 5120) * 64)

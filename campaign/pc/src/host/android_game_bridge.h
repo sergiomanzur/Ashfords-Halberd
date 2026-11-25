@@ -29,6 +29,9 @@ typedef struct AshfordBridgeAudit {
 void ashford_game_bridge_init(void* game_handle);
 int  ashford_game_bridge_ready(void);
 void ashford_game_bridge_audit(AshfordBridgeAudit* out);
+/* Self-test invoked by test_window_load to verify live bridged data aliasing,
+ * thunk dispatch, and g_settings[] rebasing inside libmain.so (returns 0 ok). */
+int  ashford_game_bridge_self_test(void* game_handle);
 void* ashford_game_bridge_rebase_ptr(void* p);
 
 /* Rebase hooks implemented in config.c and settings.c. */

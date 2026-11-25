@@ -142,7 +142,8 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Android")
     set_target_properties(recvx_game PROPERTIES POSITION_INDEPENDENT_CODE ON)
     # Compile snapshot manifest/core and VU DMA stub packets without pc_prelude.h so
-    # .ahsnap and ps2_vu*sub* live inside librecvx_game.so's [0x30000000, 0x40000000) window.
+    # .ahsnap and ps2_vu*sub* live inside librecvx_game.so's [0x33000000, 0x40000000) window.
+    # librecvx_game.so itself is linked below after libmain.so so DT_NEEDED includes libmain.so.
     add_library(recvx_game_snapshot OBJECT
         src/host/snapshot_manifest.c
         src/host/snapshot_core.c
@@ -151,30 +152,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Android")
     set_target_properties(recvx_game_snapshot PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_compile_options(recvx_game_snapshot PRIVATE -std=gnu11 -Wall)
     target_include_directories(recvx_game_snapshot PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-
-    set(_android_window_ld "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/android-window.ld")
-    add_library(recvx_game_so SHARED $<TARGET_OBJECTS:recvx_game> $<TARGET_OBJECTS:recvx_game_snapshot>)
-    set_target_properties(recvx_game_so PROPERTIES
-        OUTPUT_NAME recvx_game
-        LINK_DEPENDS "${_android_window_ld}"
-    )
-    target_link_options(recvx_game_so PRIVATE
-        "LINKER:-T,${_android_window_ld}"
-        "-Wl,-O0"
-        "-Wl,-z,max-page-size=16384"
-        "-Wl,-z,norelro"
-        "-Wl,-Bsymbolic"
-        "-Wl,--unresolved-symbols=ignore-all"
-        "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/librecvx_game.map"
-    )
-    target_link_libraries(recvx_game_so PRIVATE m)
-    add_custom_command(TARGET recvx_game_so POST_BUILD
-        COMMAND Python3::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/tools/snapshot_manifest.py
-            --so "$<TARGET_FILE:recvx_game_so>"
-            --map "${CMAKE_CURRENT_BINARY_DIR}/librecvx_game.map"
-            --nm "${CMAKE_NM}"
-            --audit "${CMAKE_CURRENT_BINARY_DIR}/snapshot-manifest-android.json"
-        VERBATIM)
 endif()
 
 endif()
@@ -191,6 +168,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Android")
     list(FILTER PLATFORM_SOURCES EXCLUDE REGEX "src/ps2/vu_stubs_android\\.c$")
 else()
     list(FILTER PLATFORM_SOURCES EXCLUDE REGEX "src/host/android_game_bridge\\.c$")
+    list(FILTER PLATFORM_SOURCES EXCLUDE REGEX "src/host/android_saf\\.c$")
 endif()
 add_library(recvx_platform OBJECT ${PLATFORM_SOURCES})
 if(CMAKE_SYSTEM_NAME STREQUAL "Android")
@@ -613,65 +591,104 @@ foreach(target test_audio_snapshot test_audio_snapshot_decoder test_audio_snapsh
     add_test(NAME ${target} COMMAND ${target})
 endforeach()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Android")
+    # Instrumentation test libraries (libjni_test_<name>.so) for the Android
+    # Java-lifecycle-dependent SDL tests. These tests call SDL_Init(SDL_INIT_GAMEPAD/AUDIO),
+    # which dereferences SDL's JavaVM initialized from a Java process; headless
+    # adb shell runs segfault on mJavaVM == NULL. Each library embeds the same
+    # sources as the corresponding test_<name> executable, exposes the test main
+    # as a com.ashfordshalberd.app.NativeSDLTests JNI method, and links SDL3
+    # statically with JNI_OnLoad exported so System.loadLibrary() bootstraps the
+    # JavaVM inside the androidTest process. The libs are staged ONLY into the
+    # androidTest APK so app-debug.apk stays lean.
+    function(ashford_add_jni_test name)
+        set(extra_sources ${ARGN})
+        add_library(jni_test_${name} SHARED tests/jni_test_${name}.c ${extra_sources})
+        target_compile_options(jni_test_${name} PRIVATE -std=gnu11)
+        target_link_libraries(jni_test_${name} PRIVATE SDL3::SDL3 m)
+        target_link_options(jni_test_${name} PRIVATE
+            "-Wl,-u,JNI_OnLoad"
+            "-Wl,-z,max-page-size=16384"
+        )
+    endfunction()
+
+    ashford_add_jni_test(bindings src/input/bindings.c src/input/tps_input.c)
+    ashford_add_jni_test(pad_weapon_switch src/input/bindings.c "${PAD_WEAPON_SWITCH_TEST}")
+    target_include_directories(jni_test_pad_weapon_switch PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+    ashford_add_jni_test(pad_quicksave src/input/bindings.c "${PAD_QUICKSAVE_TEST}")
+    target_include_directories(jni_test_pad_quicksave PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+    ashford_add_jni_test(rumble "${RUMBLE_TEST}")
+    target_include_directories(jni_test_rumble PRIVATE ${CMAKE_CURRENT_BINARY_DIR} include/sdk src src/ps2)
+    ashford_add_jni_test(audio_snapshot src/audio/audio.c ${AUDIO_SNAPSHOT_SOURCES})
+    target_include_directories(jni_test_audio_snapshot PRIVATE src src/ps2 include/sdk)
+    ashford_add_jni_test(audio_snapshot_decoder ${AUDIO_SNAPSHOT_SOURCES})
+    target_include_directories(jni_test_audio_snapshot_decoder PRIVATE src src/ps2 include/sdk)
+    ashford_add_jni_test(audio_snapshot_synth)
+    target_include_directories(jni_test_audio_snapshot_synth PRIVATE src src/ps2 include/sdk)
+
+    # Keep the on-device ctest roster honest: the Java-lifecycle tests are
+    # intentionally skipped headless and verified by the androidTest harness
+    # (tools/run-android-instrumentation.py) instead.
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Android" AND NOT ASHFORD_PLATFORM_TESTS_ONLY)
-    # Android platform layer compiled once with ASHFORD_ANDROID_GAME_BRIDGE so
-    # both libmain.so (SDLActivity entry) and test_window_load resolve all 61
-    # game symbols at runtime after ashford_window_init() loads librecvx_game.so
-    # into [0x30000000, 0x50000000) without putting librecvx_game.so in DT_NEEDED.
-    set(PLATFORM_NO_HOST_SOURCES ${PLATFORM_SOURCES})
-    list(FILTER PLATFORM_NO_HOST_SOURCES EXCLUDE REGEX "src/host/host\\.c$")
-
-    add_library(recvx_platform_core OBJECT ${PLATFORM_NO_HOST_SOURCES})
-    target_include_directories(recvx_platform_core PRIVATE $<TARGET_PROPERTY:recvx_platform,INCLUDE_DIRECTORIES>)
-    target_compile_options(recvx_platform_core PRIVATE $<TARGET_PROPERTY:recvx_platform,COMPILE_OPTIONS>)
-    target_compile_definitions(recvx_platform_core PRIVATE ASHFORD_ANDROID_GAME_BRIDGE=1)
-    target_link_libraries(recvx_platform_core PRIVATE SDL3::SDL3 imgui)
-
     # Full Android application library loaded by org.libsdl.app.SDLActivity.
     # Exports SDL_main, JNI_OnLoad (via SDL3-static), and platform symbols (--export-dynamic),
     # while keeping all 61 game bridge shims hidden and omitting librecvx_game.so from DT_NEEDED.
-    add_library(recvx_host_main OBJECT src/host/host.c)
-    target_include_directories(recvx_host_main PRIVATE $<TARGET_PROPERTY:recvx_platform,INCLUDE_DIRECTORIES>)
-    target_compile_options(recvx_host_main PRIVATE $<TARGET_PROPERTY:recvx_platform,COMPILE_OPTIONS>)
-    target_compile_definitions(recvx_host_main PRIVATE ASHFORD_ANDROID_GAME_BRIDGE=1
+    add_library(recvx_platform_android OBJECT ${PLATFORM_SOURCES})
+    target_include_directories(recvx_platform_android PRIVATE $<TARGET_PROPERTY:recvx_platform,INCLUDE_DIRECTORIES>)
+    target_compile_options(recvx_platform_android PRIVATE $<TARGET_PROPERTY:recvx_platform,COMPILE_OPTIONS>)
+    target_compile_definitions(recvx_platform_android PRIVATE ASHFORD_ANDROID_GAME_BRIDGE=1
         "RECVX_VERSION=\"${RECVX_VERSION}\"" "ASHFORD_VERSION=\"${ASHFORD_VERSION}\"")
-    target_link_libraries(recvx_host_main PRIVATE SDL3::SDL3 imgui)
+    target_link_libraries(recvx_platform_android PRIVATE SDL3::SDL3 imgui)
 
-    add_library(main SHARED
-        $<TARGET_OBJECTS:recvx_platform_core>
-        $<TARGET_OBJECTS:recvx_host_main>
-    )
+    set(_android_main_map "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/android-main.map")
+    add_library(main SHARED $<TARGET_OBJECTS:recvx_platform_android>)
+    set_target_properties(main PROPERTIES LINK_DEPENDS "${_android_main_map}")
     target_link_options(main PRIVATE
         "-Wl,--export-dynamic"
+        "LINKER:--version-script,${_android_main_map}"
         "-Wl,-u,SDL_GetTicks"
         "-Wl,-u,SDL_GetTicksNS"
         "-Wl,-z,max-page-size=16384"
     )
     target_link_libraries(main PRIVATE ashford_campaign_disc SDL3::SDL3 imgui EGL GLESv3 log android m dl)
-    add_dependencies(main recvx_game_so)
 
-    # On-device test harness for the windowed loader, DMA pool, and runtime game bridge.
-    add_library(recvx_host_nomain OBJECT src/host/host.c)
-    target_include_directories(recvx_host_nomain PRIVATE $<TARGET_PROPERTY:recvx_platform,INCLUDE_DIRECTORIES>)
-    target_compile_options(recvx_host_nomain PRIVATE $<TARGET_PROPERTY:recvx_platform,COMPILE_OPTIONS>)
-    target_compile_definitions(recvx_host_nomain PRIVATE ASHFORD_HOST_NOMAIN=1 ASHFORD_ANDROID_GAME_BRIDGE=1
-        main=ashford_host_main "RECVX_VERSION=\"${RECVX_VERSION}\"" "ASHFORD_VERSION=\"${ASHFORD_VERSION}\"")
-    target_link_libraries(recvx_host_nomain PRIVATE SDL3::SDL3 imgui)
-
-    add_executable(test_window_load
-        tests/test_window_load.c
-        $<TARGET_OBJECTS:recvx_platform_core>
-        $<TARGET_OBJECTS:recvx_host_nomain>
+    # Windowed game shared library. Declares DT_NEEDED: libmain.so so Android bionic
+    # always binds game->platform calls (g_vu0, sceDmaSend, host_log, SDL_GetTicks, ...)
+    # directly to the already-loaded libmain.so even under ART's RTLD_LOCAL namespace,
+    # while libmain.so never puts librecvx_game.so in DT_NEEDED (loads it at 0x33000000).
+    set(_android_window_ld "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/android-window.ld")
+    add_library(recvx_game_so SHARED $<TARGET_OBJECTS:recvx_game> $<TARGET_OBJECTS:recvx_game_snapshot>)
+    set_target_properties(recvx_game_so PROPERTIES
+        OUTPUT_NAME recvx_game
+        LINK_DEPENDS "${_android_window_ld}"
     )
+    target_link_options(recvx_game_so PRIVATE
+        "LINKER:-T,${_android_window_ld}"
+        "-Wl,-O0"
+        "-Wl,-z,max-page-size=16384"
+        "-Wl,-z,norelro"
+        "-Wl,-Bsymbolic"
+        "-Wl,--no-as-needed"
+        "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/librecvx_game.map"
+    )
+    target_link_libraries(recvx_game_so PRIVATE main m)
+    add_custom_command(TARGET recvx_game_so POST_BUILD
+        COMMAND Python3::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/tools/snapshot_manifest.py
+            --so "$<TARGET_FILE:recvx_game_so>"
+            --map "${CMAKE_CURRENT_BINARY_DIR}/librecvx_game.map"
+            --nm "${CMAKE_NM}"
+            --audit "${CMAKE_CURRENT_BINARY_DIR}/snapshot-manifest-android.json"
+        VERBATIM)
+
+    # On-device test harness dynamically linked against the exact libmain.so shipped in the APK.
+    add_executable(test_window_load tests/test_window_load.c)
     target_include_directories(test_window_load PRIVATE src src/ps2 include/sdk)
     target_compile_options(test_window_load PRIVATE -std=gnu11 -Wall)
     target_compile_definitions(test_window_load PRIVATE ASHFORD_ANDROID_GAME_BRIDGE=1)
-    target_link_options(test_window_load PRIVATE
-        "-Wl,--export-dynamic"
-        "-Wl,-u,SDL_GetTicks"
-        "-Wl,-u,SDL_GetTicksNS"
-    )
-    target_link_libraries(test_window_load PRIVATE ashford_campaign_disc SDL3::SDL3 imgui EGL GLESv3 log android m dl)
+    set_target_properties(test_window_load PROPERTIES BUILD_RPATH "\$ORIGIN")
+    target_link_libraries(test_window_load PRIVATE main dl)
     add_dependencies(test_window_load recvx_game_so)
     add_test(NAME window_load COMMAND test_window_load)
 endif()

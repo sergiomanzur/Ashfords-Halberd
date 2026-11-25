@@ -1,15 +1,18 @@
 /* Linker script for Android arm64 librecvx_game.so.
  *
  * Loaded by window_load.c via android_dlopen_ext(ANDROID_DLEXT_RESERVED_ADDRESS)
- * into the fixed reservation [0x30000000, 0x50000000) (512 MiB).
+ * into the fixed reservation [0x33000000, 0x50000000) (464 MiB), placed cleanly
+ * above Android ART's 512 MiB dalvik-main space [0x12c00000, 0x32c00000).
  *
  * Because the first PT_LOAD (ro_hdr) begins at p_vaddr = 0x0 with FILEHDR PHDRS,
- * bionic computes min_vaddr = 0 and load_bias = 0x30000000 exactly:
- *   - [0x00000000, 0x00010000) -> [0x30000000, 0x30010000) ELF headers / dynsym
- *   - [0x00010000, 0x10000000) -> [0x30010000, 0x40000000) game data, rodata,
- *                                                          .ahsnap, .trtab, bss
- *   - [0x10000000, 0x20000000) -> [0x40000000, 0x50000000) game code (.text/.plt)
+ * bionic computes min_vaddr = 0 and load_bias = 0x33000000 exactly:
+ *   - [0x00000000, 0x00010000) -> [0x33000000, 0x33010000) ELF headers / dynsym
+ *   - [0x00010000, 0x0D000000) -> [0x33010000, 0x40000000) game data, rodata,
+ *                                                          .ahsnap, .trtab, bss (208 MiB)
+ *   - [0x0D000000, 0x1D000000) -> [0x40000000, 0x50000000) game code (.text/.plt, 256 MiB)
  *
+ * All data addresses stay inside 0x3xxxxxxx so PS2 uncached identities
+ * (addr | 0x20000000 == addr, addr | 0x30000000 == addr) remain exact.
  * All segments align to 64 KiB (>= 16 KiB Android max-page-size).
  * Game .rodata lives in the RW data segment because the PS2 decomp mutates
  * string literals in place (no RO MMU protection on the EE).
@@ -78,11 +81,11 @@ SECTIONS
     } :data
 
     __ashford_data_end = .;
-    ASSERT(__ashford_data_end <= 0x10000000,
-           "librecvx_game.so data/bss exceeds 256 MiB PS2 window [0x30000000, 0x40000000)")
+    ASSERT(__ashford_data_end <= 0x0D000000,
+           "librecvx_game.so data/bss exceeds 208 MiB Android PS2 window [0x33000000, 0x40000000)")
 
-    /* Executable code segment: fixed at vaddr 0x10000000 -> runtime [0x40000000, 0x50000000). */
-    . = 0x10000000;
+    /* Executable code segment: fixed at vaddr 0x0D000000 -> runtime [0x40000000, 0x50000000). */
+    . = 0x0D000000;
     __ashford_code_start = .;
 
     .init           : { KEEP(*(SORT_NONE(.init))) }                      :text
@@ -94,7 +97,7 @@ SECTIONS
     .gcc_except_table : ALIGN(4) { *(.gcc_except_table .gcc_except_table.*) } :text
 
     __ashford_code_end = .;
-    ASSERT(__ashford_code_end <= 0x20000000,
+    ASSERT(__ashford_code_end <= 0x1D000000,
            "librecvx_game.so code exceeds 256 MiB code range [0x40000000, 0x50000000)")
 
     /DISCARD/ : { *(.note.GNU-stack) }
