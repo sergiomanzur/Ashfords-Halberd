@@ -186,10 +186,10 @@
 - Consumes: the PE mode's constants and rules (`MAGIC='AHSMAP02'`, `REQUIRED_SYMBOLS`, `SAFE_GLUE`, `BASE/LIMIT`) — reused verbatim.
 - Produces: `snapshot_manifest.py --so librecvx_game.so --nm <llvm-nm> --audit <json>` — selects window-segment regions for decomp+SAFE_GLUE symbols, validates every `REQUIRED_SYMBOL` covered and every region inside `[0x30000000,0x40000000)`, patches `.ahsnap` in the `.so` file with the same header/CRC format; runtime side (`snapshot_core.c`) unchanged (it already reads the patched bytes byte-by-byte).
 
-- [ ] **Step 1: Write the failing on-device check** — `snapshot_core_available()` must be true and `snapshot_core_signature()` nonzero after a patched build. Run on device against the unpatched `.so`. Expected: FAIL (count=0).
-- [ ] **Step 2: Implement `--so` mode** — ELF parsing via `llvm-readelf`/`llvm-nm` output (no new Python dependencies); same region merge/overlap rules; refuse a data segment crossing the window limit.
-- [ ] **Step 3: Wire POST_BUILD and verify on device** — Run: `./tools/build-campaign-android.ps1` then the runner. Expected: manifest check PASS; `snapshot_unpatched` still validates the unpatched behavior (both patched and unpatched semantics covered on device).
-- [ ] **Step 4: Windows non-regression + commit** — the Windows POST_BUILD path is untouched; run the PC platform suite. Expected: green. Message `feat(android): ELF snapshot manifest for arm64 quicksave`.
+- [x] **Step 1: Write the failing on-device check** — added `snapshot_core_available()` and `snapshot_core_signature()` dlsym checks in `test_window_load.c`; confirmed TDD red on RP6 against unpatched `.so` (`available=0 signature=0x00000000`).
+- [x] **Step 2: Implement `--so` mode** — added `parse_lld_map`, `elf64_sections`, `patch_elf_image`, and `--so` CLI mode to `campaign/pc/tools/snapshot_manifest.py` plus ELF unit tests in `test_snapshot_manifest.py` (11/11 OK), preserving PE mode verbatim.
+- [x] **Step 3: Wire POST_BUILD and verify on device** — wired Android POST_BUILD on `recvx_game_so` in `campaign/pc/CMakeLists.txt`; verified `window_load`, `snapshot_core`, and `snapshot_unpatched` all PASS on RP6 (`cf916605`).
+- [x] **Step 4: Windows non-regression + commit** — Windows x86 suite 41/41 passed (including `snapshot_manifest`). Message `feat(android): ELF snapshot manifest for arm64 quicksave`.
 
 ### Task 10: Full-build closeout, on-device ctest sweep, docs
 

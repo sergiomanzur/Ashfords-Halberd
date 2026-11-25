@@ -1,4 +1,5 @@
-"""Patch a fixed-size room snapshot manifest into a linked i386 PE executable.
+"""Patch a fixed-size room snapshot manifest into a linked i386 PE executable
+or an Android arm64 ELF64 shared library (librecvx_game.so).
 
 The linker map selects original game input sections and a small glue allowlist.
 Only the already-reserved .ahsnap raw section is changed: no link addresses move.
@@ -82,7 +83,44 @@ def parse_map(text: str) -> list[Region]:
     return merge_regions(regions)
 
 
-def parse_nm(text: str) -> dict[str, int]:
+def parse_lld_map(text: str, base: int = BASE) -> list[Region]:
+    """Parse an LLD -Map file for an Android arm64 windowed shared library.
+
+    LLD emits 5-column rows: VMA LMA Size Align <name>, where output sections
+    have a single space after Align and input sections are indented further as
+    `<object_path>:(<input_section>)`. Segment-relative addresses in the data
+    window (< LIMIT - BASE) are shifted by `base` (0x30000000).
+    """
+    allowed_outputs = {'.rodata', '.data', '.bss', '.data.rel.ro'}
+    row_re = re.compile(r'^\s*([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+(\d+)( +)(\S.*)$')
+    input_re = re.compile(r'^(.+?):\(([^)]+)\)$')
+    cur_output: str | None = None
+    regions: list[Region] = []
+    for line in text.splitlines():
+        m = row_re.match(line)
+        if not m:
+            continue
+        vma = int(m.group(1), 16)
+        size = int(m.group(3), 16)
+        spaces = m.group(5)
+        rest = m.group(6).strip()
+        if len(spaces) == 1:
+            cur_output = rest.split()[0]
+            continue
+        if cur_output not in allowed_outputs or not size:
+            continue
+        m_in = input_re.match(rest)
+        if not m_in:
+            continue
+        origin = m_in.group(1).strip()
+        if not allowed_origin(origin):
+            continue
+        addr = base + vma if vma < LIMIT - BASE else vma
+        regions.append(Region(addr, size, (origin,)))
+    return merge_regions(regions)
+
+
+def parse_nm(text: str, base: int = 0) -> dict[str, int]:
     symbols: dict[str, int] = {}
     for line in text.splitlines():
         match = re.match(r'^\s*([0-9a-fA-F]+)\s+[A-Za-z]\s+(\S+)\s*$', line)
@@ -91,6 +129,8 @@ def parse_nm(text: str) -> dict[str, int]:
             if name.startswith('_'):
                 name = name[1:]
             address = int(match.group(1), 16)
+            if base and address < LIMIT - BASE:
+                address += base
             if name in REQUIRED_SYMBOLS and name in symbols and symbols[name] != address:
                 raise ValueError(f'ambiguous symbol {name}')
             symbols[name] = address
@@ -144,12 +184,89 @@ def pe_sections(data: bytes) -> tuple[int, list[Section]]:
     return size, sections
 
 
-def patch_image(data: bytes, regions: list[Region], symbols: dict[str, int]) -> bytes:
-    image_size, sections = pe_sections(data)
-    reserved = [s for s in sections if s.name == '.ahsnap']
-    if len(reserved) != 1 or reserved[0].raw_size < MANIFEST_BYTES or reserved[0].virtual_size < MANIFEST_BYTES or reserved[0].flags & 0x22000000:
-        raise ValueError('missing or undersized .ahsnap reserved section')
-    slot = reserved[0]
+def elf64_sections(data: bytes, base: int = BASE) -> tuple[int, list[Section]]:
+    """Parse an AArch64 ELF64 shared object linked with android-window.ld."""
+    if len(data) < 64 or data[:4] != b'\x7fELF':
+        raise ValueError('not an ELF binary')
+    ei_class, ei_data = data[4], data[5]
+    if ei_class != 2 or ei_data != 1:
+        raise ValueError('Android snapshots require little-endian ELF64')
+    e_type, e_machine = struct.unpack_from('<HH', data, 16)
+    if e_type != 3 or e_machine != 183:
+        raise ValueError('Android snapshots require AArch64 ET_DYN shared library')
+    e_phoff, e_shoff = struct.unpack_from('<QQ', data, 32)
+    e_phentsize, e_phnum, e_shentsize, e_shnum, e_shstrndx = struct.unpack_from('<HHHHH', data, 54)
+    if not e_phnum or e_phentsize < 56 or e_phoff + e_phnum * e_phentsize > len(data):
+        raise ValueError('invalid ELF64 program header table')
+    if not e_shnum or e_shentsize < 64 or e_shoff + e_shnum * e_shentsize > len(data):
+        raise ValueError('invalid ELF64 section header table')
+    if e_shstrndx >= e_shnum:
+        raise ValueError('invalid ELF64 shstrtab index')
+
+    window_span = LIMIT - BASE
+    min_vaddr: int | None = None
+    data_max_vaddr = 0
+    has_exec = False
+    for i in range(e_phnum):
+        at = e_phoff + i * e_phentsize
+        p_type, p_flags, p_offset, p_vaddr, _p_paddr, p_filesz, p_memsz, _p_align = struct.unpack_from('<IIQQQQQQ', data, at)
+        if p_type != 1:  # PT_LOAD
+            continue
+        if p_filesz and p_offset + p_filesz > len(data):
+            raise ValueError(f'invalid file bounds for PT_LOAD[{i}]')
+        if (p_flags & 0x2) and (p_flags & 0x1):  # PF_W | PF_X
+            raise ValueError(f'W^X violation in PT_LOAD[{i}]')
+        if min_vaddr is None or p_vaddr < min_vaddr:
+            min_vaddr = p_vaddr
+        if p_flags & 0x1:  # PF_X
+            has_exec = True
+            if p_vaddr < window_span or p_vaddr + p_memsz > 0x20000000:
+                raise ValueError(f'executable PT_LOAD[{i}] outside code range [0x10000000, 0x20000000)')
+        else:
+            if p_vaddr + p_memsz > window_span:
+                raise ValueError(f'data PT_LOAD[{i}] exceeds the 256 MiB PS2 window')
+            if p_vaddr + p_memsz > data_max_vaddr:
+                data_max_vaddr = p_vaddr + p_memsz
+
+    if min_vaddr != 0:
+        raise ValueError(f'ELF64 min PT_LOAD vaddr must be 0 for load_bias 0x30000000 (got 0x{min_vaddr or 0:x})')
+    if not data_max_vaddr or not has_exec:
+        raise ValueError('ELF64 missing required data or executable PT_LOAD segments')
+
+    str_at = e_shoff + e_shstrndx * e_shentsize
+    _, _, _, _, str_off, str_size = struct.unpack_from('<IIQQQQ', data, str_at)
+    if str_off + str_size > len(data):
+        raise ValueError('invalid ELF64 .shstrtab bounds')
+    shstrtab = data[str_off:str_off + str_size]
+
+    sections: list[Section] = []
+    for i in range(e_shnum):
+        at = e_shoff + i * e_shentsize
+        sh_name, sh_type, sh_flags, sh_addr, sh_offset, sh_size = struct.unpack_from('<IIQQQQ', data, at)
+        if not (sh_flags & 0x2):  # SHF_ALLOC
+            continue
+        if sh_name >= len(shstrtab):
+            raise ValueError(f'invalid section name offset for section {i}')
+        end_nul = shstrtab.find(b'\0', sh_name)
+        name = shstrtab[sh_name:(end_nul if end_nul >= 0 else len(shstrtab))].decode('ascii', errors='strict')
+        is_nobits = (sh_type == 8)
+        raw_size = 0 if is_nobits else sh_size
+        if raw_size and sh_offset + raw_size > len(data):
+            raise ValueError(f'invalid file bounds for ELF section {name}')
+        if not (sh_flags & 0x4):  # non-exec SHF_ALLOC
+            # Unwind tables (.eh_frame_hdr, .eh_frame, .gcc_except_table) are placed in
+            # the exec PT_LOAD [0x10000000, 0x20000000) by android-window.ld.
+            if not (sh_flags & 0x1) and name in ('.eh_frame_hdr', '.eh_frame', '.gcc_except_table') and window_span <= sh_addr and sh_addr + sh_size <= 0x20000000:
+                continue
+            if sh_addr + sh_size > window_span:
+                raise ValueError(f'non-exec ELF section {name} exceeds the fixed address window')
+            sections.append(Section(name, base + sh_addr, sh_size, raw_size, sh_offset, sh_flags))
+    return data_max_vaddr, sections
+
+
+def _write_manifest(data: bytes, slot: Section, regions: list[Region], symbols: dict[str, int],
+                    sections: list[Section], valid_names: tuple[str, ...], image_end: int,
+                    reject_flags_mask: int) -> bytes:
     if data[slot.raw_offset:slot.raw_offset + 12] != MAGIC + struct.pack('<I', VERSION):
         raise ValueError('.ahsnap does not contain the reserved manifest')
     regions = merge_regions(regions)
@@ -158,19 +275,18 @@ def patch_image(data: bytes, regions: list[Region], symbols: dict[str, int]) -> 
     total = 0
     for region in regions:
         end = region.address + region.size
-        if region.address < BASE or end > BASE + image_size or end > LIMIT:
+        if region.address < BASE or end > image_end or end > LIMIT:
             raise ValueError('selected region is outside the fixed image')
-        # Do not allow a range to pass through unmapped padding or host code.
         cursor = region.address
         for section in sorted(sections, key=lambda s: s.address):
-            if section.name not in ('.data', '.bss', '.rdata') or section.flags & 0x22000000:
+            if section.name not in valid_names or (section.flags & reject_flags_mask):
                 continue
             if section.address <= cursor < section.address + section.virtual_size:
                 cursor = min(end, section.address + section.virtual_size)
                 if cursor == end:
                     break
         if cursor != end:
-            raise ValueError('selected region is not entirely in PE data sections')
+            raise ValueError('selected region is not entirely in image data sections')
         total += region.size
     if total > 256 * 1024 * 1024:
         raise ValueError('manifest exceeds 256 MiB')
@@ -186,22 +302,57 @@ def patch_image(data: bytes, regions: list[Region], symbols: dict[str, int]) -> 
     return bytes(result)
 
 
+def patch_image(data: bytes, regions: list[Region], symbols: dict[str, int]) -> bytes:
+    image_size, sections = pe_sections(data)
+    reserved = [s for s in sections if s.name == '.ahsnap']
+    if len(reserved) != 1 or reserved[0].raw_size < MANIFEST_BYTES or reserved[0].virtual_size < MANIFEST_BYTES or reserved[0].flags & 0x22000000:
+        raise ValueError('missing or undersized .ahsnap reserved section')
+    return _write_manifest(data, reserved[0], regions, symbols, sections,
+                           ('.data', '.bss', '.rdata'), BASE + image_size, 0x22000000)
+
+
+def patch_elf_image(data: bytes, regions: list[Region], symbols: dict[str, int]) -> bytes:
+    data_max_vaddr, sections = elf64_sections(data)
+    reserved = [s for s in sections if s.name == '.ahsnap']
+    if len(reserved) != 1 or reserved[0].raw_size < MANIFEST_BYTES or reserved[0].virtual_size < MANIFEST_BYTES or (reserved[0].flags & 0x4):
+        raise ValueError('missing or undersized .ahsnap reserved section')
+    return _write_manifest(data, reserved[0], regions, symbols, sections,
+                           ('.data', '.bss', '.rodata', '.data.rel.ro'), BASE + data_max_vaddr, 0x4)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--exe', type=Path, required=True)
-    parser.add_argument('--map', type=Path, required=True)
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument('--exe', type=Path)
+    target.add_argument('--so', type=Path)
+    parser.add_argument('--map', type=Path)
     parser.add_argument('--nm', required=True)
     parser.add_argument('--audit', type=Path)
     args = parser.parse_args(argv)
     try:
-        regions = parse_map(args.map.read_text(encoding='utf-8', errors='replace'))
-        nm = subprocess.run([args.nm, '--defined-only', '--numeric-sort', str(args.exe)], check=True, capture_output=True, text=True, encoding='utf-8', errors='replace')
-        symbols = parse_nm(nm.stdout)
-        original = args.exe.read_bytes()
-        patched = patch_image(original, regions, symbols)
-        _, sections = pe_sections(original)
+        if args.exe:
+            if not args.map:
+                raise ValueError('--map is required with --exe')
+            regions = parse_map(args.map.read_text(encoding='utf-8', errors='replace'))
+            nm = subprocess.run([args.nm, '--defined-only', '--numeric-sort', str(args.exe)], check=True, capture_output=True, text=True, encoding='utf-8', errors='replace')
+            symbols = parse_nm(nm.stdout)
+            original = args.exe.read_bytes()
+            patched = patch_image(original, regions, symbols)
+            _, sections = pe_sections(original)
+            out_path = args.exe
+        else:
+            map_path = args.map if args.map else args.so.with_suffix('.map')
+            if not map_path.exists():
+                raise ValueError(f'linker map not found: {map_path} (pass --map)')
+            regions = parse_lld_map(map_path.read_text(encoding='utf-8', errors='replace'))
+            nm = subprocess.run([args.nm, '--defined-only', '--numeric-sort', str(args.so)], check=True, capture_output=True, text=True, encoding='utf-8', errors='replace')
+            symbols = parse_nm(nm.stdout, base=BASE)
+            original = args.so.read_bytes()
+            patched = patch_elf_image(original, regions, symbols)
+            _, sections = elf64_sections(original)
+            out_path = args.so
         slot = next(s for s in sections if s.name == '.ahsnap')
-        with args.exe.open('r+b') as executable:
+        with out_path.open('r+b') as executable:
             executable.seek(slot.raw_offset)
             payload = patched[slot.raw_offset:slot.raw_offset + slot.raw_size]
             if executable.write(payload) != len(payload):

@@ -167,6 +167,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Android")
         "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/librecvx_game.map"
     )
     target_link_libraries(recvx_game_so PRIVATE m)
+    add_custom_command(TARGET recvx_game_so POST_BUILD
+        COMMAND Python3::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/tools/snapshot_manifest.py
+            --so "$<TARGET_FILE:recvx_game_so>"
+            --map "${CMAKE_CURRENT_BINARY_DIR}/librecvx_game.map"
+            --nm "${CMAKE_NM}"
+            --audit "${CMAKE_CURRENT_BINARY_DIR}/snapshot-manifest-android.json"
+        VERBATIM)
 endif()
 
 endif()

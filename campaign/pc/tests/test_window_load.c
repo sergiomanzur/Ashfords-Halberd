@@ -335,6 +335,19 @@ int main(void)
         CHECK(align_fails == 0);
     }
 
+    /* 11. Task 9: ELF snapshot manifest must be patched into librecvx_game.so .ahsnap. */
+    {
+        int (*snap_avail)(void) = (int (*)(void))dlsym(handle, "snapshot_core_available");
+        uint32_t (*snap_sig)(void) = (uint32_t (*)(void))dlsym(handle, "snapshot_core_signature");
+        CHECK(snap_avail != NULL);
+        CHECK(snap_sig != NULL);
+        int avail = snap_avail();
+        uint32_t sig = snap_sig();
+        printf("  snapshot_core   = available=%d signature=0x%08x\n", avail, sig);
+        CHECK(avail != 0);
+        CHECK(sig != 0);
+    }
+
     printf("test_window_load: PASS\n");
     return 0;
 }
