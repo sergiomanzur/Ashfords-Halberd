@@ -22,9 +22,13 @@ void render_loop(void);
 #include <stdlib.h>
 #include <string.h>
 #ifndef _WIN32
-#include <execinfo.h>
 #include <signal.h>
 #include <unistd.h>
+#if defined(__ANDROID__)
+#include <unwind.h>
+#else
+#include <execinfo.h>
+#endif
 #endif
 
 int recvx_game_main(int argc, char* argv[]);
@@ -198,14 +202,32 @@ void host_pump_events(void)
 }
 
 #ifndef _WIN32
+#if defined(__ANDROID__)
+struct watchdog_bt_ctx { void* frames[64]; int n; };
+static _Unwind_Reason_Code watchdog_bt_trace(struct _Unwind_Context* uc, void* ud)
+{
+    struct watchdog_bt_ctx* c = ud;
+    if (c->n < 64) c->frames[c->n++] = (void*)_Unwind_GetIP(uc);
+    return c->n >= 64 ? _URC_END_OF_STACK : _URC_NO_REASON;
+}
+#endif
 /* debugging aid: RECVX_WATCHDOG=<seconds> prints a backtrace and exits (headless runs) */
 static void watchdog(int sig)
 {
+#if defined(__ANDROID__)
+    struct watchdog_bt_ctx ctx = { .n = 0 };
+    _Unwind_Backtrace(watchdog_bt_trace, &ctx);
+#else
     void* frames[64];
     int n = backtrace(frames, 64);
+#endif
     (void)sig;
     fprintf(stderr, "watchdog: backtrace\n");
+#if defined(__ANDROID__)
+    for (int i = 0; i < ctx.n; i++) fprintf(stderr, "#%d %p\n", i, ctx.frames[i]);
+#else
     backtrace_symbols_fd(frames, n, 2);
+#endif
     if (getenv("RECVX_PROFILE")) exit(3);   /* run atexit: profile dump */
     _exit(3);
 }

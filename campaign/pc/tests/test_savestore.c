@@ -8,6 +8,50 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(__ANDROID__)
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <errno.h>
+
+static int test_remove(const char* path) { return remove(path) == 0 || errno == ENOENT; }
+static int test_mkdir(const char* path)
+{
+    char tmp[512];
+    size_t len = strlen(path);
+    if (len >= sizeof(tmp)) return 0;
+    memcpy(tmp, path, len + 1);
+    for (char* p = tmp + 1; *p; p++) {
+        if (*p == '/') { *p = '\0'; if (mkdir(tmp, 0770) < 0 && errno != EEXIST) return 0; *p = '/'; }
+    }
+    return mkdir(tmp, 0770) == 0 || errno == EEXIST;
+}
+static int test_get_path_info(const char* path, SDL_PathInfo* info)
+{
+    struct stat st;
+    if (stat(path, &st) != 0) return 0;
+    if (info) { memset(info, 0, sizeof(*info)); info->type = S_ISREG(st.st_mode) ? SDL_PATHTYPE_FILE : S_ISDIR(st.st_mode) ? SDL_PATHTYPE_DIRECTORY : SDL_PATHTYPE_OTHER; info->size = (Uint64)st.st_size; }
+    return 1;
+}
+static int test_enumerate(const char* path, SDL_EnumerateDirectoryCallback cb, void* ud)
+{
+    DIR* d = opendir(path);
+    struct dirent* ent;
+    if (!d) return 0;
+    while ((ent = readdir(d)) != NULL) {
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+        if (cb(ud, path, ent->d_name) == SDL_ENUM_FAILURE) break;
+    }
+    closedir(d);
+    return 1;
+}
+#else
+#define test_remove SDL_RemovePath
+#define test_mkdir SDL_CreateDirectory
+#define test_get_path_info SDL_GetPathInfo
+#define test_enumerate SDL_EnumerateDirectory
+#endif
+
 static int fails;
 #define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
 
@@ -34,7 +78,7 @@ static void write_raw(const char* path, const void* p, int n)
     CHECK(pc_save_file(path, "wb", put, b) == 0);
     free(b);
 }
-static int file_size(const char* path) { SDL_PathInfo i; return SDL_GetPathInfo(path, &i) ? (int)i.size : -1; }
+static int file_size(const char* path) { SDL_PathInfo i; return test_get_path_info(path, &i) ? (int)i.size : -1; }
 
 static SDL_EnumerationResult SDLCALL count_tmp(void* ud, const char* dir, const char* name)
 {
@@ -83,8 +127,8 @@ int main(void)
     names();
     snprintf(save_dir, sizeof(save_dir), "%s", root);
     snprintf(dir, sizeof(dir), "%s/saves", root);
-    SDL_RemovePath(dir);   /* leftovers of a failed run */
-    SDL_CreateDirectory(dir);
+    test_remove(dir);   /* leftovers of a failed run */
+    test_mkdir(dir);
 
     /* a new save: number 1, the card bytes behind a 64-byte header, read back unchanged (native -> card) */
     card_save(d, 0, 0, 1, 3);
@@ -116,7 +160,7 @@ int main(void)
     n = savestore_list(dir, &l);
     CHECK(n == 4);
     free(l);
-    SDL_EnumerateDirectory(dir, count_tmp, &tmp);
+    test_enumerate(dir, count_tmp, &tmp);
     CHECK(tmp == 0);   /* atomic writes leave no temporary files */
     snprintf(path, sizeof(path), "%s/no_such_folder", dir);
     CHECK(savestore_write(path, 0, d, NULL) == 0);
@@ -155,9 +199,9 @@ int main(void)
         unsigned char cfg[SAVE_CONFIG_BYTES] = { 1, 2, 3 };
         snprintf(save_dir, sizeof(save_dir), "%s/user", root);
         snprintf(card, sizeof(card), "%s/card0/BASLUS-20184", save_dir);
-        SDL_CreateDirectory(card);
+        test_mkdir(card);
         snprintf(dir, sizeof(dir), "%s/saves", save_dir);
-        SDL_CreateDirectory(dir);
+        test_mkdir(dir);
         card_save(d, 0, 0, 1, 5);
         snprintf(path, sizeof(path), "%s/SAVEDATA-00", card); write_raw(path, d, SAVE_DATA_BYTES);
         snprintf(path, sizeof(path), "%s/SAVEDATA-01", card); write_raw(path, (unsigned char[SAVE_DATA_BYTES]){ 0 }, SAVE_DATA_BYTES);
@@ -181,19 +225,32 @@ int main(void)
         free(l);
     }
 
-    {   /* SDL_RemovePath removes empty folders only: files first, then the folders inside out */
+    {   /* remove files first, then the folders inside out */
         const char* dirs[] = { "saves", "user/saves", "user/card0/BASLUS-20184", "user", "user/card0", "" };
         for (int k = 0; k < 6; k++) {
+            snprintf(dir, sizeof(dir), "%s/%s", root, dirs[k]);
+#if defined(__ANDROID__)
+            DIR* d = opendir(dir);
+            struct dirent* ent;
+            if (d) {
+                while ((ent = readdir(d)) != NULL) {
+                    if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+                    snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
+                    remove(path);
+                }
+                closedir(d);
+            }
+#else
             int cnt = 0;
             char** fl;
-            snprintf(dir, sizeof(dir), "%s/%s", root, dirs[k]);
             fl = SDL_GlobDirectory(dir, NULL, 0, &cnt);
             for (int i = 0; fl && i < cnt; i++) { snprintf(path, sizeof(path), "%s/%s", dir, fl[i]); SDL_RemovePath(path); }
             SDL_free(fl);
+#endif
         }
-        snprintf(path, sizeof(path), "%s/user/card0", root); SDL_RemovePath(path);
-        snprintf(path, sizeof(path), "%s/user", root); SDL_RemovePath(path);
-        SDL_RemovePath(root);
+        snprintf(path, sizeof(path), "%s/user/card0", root); test_remove(path);
+        snprintf(path, sizeof(path), "%s/user", root); test_remove(path);
+        test_remove(root);
         CHECK(file_size(root) < 0);
     }
     printf("savestore: %s\n", fails ? "FAILED" : "ok");

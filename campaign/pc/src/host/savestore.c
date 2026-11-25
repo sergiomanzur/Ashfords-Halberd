@@ -8,6 +8,53 @@
 #include <string.h>
 #include <time.h>
 
+#if defined(__ANDROID__)
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <errno.h>
+
+static int android_remove_path(const char* path)
+{
+    int rc = remove(path);
+    return rc == 0 || errno == ENOENT;
+}
+
+static int android_get_path_info(const char* path, SDL_PathInfo* info)
+{
+    struct stat st;
+    if (stat(path, &st) != 0) return 0;
+    if (info) {
+        SDL_memset(info, 0, sizeof(*info));
+        info->type = S_ISREG(st.st_mode) ? SDL_PATHTYPE_FILE :
+                     S_ISDIR(st.st_mode) ? SDL_PATHTYPE_DIRECTORY : SDL_PATHTYPE_OTHER;
+        info->size = (Uint64)st.st_size;
+    }
+    return 1;
+}
+
+static int android_enumerate_directory(const char* path, SDL_EnumerateDirectoryCallback cb, void* userdata)
+{
+    DIR* d = opendir(path);
+    struct dirent* ent;
+    char dirsep[1024];
+    size_t n;
+    if (!d) return 0;
+    n = SDL_strlen(path);
+    if (n >= sizeof(dirsep) - 2) { closedir(d); return 0; }
+    SDL_memcpy(dirsep, path, n + 1);
+    if (n > 0 && dirsep[n - 1] != '/') {
+        dirsep[n] = '/'; dirsep[n + 1] = '\0';
+    }
+    while ((ent = readdir(d)) != NULL) {
+        if (SDL_strcmp(ent->d_name, ".") == 0 || SDL_strcmp(ent->d_name, "..") == 0) continue;
+        if (cb(userdata, dirsep, ent->d_name) == SDL_ENUM_FAILURE) break;
+    }
+    closedir(d);
+    return 1;
+}
+#endif
+
 typedef struct Header {
     char magic[8];          /* "RECVXSAV" */
     uint32_t version;       /* 1 */
@@ -187,7 +234,11 @@ static int by_number(const void* a, const void* b)
 int savestore_list(const char* dir, SaveEntry** out)
 {
     Scan s = { .dir = dir };
+#if defined(__ANDROID__)
+    android_enumerate_directory(dir, scan_entry, &s);
+#else
     SDL_EnumerateDirectory(dir, scan_entry, &s);
+#endif
     if (s.over) SDL_Log("saves: more than %d save files in %s: %d not listed", SAVESTORE_MAX, dir, s.over);
     if (s.count > 1) qsort(s.list, s.count, sizeof(SaveEntry), by_number);
     *out = s.list;
@@ -197,7 +248,11 @@ int savestore_list(const char* dir, SaveEntry** out)
 int savestore_find(const char* dir, int number, char* file, int n)
 {
     Scan s = { .want = number, .file = file, .n = n };
+#if defined(__ANDROID__)
+    android_enumerate_directory(dir, scan_entry, &s);
+#else
     SDL_EnumerateDirectory(dir, scan_entry, &s);
+#endif
     return s.found;
 }
 
@@ -206,7 +261,11 @@ int savestore_next(const char* dir)
     unsigned char used[SAVESTORE_MAX + 2] = { 0 };
     Scan s = { .used = used };
     int i;
+#if defined(__ANDROID__)
+    android_enumerate_directory(dir, scan_entry, &s);
+#else
     SDL_EnumerateDirectory(dir, scan_entry, &s);
+#endif
     if (s.max < SAVESTORE_NUMBER_MAX) return s.max + 1;
     for (i = 1; i <= SAVESTORE_MAX + 1; i++)   /* past the last number: the first free one */
         if (!used[i]) return i;
@@ -236,7 +295,11 @@ static int write_locked(const char* dir, int number, const unsigned char* data, 
     if (pc_save_file(path, "wb", put_blob, &blob)) return 0;
     if (replaces && *replaces && strcmp(replaces, name)) {   /* the save it overwrote had another label */
         snprintf(path, sizeof(path), "%s/%s", dir, replaces);
+#if defined(__ANDROID__)
+        android_remove_path(path);
+#else
         SDL_RemovePath(path);
+#endif
     }
     return number;
 }
@@ -282,7 +345,11 @@ int savestore_import_card(const char* save_dir, const char* dir)
         copied++;
     }
     snprintf(to, sizeof(to), "%s/system.dat", dir);
+#if defined(__ANDROID__)
+    if (!android_get_path_info(to, NULL)) {
+#else
     if (!SDL_GetPathInfo(to, NULL)) {
+#endif
         snprintf(path, sizeof(path), "%s/card0/BASLUS-20184/BASLUS-20184", save_dir);
         copy_file(path, to, SAVE_CONFIG_BYTES + 1);
     }

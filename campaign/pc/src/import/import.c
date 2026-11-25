@@ -11,6 +11,32 @@
 
 void host_log(const char* fmt, ...);
 
+#if defined(__ANDROID__)
+#include <sys/stat.h>
+#include <unistd.h>
+#include <errno.h>
+static int android_mkdir_p(const char* path)
+{
+    char tmp[1100];
+    size_t len = SDL_strlen(path);
+    if (len >= sizeof(tmp)) return -1;
+    SDL_strlcpy(tmp, path, sizeof(tmp));
+    for (char* p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            if (mkdir(tmp, 0770) < 0 && errno != EEXIST) return -1;
+            *p = '/';
+        }
+    }
+    return mkdir(tmp, 0770) < 0 && errno != EEXIST ? -1 : 0;
+}
+static int android_path_exists(const char* path)
+{
+    struct stat st;
+    return stat(path, &st) == 0;
+}
+#endif
+
 ImportSettings g_import;
 ImportProgress g_import_progress;
 volatile int g_import_reload;
@@ -55,7 +81,11 @@ int import_present(int src)
 {
     char d[1100];
     source_dir(src, d, sizeof(d));
+#if defined(__ANDROID__)
+    return android_path_exists(d);
+#else
     return SDL_GetPathInfo(d, NULL);
+#endif
 }
 
 /* <dir>/<source>/manifest.txt: a header, then one line per model:
@@ -119,7 +149,11 @@ int import_run(int src, int what)
     pg->done = pg->total = pg->failed = 0;
     snprintf(pg->phase, sizeof(pg->phase), "Reading disc...");
     source_dir(src, dir, sizeof(dir));
+#if defined(__ANDROID__)
+    android_mkdir_p(dir);   /* (creates the parents too) */
+#else
     SDL_CreateDirectory(dir);   /* (creates the parents too) */
+#endif
     if (import_sources[src].cat == IMPORT_CAT_LANGUAGES) {
         r = lang_extract(src, g_import.iso[src], dir);
         host_log("import: %s: %s\n", import_sources[src].key, pg->phase);

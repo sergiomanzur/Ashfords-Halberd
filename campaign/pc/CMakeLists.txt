@@ -173,16 +173,6 @@ if(WIN32)
     target_compile_options(recvx_platform PRIVATE $<$<COMPILE_LANGUAGE:C>:-mno-ms-bitfields>)
 endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Android")
-    # Bionic ships execinfo.h but does not expose the backtrace symbols at API 26.
-    # Stub the two functions so the crash-log code in host.c/log.c compiles unchanged.
-    set(_android_backtrace_stub "${CMAKE_BINARY_DIR}/android_backtrace_stub.h")
-    file(WRITE "${_android_backtrace_stub}"
-        "#ifndef ANDROID_BACKTRACE_STUB_H\n"
-        "#define ANDROID_BACKTRACE_STUB_H\n"
-        "#define backtrace(frames, count) 0\n"
-        "#define backtrace_symbols_fd(frames, count, fd) ((void)0)\n"
-        "#endif\n")
-    target_compile_options(recvx_platform PRIVATE "$<$<COMPILE_LANGUAGE:C>:SHELL:-include ${_android_backtrace_stub}>")
     # tr.c's inline-asm .trtab symbols are global; make them hidden so arm64 uses
     # PC-relative addressing instead of GOT (which requires 8-byte section alignment).
     set(_android_tr_visibility "${CMAKE_BINARY_DIR}/android_tr_visibility.h")

@@ -77,13 +77,17 @@ static void last_dump(void (*out)(void*, const char*, size_t), void* ud)
     }
 }
 #ifndef _WIN32
-#include <execinfo.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
 #include <sys/syscall.h>
 #include <ucontext.h>
 #include <unistd.h>
+#if defined(__ANDROID__)
+#include <unwind.h>
+#else
+#include <execinfo.h>
+#endif
 
 static int log_fd = -1, console_fd = 2, pipe_rd = -1;
 static uint64_t t0;
@@ -132,11 +136,38 @@ static char* put_u(char* p, unsigned long v, unsigned base)
     return p;
 }
 
+#if defined(__ANDROID__)
+struct android_bt_ctx { void* frames[64]; int n; };
+static _Unwind_Reason_Code android_bt_trace(struct _Unwind_Context* uc, void* ud)
+{
+    struct android_bt_ctx* c = ud;
+    if (c->n < 64) c->frames[c->n++] = (void*)_Unwind_GetIP(uc);
+    return c->n >= 64 ? _URC_END_OF_STACK : _URC_NO_REASON;
+}
+static void android_write_backtrace(int fd, struct android_bt_ctx* ctx)
+{
+    char line[64];
+    write_all(fd, "backtrace:\n", 11);
+    for (int i = 0; i < ctx->n; i++) {
+        char* p = line;
+        *p++ = '#';
+        p = put_u(p, (unsigned long)i, 10);
+        p = put_s(p, " 0x");
+        p = put_u(p, (unsigned long)(uintptr_t)ctx->frames[i], 16);
+        *p++ = '\n';
+        write_all(fd, line, (size_t)(p - line));
+    }
+}
+#endif
+
 static void on_fatal(int sig, siginfo_t* si, void* uc)
 {
     static int entered;
+#if !defined(__ANDROID__)
     void* frames[64];
-    int n, fd;
+    int n;
+#endif
+    int fd;
     long tid = syscall(SYS_gettid);
     char msg[256], *p = msg;
     if (__atomic_exchange_n(&entered, 1, __ATOMIC_ACQ_REL)) for (;;) pause();   /* another thread is writing the report; the process ends with it */
@@ -148,6 +179,8 @@ static void on_fatal(int sig, siginfo_t* si, void* uc)
     p = put_s(p, ", eip 0x"); p = put_u(p, (unsigned long)((ucontext_t*)uc)->uc_mcontext.gregs[REG_EIP], 16);
 #elif defined(__x86_64__)
     p = put_s(p, ", rip 0x"); p = put_u(p, (unsigned long)((ucontext_t*)uc)->uc_mcontext.gregs[REG_RIP], 16);
+#elif defined(__aarch64__)
+    p = put_s(p, ", pc 0x"); p = put_u(p, (unsigned long)((ucontext_t*)uc)->uc_mcontext.pc, 16);
 #else
     (void)uc;
 #endif
@@ -161,6 +194,21 @@ static void on_fatal(int sig, siginfo_t* si, void* uc)
         fsync(fd);
     }
     /* then the backtrace (backtrace() was primed at start: no library loading here) and the last messages */
+#if defined(__ANDROID__)
+    {
+        struct android_bt_ctx ctx = { .n = 0 };
+        _Unwind_Backtrace(android_bt_trace, &ctx);
+        android_write_backtrace(console_fd, &ctx);
+        if (log_fd >= 0) { android_write_backtrace(log_fd, &ctx); fsync(log_fd); }
+        if (fd >= 0) {
+            android_write_backtrace(fd, &ctx);
+            last_dump(out_fd, &fd);
+            fsync(fd);
+            close(fd);
+            write_all(console_fd, "crash report written to AshfordsHalberd-crash.log\n", 50);
+        }
+    }
+#else
     n = backtrace(frames, 64);
     write_all(console_fd, "backtrace:\n", 11);
     backtrace_symbols_fd(frames, n, console_fd);
@@ -173,6 +221,7 @@ static void on_fatal(int sig, siginfo_t* si, void* uc)
         close(fd);
         write_all(console_fd, "crash report written to AshfordsHalberd-crash.log\n", 52);
     }
+#endif
     signal(sig, SIG_DFL);
     raise(sig);
 }
@@ -215,10 +264,18 @@ void crash_init(const char* version)
     struct sigaction sa;
     void* f;
     static const int sigs[] = { SIGSEGV, SIGABRT, SIGFPE, SIGBUS, SIGILL, SIGTRAP };
+#if defined(__ANDROID__)
+    SDL_snprintf(crash_head, sizeof(crash_head), "Ashford's Halberd %s Beta crashed (Android; addresses: llvm-addr2line -f -e AshfordsHalberd)\n", version);
+#else
     SDL_snprintf(crash_head, sizeof(crash_head), "Ashford's Halberd %s Beta crashed (Linux; addresses: addr2line -f -e AshfordsHalberd)\n", version);
+#endif
     pthread_key_create(&altstack_key, altstack_free);
     crash_thread_init();
+#if !defined(__ANDROID__)
     backtrace(&f, 1);   /* loads what backtrace needs now, not in the handler */
+#else
+    (void)f;
+#endif
     memset(&sa, 0, sizeof(sa));
     sa.sa_sigaction = on_fatal;
     sa.sa_flags = SA_ONSTACK | SA_SIGINFO;

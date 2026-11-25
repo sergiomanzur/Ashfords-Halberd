@@ -9,6 +9,26 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if defined(__ANDROID__)
+#include <sys/stat.h>
+#include <errno.h>
+#include <string.h>
+static int test_mkdir(const char* path)
+{
+    char tmp[1024];
+    size_t len = strlen(path);
+    if (len >= sizeof(tmp)) return 0;
+    memcpy(tmp, path, len + 1);
+    for (char* p = tmp + 1; *p; p++) {
+        if (*p == '/') { *p = '\0'; if (mkdir(tmp, 0770) < 0 && errno != EEXIST) return 0; *p = '/'; }
+    }
+    return mkdir(tmp, 0770) == 0 || errno == EEXIST;
+}
+#else
+#define test_mkdir SDL_CreateDirectory
+#endif
+
 #define CHECK(x) do { if (!(x)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #x); return 1; } } while (0)
 
 int ob2_sld(const unsigned char* src, int n, unsigned char* dst, int cap);
@@ -209,7 +229,7 @@ int main(int argc, char** argv)
         const char *kevin, *nurse;
         snprintf(g_import.dir, sizeof(g_import.dir), "%s/test_import_reg", dir);
         import_source_dir(IMPORT_OUTBREAK2, p, sizeof(p));
-        SDL_CreateDirectory(p);
+        test_mkdir(p);
         strcat(p, "/manifest.txt");
         for (int r = 0; r < 2; r++) {
             f = fopen(p, "w");

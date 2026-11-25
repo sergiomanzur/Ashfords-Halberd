@@ -6,6 +6,7 @@ echoed device-side exit code, and reports PASS/FAIL/SKIP honestly.
 import argparse
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -57,12 +58,52 @@ SKIP_RETURN_CODE = 77
 
 DEFAULT_TIMEOUT = 120
 
+# Per-test arguments that ctest registers in campaign/pc/CMakeLists.txt.
+# The runner must invoke each test exactly as ctest would, with device-side
+# substitutions for host-only paths.
+TEST_ARGS = {
+    # import expects a writable directory for generated fixtures; on device that
+    # is the test's working directory (ctest passes the host binary dir).
+    "import": ["${DEVICE_CWD}"],
+}
+
+# Tests that are not runnable in a headless adb shell because they need the
+# Android Java lifecycle / SDL initialization (joystick, audio). Plan 2 owns
+# the app shell; these are recorded as SKIP with a disposition instead of FAIL.
+DISPOSITIONS = {
+    "pad_weapon_switch": "needs Android Java lifecycle: SDL_Init(SDL_INIT_GAMEPAD) (Plan 2 app shell)",
+    "pad_quicksave": "needs Android Java lifecycle: SDL_Init(SDL_INIT_GAMEPAD) (Plan 2 app shell)",
+    "rumble": "needs Android Java lifecycle: SDL main bootstrap (Plan 2 app shell)",
+    "test_audio_snapshot": "needs Android Java lifecycle: SDL_Init(SDL_INIT_AUDIO) (Plan 2 app shell)",
+    "test_audio_snapshot_decoder": "needs Android Java lifecycle: SDL_Init(SDL_INIT_AUDIO) (Plan 2 app shell)",
+    "test_audio_snapshot_synth": "needs Android Java lifecycle: SDL_Init(0) (Plan 2 app shell)",
+}
+
+
+def substitute_args(args):
+    """Expand CMake-style placeholders for the device environment."""
+    out = []
+    for a in args:
+        if a == "${DEVICE_CWD}":
+            out.append(".")
+        else:
+            out.append(a)
+    return out
+
 
 def find_adb():
     env = os.environ.get("ADB")
     if env:
         return Path(env)
-    return Path(r"C:\Users\sergi\AppData\Local\Android\Sdk\platform-tools\adb.exe")
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        candidate = Path(local_app_data) / "Android" / "Sdk" / "platform-tools" / "adb.exe"
+        if candidate.exists():
+            return candidate
+    which = shutil.which("adb")
+    if which:
+        return Path(which)
+    return Path("adb")
 
 
 def run_adb(adb, serial, cmd, **kwargs):
@@ -80,9 +121,12 @@ def ensure_device_ready(adb, serial):
         raise SystemExit(f"adb device not ready (serial={serial}): {result.stderr or result.stdout}")
 
 
-def shell_command(test_dir, binary_name, timeout):
+def shell_command(test_dir, binary_name, timeout, args):
     # Use the device-side timeout utility and echo the real exit code.
-    inner = f"cd {test_dir} && timeout {timeout} ./{binary_name}; echo EXIT_CODE:$?"
+    arg_str = ""
+    if args:
+        arg_str = " " + " ".join(shlex.quote(a) for a in args)
+    inner = f"cd {test_dir} && timeout {timeout} ./{binary_name}{arg_str}; echo EXIT_CODE:$?"
     return ["shell", inner]
 
 
@@ -162,11 +206,13 @@ def run_test(adb, serial, build_dir, name, timeout):
     run_adb(adb, serial, ["shell", f"rm -rf {remote_dir} && mkdir -p {remote_dir}"], capture_output=True)
     push_binary(adb, serial, local_binary, remote_dir, binary_name)
 
+    test_args = substitute_args(TEST_ARGS.get(name, []))
+
     start = time.monotonic()
     result = run_adb(
         adb,
         serial,
-        shell_command(remote_dir, binary_name, timeout),
+        shell_command(remote_dir, binary_name, timeout, test_args),
         capture_output=True,
         text=True,
         timeout=timeout + 30,  # extra slack for adb itself
@@ -184,14 +230,23 @@ def run_test(adb, serial, build_dir, name, timeout):
     pull_results(adb, serial, remote_dir, results_dir)
 
     if exit_code is None:
-        return "FAIL", "could not parse device exit code"
+        detail = "could not parse device exit code"
+        if result.stderr:
+            detail += f"\n{result.stderr}"
+        return "FAIL", detail
     if exit_code == 124:
-        return "FAIL", f"timeout ({timeout}s)"
+        detail = f"timeout ({timeout}s)"
+        if result.stderr:
+            detail += f"\n{result.stderr}"
+        return "FAIL", detail
     if exit_code == SKIP_RETURN_CODE:
         reason = "ISO-gated (RECVX_ISO not set)" if name == "movies" else "skip return code"
         return "SKIP", reason
     if exit_code != 0:
-        return "FAIL", f"exit code {exit_code}"
+        detail = f"exit code {exit_code}"
+        if result.stderr:
+            detail += f"\n{result.stderr}"
+        return "FAIL", detail
     return "PASS", f"{elapsed:.1f}s"
 
 
@@ -230,7 +285,10 @@ def main(argv=None):
     passed = failed = skipped = 0
     outcomes = []
     for name in selected:
-        status, detail = run_test(adb, args.serial, build_dir, name, args.timeout)
+        if name in DISPOSITIONS:
+            status, detail = "SKIP", DISPOSITIONS[name]
+        else:
+            status, detail = run_test(adb, args.serial, build_dir, name, args.timeout)
         outcomes.append((name, status, detail))
         if status == "PASS":
             passed += 1

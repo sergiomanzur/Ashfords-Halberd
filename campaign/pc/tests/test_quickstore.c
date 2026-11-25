@@ -4,6 +4,17 @@
 #include <stdio.h>
 #include <string.h>
 
+#if defined(__ANDROID__)
+#include <sys/stat.h>
+#include <unistd.h>
+#include <errno.h>
+static int test_mkdir(const char* path) { return mkdir(path, 0770) == 0 || errno == EEXIST; }
+static int test_remove(const char* path) { return remove(path) == 0 || errno == ENOENT; }
+#else
+#define test_mkdir SDL_CreateDirectory
+#define test_remove SDL_RemovePath
+#endif
+
 #define CHECK(c) do { if (!(c)) { fprintf(stderr, "FAIL %d: %s\n", __LINE__, #c); return 1; } } while (0)
 static void checksum(unsigned char* d)
 {
@@ -25,7 +36,7 @@ int main(void)
     unsigned char data[SAVE_DATA_BYTES] = {10}, out[SAVE_DATA_BYTES], image[SAVE_DATA_BYTES + 33];
     snprintf(path, sizeof(path), "%s/quicksave.ahs", dir);
     snprintf(bad, sizeof(bad), "%s/corrupt.ahs", dir);
-    CHECK(SDL_CreateDirectory(dir)); SDL_RemovePath(path); SDL_RemovePath(bad);
+    CHECK(test_mkdir(dir)); test_remove(path); test_remove(bad);
     memset(out, 0xDD, sizeof(out));
     CHECK(quickstore_read(path, out) == QUICKSTORE_MISSING && out[0] == 0xDD);
     data[100] = 73; checksum(data);
@@ -53,7 +64,7 @@ int main(void)
     CHECK(raw(bad, image, n + 1)); CHECK(quickstore_read(bad, out) == QUICKSTORE_BAD);
     CHECK(quickstore_write(dir, data) == QUICKSTORE_IO); /* rename over directory must fail */
     CHECK(quickstore_read(path, out) == QUICKSTORE_OK && out[100] == 91);
-    SDL_RemovePath(path); SDL_RemovePath(bad); SDL_RemovePath(dir);
+    test_remove(path); test_remove(bad); test_remove(dir);
     puts("quickstore: atomic slot, native checksum, full CRC, UTF-8 and corrupt-file isolation verified");
     return 0;
 }
