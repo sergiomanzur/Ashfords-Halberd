@@ -156,7 +156,7 @@ void  pc_mesh_strip(const void* strip);   /* within a mesh: the following output
 void  pc_margin_next(int mode);   /* the next mesh is drawn only outside the 4:3 screen (native 3D, hor+); mode: view_glue.c pc_margin_mesh */
 int   pc_margin_reaches_43(const struct VU1_STRIP_BUF* v, int n);   /* such a mesh would cover the view (native_glue.c): left out */
 void  pc_effect_tag(const void* op);      /* effect.c: the following output is this effect (O_WRK*, NULL: none) */
-unsigned long long pc_effect_poly(void); /* ps2_dummy.c Ps2AddOT: STREAM_TAG_REG value for an effect polygon (0: none) */
+uint64_t pc_effect_poly(void); /* ps2_dummy.c Ps2AddOT: STREAM_TAG_REG value for an effect polygon (0: none) */
 /* Offline compatibility for hooks in the imported game sources. These constants and
    inline no-ops preserve the original single-player path without any network runtime. */
 #define coop_on 0

@@ -114,8 +114,18 @@ target_compile_options(recvx_game PRIVATE
 # permerrors the decomp needs are switched off one by one). GCC 13 (CI) only warns: the ctest
 # decomp_declarations checks it there. Missing returns and uninitialized locals are listed by
 # pc/tools/decomp_warnings.py. The port's own glue gets warnings.
-set_source_files_properties(${GAME_SOURCES} PROPERTIES COMPILE_OPTIONS
-    "-w;-Wno-incompatible-pointer-types;-Wno-int-conversion;-Wno-return-mismatch")
+if(CMAKE_SYSTEM_NAME STREQUAL "Android")
+    # Clang 17 does not recognize GCC 14's -Wno-return-mismatch; suppress the
+    # matching Clang diagnostics while keeping undeclared-function errors active.
+    # Disable bionic _FORTIFY_SOURCE overload wrappers on decomp TUs (e.g.
+    # sub1.c's memset(ptr, NULL, len) fails __overloadable resolution).
+    target_compile_options(recvx_game PRIVATE -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0)
+    set_source_files_properties(${GAME_SOURCES} PROPERTIES COMPILE_OPTIONS
+        "-w;-Wno-incompatible-pointer-types;-Wno-incompatible-function-pointer-types;-Wno-int-conversion;-Wno-return-type;-Wno-format-security")
+else()
+    set_source_files_properties(${GAME_SOURCES} PROPERTIES COMPILE_OPTIONS
+        "-w;-Wno-incompatible-pointer-types;-Wno-int-conversion;-Wno-return-mismatch")
+endif()
 set_source_files_properties(${GLUE_SOURCES} PROPERTIES COMPILE_OPTIONS "-Wall;-Wno-unused-function")
 if(WIN32)
     # GCC (not MSVC) bitfield layout, as on Linux and the EE
@@ -125,6 +135,30 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # the executable is non-PIE (fixed address window); position-independent code only costs
     # get_pc_thunk calls on x86-32
     target_compile_options(recvx_game PRIVATE -fno-pie)
+endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Android")
+    set_target_properties(recvx_game PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    # Compile snapshot manifest/core without pc_prelude.h so .ahsnap lives inside
+    # librecvx_game.so and snapshot_core.c reads its patched bytes directly.
+    add_library(recvx_game_snapshot OBJECT src/host/snapshot_manifest.c src/host/snapshot_core.c)
+    set_target_properties(recvx_game_snapshot PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_compile_options(recvx_game_snapshot PRIVATE -std=gnu11 -Wall)
+    target_include_directories(recvx_game_snapshot PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+    set(_android_window_ld "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/android-window.ld")
+    add_library(recvx_game_so SHARED $<TARGET_OBJECTS:recvx_game> $<TARGET_OBJECTS:recvx_game_snapshot>)
+    set_target_properties(recvx_game_so PROPERTIES
+        OUTPUT_NAME recvx_game
+        LINK_DEPENDS "${_android_window_ld}"
+    )
+    target_link_options(recvx_game_so PRIVATE
+        "LINKER:-T,${_android_window_ld}"
+        "-Wl,-z,max-page-size=16384"
+        "-Wl,-z,norelro"
+        "-Wl,--unresolved-symbols=ignore-all"
+        "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/librecvx_game.map"
+    )
+    target_link_libraries(recvx_game_so PRIVATE m)
 endif()
 
 endif()
@@ -137,6 +171,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Android")
     # The sampling profiler is x86/Linux-specific (ucontext.gregs[REG_RIP]).
     # It is not linked in tests-only mode; exclude it from the arm64 object library.
     list(FILTER PLATFORM_SOURCES EXCLUDE REGEX "src/host/profile\\.c$")
+    # On Android, .ahsnap and snapshot_core live inside librecvx_game.so so
+    # snapshot_manifest.py patches the game library directly.
+    list(FILTER PLATFORM_SOURCES EXCLUDE REGEX "src/host/snapshot_(manifest|core)\\.c$")
 endif()
 add_library(recvx_platform OBJECT ${PLATFORM_SOURCES})
 # xxHash (BSD-2-Clause, header only): XXH3, the hash PCSX2 names its texture replacements by (src/gs/hdpack.c)
@@ -189,7 +226,7 @@ endif()
 
 # ---------------------------------------------------------------- executable
 set(RECVX_LAYOUT_PAD 0 CACHE STRING "test aid: bytes of padding before all code, data and bss (pc/tools/layout_check.sh)")
-if(RECVX_LAYOUT_PAD)
+if(RECVX_LAYOUT_PAD AND NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
     set(LAYOUT_PAD_SRC tests/layout_pad.c)
     set_source_files_properties(tests/layout_pad.c PROPERTIES COMPILE_DEFINITIONS RECVX_LAYOUT_PAD=${RECVX_LAYOUT_PAD})
 endif()
@@ -207,7 +244,7 @@ if(WIN32)
         "${ASHFORD_BRANDING}/ashford.ico;${CMAKE_CURRENT_SOURCE_DIR}/src/host/tr_table.inc")
     set(RECVX_RES $<TARGET_OBJECTS:ashford_icon>)
 endif()
-if(NOT ASHFORD_PLATFORM_TESTS_ONLY)
+if(NOT ASHFORD_PLATFORM_TESTS_ONLY AND NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
 add_executable(recvx ${LAYOUT_PAD_SRC} ${RECVX_RES} $<TARGET_OBJECTS:recvx_game> $<TARGET_OBJECTS:recvx_platform>
                $<$<TARGET_EXISTS:glibc_compat>:$<TARGET_OBJECTS:glibc_compat>>)
 target_link_libraries(recvx PRIVATE imgui SDL3::SDL3 m)

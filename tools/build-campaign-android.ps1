@@ -3,6 +3,7 @@ param(
     [string]$NdkDir,
     [switch]$PlatformTestsOnly,
     [switch]$ConfigureOnly,
+    [switch]$SkipDeviceTests,
     [string]$BuildDirectory = 'build/campaign-android',
     [int]$Jobs = 4,
     [string]$Serial
@@ -29,13 +30,21 @@ $campaignPin = & git -C $campaignDecomp rev-parse HEAD
 if ($LASTEXITCODE -or $campaignPin -ne '4aac5133901da3821fe443b79d6cdd1e3b29e6da') {
     throw 'Initialize only the pinned campaign source: git submodule update --init upstream/recvx-campaign-decomp. Do not recursively fetch SDK submodules.'
 }
+if (!$PlatformTestsOnly) {
+    $campaignMissing = @(
+        'include/recvx-decomp-katana/KATANA/Include/ninja.h',
+        'include/recvx-decomp-cri/cri/mwlib/include/cri_adxt.h',
+        'include/recvx-decomp-cri/cri/mwlib/include/cri_adxf.h'
+    ) | ForEach-Object { Join-Path $campaignDecomp $_ } | Where-Object { !(Test-Path -LiteralPath $_) }
+    if ($campaignMissing) { throw "Android campaign build blocked by missing local SDK headers:`n$($campaignMissing -join "`n")`nUse -PlatformTestsOnly for independent component checks without building librecvx_game.so." }
+}
 
 $campaignCMake = (Get-Command cmake -ErrorAction Stop).Source
 $envOldAndroidNdk = $env:ANDROID_NDK
 try {
     $env:ANDROID_NDK = $NdkDir
     & $campaignCMake -S $campaignRoot -B $campaignBuild -G Ninja -DASHFORD_CAMPAIGN=ON `
-        "-DASHFORD_PLATFORM_TESTS_ONLY=ON" `
+        "-DASHFORD_PLATFORM_TESTS_ONLY=$(if ($PlatformTestsOnly) { 'ON' } else { 'OFF' })" `
         "-DCMAKE_TOOLCHAIN_FILE=campaign/cmake/android-arm64.cmake" `
         "-DANDROID_NDK=$NdkDir" `
         "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
@@ -44,6 +53,7 @@ try {
     & $campaignCMake --build $campaignBuild --parallel $Jobs
     if ($LASTEXITCODE) { throw 'Android campaign build failed.' }
 
+    if ($SkipDeviceTests) { return }
     # Run the on-device test suite.
     $runner = Join-Path $PSScriptRoot 'run-android-ctest.py'
     $runnerArgs = @($runner, '--build-dir', $campaignBuild)
