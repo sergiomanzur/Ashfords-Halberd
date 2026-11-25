@@ -9,6 +9,9 @@
 #if defined(__ANDROID__)
 #define _GNU_SOURCE
 #include "window_load.h"
+#ifdef ASHFORD_ANDROID_GAME_BRIDGE
+#include "android_game_bridge.h"
+#endif
 #include "../ps2_platform.h"
 #include <android/dlext.h>
 #include <dlfcn.h>
@@ -22,6 +25,7 @@
 #include <unistd.h>
 
 static void* g_game_handle;
+static char g_game_lib_path[PATH_MAX];
 static int g_pool_ready;
 static size_t g_pool_mapped[ASHFORD_POOL_SLOTS];
 
@@ -51,7 +55,9 @@ static int resolve_game_lib_path(char* out, size_t out_cap)
             if (dir_len + sizeof("/librecvx_game.so") <= out_cap) {
                 memcpy(out, self_info.dli_fname, dir_len);
                 memcpy(out + dir_len, "/librecvx_game.so", sizeof("/librecvx_game.so"));
-                if (access(out, R_OK) == 0)
+                /* When extractNativeLibs="false", dli_fname is "<apk>!/lib/arm64-v8a/libmain.so";
+                 * access() cannot stat a zip entry, whereas bionic android_dlopen_ext() accepts it. */
+                if (strstr(out, "!/") != NULL || access(out, R_OK) == 0)
                     return 0;
             }
         }
@@ -234,13 +240,23 @@ int ashford_window_init(void)
                    verify.data_segs, verify.exec_segs);
     }
 
+    const char* canon_path = (dli.dli_fname && dli.dli_fname[0]) ? dli.dli_fname : lib_path;
+    snprintf(g_game_lib_path, sizeof(g_game_lib_path), "%s", canon_path);
     g_game_handle = handle;
+#ifdef ASHFORD_ANDROID_GAME_BRIDGE
+    ashford_game_bridge_init(g_game_handle);
+#endif
     return 0;
 }
 
 void* ashford_game_handle(void)
 {
     return g_game_handle;
+}
+
+const char* ashford_game_lib_path(void)
+{
+    return g_game_lib_path[0] ? g_game_lib_path : NULL;
 }
 
 void ashford_pool_free(int slot)

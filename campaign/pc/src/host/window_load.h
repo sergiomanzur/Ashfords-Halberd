@@ -28,10 +28,11 @@ extern "C" {
 #define ASHFORD_POOL_SLOT_SIZE    (ASHFORD_POOL_RESERVE_SIZE / ASHFORD_POOL_SLOTS)
 
 #if defined(__ANDROID__)
-int   ashford_window_init(void);            /* 0 ok; reserves both ranges, dlext-loads librecvx_game.so */
-void* ashford_game_handle(void);            /* dlopen handle after init, else NULL */
-void* ashford_pool_alloc(int slot, uint32_t len); /* one block per slot, replaces the slot's last; NULL outside the pool */
-void  ashford_pool_free(int slot);
+int         ashford_window_init(void);            /* 0 ok; reserves both ranges, dlext-loads librecvx_game.so */
+void*       ashford_game_handle(void);            /* dlopen handle after init, else NULL */
+const char* ashford_game_lib_path(void);          /* resolved path (or apk!/entry) of loaded librecvx_game.so */
+void*       ashford_pool_alloc(int slot, uint32_t len); /* one block per slot, replaces the slot's last; NULL outside the pool */
+void        ashford_pool_free(int slot);
 #endif
 
 #ifdef __cplusplus

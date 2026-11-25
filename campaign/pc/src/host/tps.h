@@ -46,7 +46,13 @@ typedef struct TpsConfig {
                                  read the DS2 buttons, so there Q/W/A/S are L1/R1/Square/Triangle again */
 } TpsConfig;
 
+#ifdef ASHFORD_ANDROID_GAME_BRIDGE
+__attribute__((visibility("hidden"))) extern TpsConfig* ashford_ptr_g_tps;
+__attribute__((visibility("hidden"))) extern TpsConfig ashford_sent_g_tps;
+#define g_tps (*ashford_ptr_g_tps)
+#else
 extern TpsConfig g_tps;
+#endif
 
 /* "Move While Aiming": legs walking under the weapon motion (tps_glue.c tps_legs): the walk motion of the base set,
    its frame (16.16), the hips' turn off the facing (game units), the weight blended in (0: none) */
@@ -67,7 +73,12 @@ typedef struct TpsHud {
     volatile int spare, spare_pct;     /* reload ammo in the bag, the same */
     volatile int round_kind;           /* 0 plain, 1 acid, 2 flame, 3 gas, 4 gunpowder arrows */
 } TpsHud;
+#ifdef ASHFORD_ANDROID_GAME_BRIDGE
+__attribute__((visibility("hidden"))) extern TpsHud* ashford_ptr_g_hud;
+#define g_hud (*ashford_ptr_g_hud)
+#else
 extern TpsHud g_hud;
+#endif
 const unsigned int* hud_icons(int* w, int* h);   /* RGBA atlas (both 512x512 textures stacked), NULL if not read */
 int hud_item_info(int id, int* group, int* two_slot, int* counted, int* pct, int* def_amt, int* min_amt, int* max_amt,
                   float* u0, float* v0, float* u1, float* v1);

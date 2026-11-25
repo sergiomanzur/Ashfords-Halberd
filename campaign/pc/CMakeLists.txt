@@ -189,8 +189,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Android")
     # Ps2Vu*ProgSend passes windowed addresses to sceDmaSend().
     list(FILTER PLATFORM_SOURCES EXCLUDE REGEX "src/host/snapshot_(manifest|core)\\.c$")
     list(FILTER PLATFORM_SOURCES EXCLUDE REGEX "src/ps2/vu_stubs_android\\.c$")
+else()
+    list(FILTER PLATFORM_SOURCES EXCLUDE REGEX "src/host/android_game_bridge\\.c$")
 endif()
 add_library(recvx_platform OBJECT ${PLATFORM_SOURCES})
+if(CMAKE_SYSTEM_NAME STREQUAL "Android")
+    set_target_properties(recvx_platform PROPERTIES EXCLUDE_FROM_ALL TRUE)
+endif()
 # xxHash (BSD-2-Clause, header only): XXH3, the hash PCSX2 names its texture replacements by (src/gs/hdpack.c)
 include(FetchContent)
 FetchContent_Declare(xxhash GIT_REPOSITORY https://github.com/Cyan4973/xxHash.git GIT_TAG v0.8.3 GIT_SHALLOW TRUE SOURCE_SUBDIR none)
@@ -609,39 +614,64 @@ foreach(target test_audio_snapshot test_audio_snapshot_decoder test_audio_snapsh
 endforeach()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Android" AND NOT ASHFORD_PLATFORM_TESTS_ONLY)
-    # On-device test harness for the windowed loader and Android memory model.
-    # Links the platform layer (with host.c's main renamed) and exports all
-    # platform symbols (--export-dynamic) so bionic resolves librecvx_game.so's
-    # undefined references without putting librecvx_game.so in DT_NEEDED.
+    # Android platform layer compiled once with ASHFORD_ANDROID_GAME_BRIDGE so
+    # both libmain.so (SDLActivity entry) and test_window_load resolve all 61
+    # game symbols at runtime after ashford_window_init() loads librecvx_game.so
+    # into [0x30000000, 0x50000000) without putting librecvx_game.so in DT_NEEDED.
     set(PLATFORM_NO_HOST_SOURCES ${PLATFORM_SOURCES})
     list(FILTER PLATFORM_NO_HOST_SOURCES EXCLUDE REGEX "src/host/host\\.c$")
-    # Compile a separate host.c object with main renamed so test_window_load owns main().
-    add_library(recvx_host_nomain OBJECT src/host/host.c)
-    target_include_directories(recvx_host_nomain PRIVATE $<TARGET_PROPERTY:recvx_platform,INCLUDE_DIRECTORIES>)
-    target_compile_options(recvx_host_nomain PRIVATE $<TARGET_PROPERTY:recvx_platform,COMPILE_OPTIONS>)
-    target_compile_definitions(recvx_host_nomain PRIVATE main=ashford_host_main
-        "RECVX_VERSION=\"${RECVX_VERSION}\"" "ASHFORD_VERSION=\"${ASHFORD_VERSION}\"")
-    target_link_libraries(recvx_host_nomain PRIVATE SDL3::SDL3 imgui)
-    # Build the remaining platform objects once via recvx_platform_core.
+
     add_library(recvx_platform_core OBJECT ${PLATFORM_NO_HOST_SOURCES})
     target_include_directories(recvx_platform_core PRIVATE $<TARGET_PROPERTY:recvx_platform,INCLUDE_DIRECTORIES>)
     target_compile_options(recvx_platform_core PRIVATE $<TARGET_PROPERTY:recvx_platform,COMPILE_OPTIONS>)
+    target_compile_definitions(recvx_platform_core PRIVATE ASHFORD_ANDROID_GAME_BRIDGE=1)
     target_link_libraries(recvx_platform_core PRIVATE SDL3::SDL3 imgui)
+
+    # Full Android application library loaded by org.libsdl.app.SDLActivity.
+    # Exports SDL_main, JNI_OnLoad (via SDL3-static), and platform symbols (--export-dynamic),
+    # while keeping all 61 game bridge shims hidden and omitting librecvx_game.so from DT_NEEDED.
+    add_library(recvx_host_main OBJECT src/host/host.c)
+    target_include_directories(recvx_host_main PRIVATE $<TARGET_PROPERTY:recvx_platform,INCLUDE_DIRECTORIES>)
+    target_compile_options(recvx_host_main PRIVATE $<TARGET_PROPERTY:recvx_platform,COMPILE_OPTIONS>)
+    target_compile_definitions(recvx_host_main PRIVATE ASHFORD_ANDROID_GAME_BRIDGE=1
+        "RECVX_VERSION=\"${RECVX_VERSION}\"" "ASHFORD_VERSION=\"${ASHFORD_VERSION}\"")
+    target_link_libraries(recvx_host_main PRIVATE SDL3::SDL3 imgui)
+
+    add_library(main SHARED
+        $<TARGET_OBJECTS:recvx_platform_core>
+        $<TARGET_OBJECTS:recvx_host_main>
+    )
+    target_link_options(main PRIVATE
+        "-Wl,--export-dynamic"
+        "-Wl,-u,SDL_GetTicks"
+        "-Wl,-u,SDL_GetTicksNS"
+        "-Wl,-z,max-page-size=16384"
+    )
+    target_link_libraries(main PRIVATE ashford_campaign_disc SDL3::SDL3 imgui EGL GLESv3 log android m dl)
+    add_dependencies(main recvx_game_so)
+
+    # On-device test harness for the windowed loader, DMA pool, and runtime game bridge.
+    add_library(recvx_host_nomain OBJECT src/host/host.c)
+    target_include_directories(recvx_host_nomain PRIVATE $<TARGET_PROPERTY:recvx_platform,INCLUDE_DIRECTORIES>)
+    target_compile_options(recvx_host_nomain PRIVATE $<TARGET_PROPERTY:recvx_platform,COMPILE_OPTIONS>)
+    target_compile_definitions(recvx_host_nomain PRIVATE ASHFORD_HOST_NOMAIN=1 ASHFORD_ANDROID_GAME_BRIDGE=1
+        main=ashford_host_main "RECVX_VERSION=\"${RECVX_VERSION}\"" "ASHFORD_VERSION=\"${ASHFORD_VERSION}\"")
+    target_link_libraries(recvx_host_nomain PRIVATE SDL3::SDL3 imgui)
 
     add_executable(test_window_load
         tests/test_window_load.c
-        tests/android_game_stubs.c
         $<TARGET_OBJECTS:recvx_platform_core>
         $<TARGET_OBJECTS:recvx_host_nomain>
     )
     target_include_directories(test_window_load PRIVATE src src/ps2 include/sdk)
     target_compile_options(test_window_load PRIVATE -std=gnu11 -Wall)
+    target_compile_definitions(test_window_load PRIVATE ASHFORD_ANDROID_GAME_BRIDGE=1)
     target_link_options(test_window_load PRIVATE
         "-Wl,--export-dynamic"
         "-Wl,-u,SDL_GetTicks"
         "-Wl,-u,SDL_GetTicksNS"
     )
-    target_link_libraries(test_window_load PRIVATE ashford_campaign_disc SDL3::SDL3 imgui EGL m dl)
+    target_link_libraries(test_window_load PRIVATE ashford_campaign_disc SDL3::SDL3 imgui EGL GLESv3 log android m dl)
     add_dependencies(test_window_load recvx_game_so)
     add_test(NAME window_load COMMAND test_window_load)
 endif()

@@ -21,7 +21,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef ASHFORD_ANDROID_GAME_BRIDGE
+__attribute__((visibility("hidden"))) extern char* (*ashford_ptr_rdx_files)[205];
+#define rdx_files (*ashford_ptr_rdx_files)
+#else
 extern char* rdx_files[205];                    /* ps2_dvd_image.c, sorted names; AFS partition 17 entry i */
+#endif
 unsigned int RoomNameSwitch(unsigned int name); /* bup_00.c: stage * 100 + room -> save menu room name 1..18, 0 none */
 
 enum { TP_SRC = 4, MAX_FILES = 1024 };

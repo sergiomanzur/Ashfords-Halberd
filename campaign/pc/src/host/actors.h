@@ -33,7 +33,13 @@ extern unsigned char actor_import_group[ACTOR_IMPORT_MAX];
 extern int actor_import_n;
 const ActorModel* actor_model(int idx);   /* catalogue entry or import idx, NULL if none */
 
+#ifdef ASHFORD_ANDROID_GAME_BRIDGE
+__attribute__((visibility("hidden"))) extern int* ashford_ptr_g_appear_chr;
+__attribute__((visibility("hidden"))) extern int ashford_sent_g_appear_chr;
+#define g_appear_chr (*ashford_ptr_g_appear_chr)
+#else
 extern int g_appear_chr;
+#endif
 void appear_frame(void);
 int  appear_look_of(int pid);             /* effective resolved chr for character pid (0..3) */
 

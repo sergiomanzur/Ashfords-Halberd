@@ -175,6 +175,151 @@ static void sha_finish(Sha256* s,unsigned char out[32]) {
     sha_update(s,tail,n+8);
     for(unsigned i=0;i<8;++i)for(unsigned j=0;j<4;++j)out[i*4+j]=(unsigned char)(s->h[i]>>(24-j*8));
 }
+#if defined(__ANDROID__)
+extern const char* ashford_game_lib_path(void) __attribute__((weak));
+
+static uint16_t rd16(const unsigned char* p) { return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8)); }
+
+static int sha_stream_file_range(FILE* f, uint64_t offset, uint64_t length, int bounded, unsigned char out[32])
+{
+    unsigned char bytes[65536], digest[32];
+    Sha256 s = {{0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19},0,{0},0};
+    if (offset > 0 && fseeko(f, (off_t)offset, SEEK_SET) != 0)
+        return 0;
+    uint64_t remaining = length;
+    for (;;) {
+        size_t want = sizeof(bytes);
+        if (bounded) {
+            if (remaining == 0) break;
+            if ((uint64_t)want > remaining) want = (size_t)remaining;
+        }
+        size_t n = fread(bytes, 1, want, f);
+        if (n > 0) {
+            sha_update(&s, bytes, n);
+            if (bounded) remaining -= n;
+        }
+        if (n < want) {
+            if (ferror(f)) return 0;
+            if (bounded && remaining != 0) return 0;
+            break;
+        }
+    }
+    sha_finish(&s, digest);
+    memcpy(out, digest, sizeof(digest));
+    return 1;
+}
+
+/* Hash an uncompressed (STORE) entry inside an APK zip referenced as "<apk>!/<entry>". */
+static int sha_zip_entry(const char* apk_path, const char* entry_name, unsigned char out[32])
+{
+    FILE* f = fopen(apk_path, "rb");
+    if (!f) return 0;
+    int ok = 0;
+    if (fseeko(f, 0, SEEK_END) != 0) goto done;
+    off_t fsize_off = ftello(f);
+    if (fsize_off < 22) goto done;
+    uint64_t fsize = (uint64_t)fsize_off;
+
+    size_t tail_len = (fsize > 65557u) ? 65557u : (size_t)fsize;
+    unsigned char* tail = malloc(tail_len);
+    if (!tail) goto done;
+    if (fseeko(f, (off_t)(fsize - tail_len), SEEK_SET) != 0 || fread(tail, 1, tail_len, f) != tail_len) {
+        free(tail);
+        goto done;
+    }
+
+    int found_eocd = 0;
+    uint32_t cd_size = 0, cd_off = 0;
+    for (size_t pos = tail_len - 22; ; pos--) {
+        if (rd(tail + pos) == UINT32_C(0x06054b50)) {
+            uint16_t comment_len = rd16(tail + pos + 20);
+            if (pos + 22u + comment_len == tail_len) {
+                cd_size = rd(tail + pos + 12);
+                cd_off = rd(tail + pos + 16);
+                found_eocd = 1;
+                break;
+            }
+        }
+        if (pos == 0) break;
+    }
+    free(tail);
+    if (!found_eocd || cd_size == 0 || (uint64_t)cd_off + (uint64_t)cd_size > fsize)
+        goto done;
+
+    if (fseeko(f, (off_t)cd_off, SEEK_SET) != 0) goto done;
+    size_t target_len = strlen(entry_name);
+    uint64_t cd_pos = 0;
+    while (cd_pos + 46u <= (uint64_t)cd_size) {
+        unsigned char hdr[46];
+        if (fread(hdr, 1, sizeof(hdr), f) != sizeof(hdr)) goto done;
+        if (rd(hdr) != UINT32_C(0x02014b50)) goto done;
+        uint16_t method = rd16(hdr + 10);
+        uint32_t comp_size = rd(hdr + 20);
+        uint32_t uncomp_size = rd(hdr + 24);
+        uint16_t name_len = rd16(hdr + 28);
+        uint16_t extra_len = rd16(hdr + 30);
+        uint16_t comment_len = rd16(hdr + 32);
+        uint32_t local_off = rd(hdr + 42);
+        uint64_t step = 46u + (uint64_t)name_len + (uint64_t)extra_len + (uint64_t)comment_len;
+        if (cd_pos + step > (uint64_t)cd_size) goto done;
+
+        if (name_len == target_len) {
+            char* name_buf = malloc(name_len + 1u);
+            if (!name_buf) goto done;
+            int read_ok = fread(name_buf, 1, name_len, f) == name_len;
+            int match = read_ok && memcmp(name_buf, entry_name, name_len) == 0;
+            free(name_buf);
+            if (!read_ok) goto done;
+            if (match) {
+                if (method != 0 || comp_size != uncomp_size || uncomp_size == 0)
+                    goto done;
+                unsigned char lhdr[30];
+                if ((uint64_t)local_off + 30u > fsize) goto done;
+                if (fseeko(f, (off_t)local_off, SEEK_SET) != 0 || fread(lhdr, 1, sizeof(lhdr), f) != sizeof(lhdr))
+                    goto done;
+                if (rd(lhdr) != UINT32_C(0x04034b50)) goto done;
+                uint64_t data_off = (uint64_t)local_off + 30u + (uint64_t)rd16(lhdr + 26) + (uint64_t)rd16(lhdr + 28);
+                if (data_off + (uint64_t)uncomp_size > fsize) goto done;
+                ok = sha_stream_file_range(f, data_off, (uint64_t)uncomp_size, 1, out);
+                goto done;
+            }
+            if (fseeko(f, (off_t)((uint64_t)extra_len + (uint64_t)comment_len), SEEK_CUR) != 0)
+                goto done;
+        } else {
+            if (fseeko(f, (off_t)((uint64_t)name_len + (uint64_t)extra_len + (uint64_t)comment_len), SEEK_CUR) != 0)
+                goto done;
+        }
+        cd_pos += step;
+    }
+
+done:
+    if (fclose(f) != 0) ok = 0;
+    return ok;
+}
+
+int snapshot_hash_android_path(const char* path, unsigned char out[32])
+{
+    if (!path || !path[0] || !out) return 0;
+    const char* bang = strstr(path, "!/");
+    if (bang) {
+        size_t apk_len = (size_t)(bang - path);
+        if (apk_len == 0 || bang[2] == '\0') return 0;
+        char* apk_path = malloc(apk_len + 1u);
+        if (!apk_path) return 0;
+        memcpy(apk_path, path, apk_len);
+        apk_path[apk_len] = '\0';
+        int ok = sha_zip_entry(apk_path, bang + 2, out);
+        free(apk_path);
+        return ok;
+    }
+    FILE* f = fopen(path, "rb");
+    if (!f) return 0;
+    int ok = sha_stream_file_range(f, 0, 0, 0, out);
+    if (fclose(f) != 0) ok = 0;
+    return ok;
+}
+#endif
+
 int snapshot_executable_hash(unsigned char out[32]) {
     FILE* f=NULL;unsigned char bytes[65536],digest[32];size_t n;
     Sha256 s={{0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19},0,{0},0};
@@ -184,6 +329,16 @@ int snapshot_executable_hash(unsigned char out[32]) {
     DWORD len=GetModuleFileNameW(NULL,path,32768);
     if(len && len<32768)f=_wfopen(path,L"rb");
     free(path);
+#elif defined(__ANDROID__)
+    /* Inside an Android APK, /proc/self/exe is /system/bin/app_process64.
+       When window_load is linked, always hash the loaded librecvx_game.so
+       (whether extracted on disk or uncompressed inside base.apk!/...). */
+    if (ashford_game_lib_path) {
+        const char* lib_path = ashford_game_lib_path();
+        if (!lib_path) return 0;
+        return snapshot_hash_android_path(lib_path, out);
+    }
+    f=fopen("/proc/self/exe","rb");
 #else
     f=fopen("/proc/self/exe","rb");
 #endif

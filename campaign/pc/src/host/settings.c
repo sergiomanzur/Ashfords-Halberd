@@ -383,7 +383,12 @@ static const char* subs_name(int v, char* b, int n) { snprintf(b, n, "%s", subs_
 static const char* subs_locked(void) { return subs_n() < 2 ? "No language with subtitles is installed." : NULL; }
 
 #define V(x) ((int*)&(x))
+#ifdef ASHFORD_ANDROID_GAME_BRIDGE
+#include "android_game_bridge_table_begin.h"
+Setting g_settings[] = {
+#else
 const Setting g_settings[] = {
+#endif
     { SP_DISPLAY, "Experience preset", NULL, 0, 2, 1, (const char* const[]){ "Original", "Enhanced", "Custom" }, .get = preset_get, .set = preset_set, .group = "QUICK SETUP",
       .help = "Original: 4:3, 30 FPS presentation and classic movement. Enhanced: widescreen, smooth frames, modern movement and convenience options. Custom keeps your choices. All settings remain available; bindings, saves, audio and camera tuning stay unchanged." },
     { SP_DISPLAY, "Display mode", NULL, 0, 2, 1, display_modes, .get = dmode_get, .set = dmode_set, .apply = settings_apply_display, .group = "WINDOW",
@@ -609,7 +614,18 @@ const Setting g_settings[] = {
     { SP_CHEATS, "Current room", NULL, .flags = SET_ACTION | SET_GAME_ONLY | SET_NOW, .apply = here, .help = "Fills in the room you are in." },
     { SP_CHEATS, "Teleport", NULL, .flags = SET_ACTION | SET_GAME_ONLY, .apply = teleport },
 };
+#ifdef ASHFORD_ANDROID_GAME_BRIDGE
+#include "android_game_bridge_table_end.h"
+#endif
 const int g_settings_n = (int)SDL_arraysize(g_settings);
+#ifdef ASHFORD_ANDROID_GAME_BRIDGE
+void settings_android_bridge_rebase(void* (*rebase)(void*))
+{
+    for (int i = 0; i < g_settings_n; i++)
+        if (g_settings[i].val)
+            g_settings[i].val = (int*)rebase(g_settings[i].val);
+}
+#endif
 
 /* ---------------------------------------------------------------- access
    Both menus write the variables directly (aligned ints: a reader sees the old or the new

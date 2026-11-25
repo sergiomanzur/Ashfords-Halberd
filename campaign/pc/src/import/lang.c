@@ -33,10 +33,23 @@
 #include <time.h>
 
 void host_log(const char* fmt, ...);
+#ifdef ASHFORD_ANDROID_GAME_BRIDGE
+__attribute__((visibility("hidden"))) extern const unsigned char (*ashford_ptr_FontSz)[126];
+__attribute__((visibility("hidden"))) extern unsigned int (*ashford_ptr_fstbl)[24];
+__attribute__((visibility("hidden"))) extern unsigned int (*ashford_ptr_fsheader)[24];
+__attribute__((visibility("hidden"))) extern unsigned int (*ashford_ptr_wallpaper)[24];
+__attribute__((visibility("hidden"))) extern void* (*ashford_ptr_comevt_message_tab)[8];
+#define FontSz (*ashford_ptr_FontSz)
+#define fstbl (*ashford_ptr_fstbl)
+#define fsheader (*ashford_ptr_fsheader)
+#define wallpaper (*ashford_ptr_wallpaper)
+#define comevt_message_tab (*ashford_ptr_comevt_message_tab)
+#else
 extern const unsigned char FontSz[126];          /* decomp message.c: the US font's widths */
 extern unsigned int fstbl[24], fsheader[24];     /* decomp fileview.c: the US files' page counts and first pages */
 extern unsigned int wallpaper[24];               /* decomp fileview.c: the files' backgrounds (the same in every release) */
 extern void* comevt_message_tab[8];              /* decomp sp_evt.c: the computer events' texts */
+#endif
 char g_lang_us_iso[1024];                        /* the US image (lang_extract reads its SYSMES.ALD; host.c sets it) */
 
 const char* const lang_codes[LANG_COUNT] = { "en", "fr", "de", "es", "ja", "ru", "tr", "pt-BR", "ar", "ko", "it" };

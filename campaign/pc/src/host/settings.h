@@ -39,7 +39,11 @@ typedef struct Setting {
     int (*shown)(void);               /* NULL or 1: the menus list the row (0: hidden, e.g. Fullscreen resolution outside exclusive) */
 } Setting;
 
+#ifdef ASHFORD_ANDROID_GAME_BRIDGE
+extern Setting g_settings[];
+#else
 extern const Setting g_settings[];
+#endif
 extern const int g_settings_n;
 
 int  settings_get(const Setting* s);

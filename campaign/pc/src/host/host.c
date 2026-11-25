@@ -19,6 +19,13 @@ extern char g_lang_us_iso[1024];   /* import/lang.c */
 #include "../gs/gs.h"
 void render_loop(void);
 #include <SDL3/SDL.h>
+#if defined(__ANDROID__) && !defined(ASHFORD_HOST_NOMAIN)
+#include <SDL3/SDL_main.h>
+#endif
+#if defined(__ANDROID__)
+#include "window_load.h"
+#include <android/log.h>
+#endif
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -71,7 +78,12 @@ int pc_cfg_no_ink_ribbon(void) { return g_config.no_ink_ribbon; }
 int pc_cfg_extra_objects(void) { return g_config.extra_objects; }
 /* the game tests a few joints of a model against the screen; with a wide or moving free
    camera that drops models that are partly visible, so third person never culls */
+#ifdef ASHFORD_ANDROID_GAME_BRIDGE
+__attribute__((visibility("hidden"))) extern int* ashford_ptr_tps_cam_active;
+#define tps_cam_active (*ashford_ptr_tps_cam_active)
+#else
 extern int tps_cam_active;
+#endif
 int pc_model_cull(void) { return g_config.model_cull && !tps_cam_active; }
 int pc_frame_blend(void) { return g_config.frame_blend < 0 ? !g_config.interpolate : g_config.frame_blend; }
 int pc_battle_unlocked(void) { return g_config.battle_unlocked; }
@@ -198,6 +210,11 @@ void host_log(const char* fmt, ...)
     va_start(ap, fmt);
     vfprintf(stderr, fmt, ap);
     va_end(ap);
+#if defined(__ANDROID__)
+    va_start(ap, fmt);
+    __android_log_vprint(ANDROID_LOG_INFO, "AshfordsHalberd", fmt, ap);
+    va_end(ap);
+#endif
 }
 
 void host_fatal(const char* fmt, ...)
@@ -209,6 +226,7 @@ void host_fatal(const char* fmt, ...)
     va_end(ap);
     fprintf(stderr, "fatal: %s\n", buf);
 #if defined(__ANDROID__)
+    __android_log_print(ANDROID_LOG_FATAL, "AshfordsHalberd", "fatal: %s", buf);
     if (g_window) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Ashford's Halberd", buf, g_window);
 #else
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Ashford's Halberd", buf, g_window);
@@ -484,6 +502,11 @@ static int SDLCALL game_thread(void* ud)
 int main(int argc, char** argv)
 {
     setvbuf(stdout, NULL, _IONBF, 0); /* the game's printf diagnostics */
+#if defined(__ANDROID__)
+    /* Reserve [0x30000000, 0x50000000) + DMA pool, load librecvx_game.so at
+       0x30000000, and resolve all game bridge symbols before touching game state. */
+    ashford_window_init();
+#endif
     argv = pc_utf8_argv(argc, argv);   /* paths are UTF-8 everywhere (fileio.h) */
     user_data_dir();
     { char* cwd = SDL_GetCurrentDirectory(); if (cwd) { SDL_strlcpy(start_dir, cwd, sizeof(start_dir)); SDL_free(cwd); } }

@@ -13,7 +13,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef ASHFORD_ANDROID_GAME_BRIDGE
+#include "android_game_bridge_table_begin.h"
+static struct { const char* key; int* val; int lo, hi; } keys[] = {
+#else
 static const struct { const char* key; int* val; int lo, hi; } keys[] = {
+#endif
     { "window_w", &g_config.window_w, 320, 16384 },
     { "window_h", &g_config.window_h, 240, 16384 },
     { "fullscreen", &g_config.fullscreen, 0, 1 },
@@ -127,6 +132,14 @@ static const struct { const char* key; int* val; int lo, hi; } keys[] = {
     { "tps_pad_dead_move", &g_tps.pad_dead_move, 0, 90 },
     { "tps_pad_dead_look", &g_tps.pad_dead_look, 0, 90 },
 };
+#ifdef ASHFORD_ANDROID_GAME_BRIDGE
+#include "android_game_bridge_table_end.h"
+void config_android_bridge_rebase(void* (*rebase)(void*))
+{
+    for (size_t i = 0; i < SDL_arraysize(keys); i++)
+        keys[i].val = (int*)rebase(keys[i].val);
+}
+#endif
 
 static char* trim(char* s)
 {

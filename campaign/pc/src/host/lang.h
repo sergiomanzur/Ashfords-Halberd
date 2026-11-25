@@ -32,7 +32,16 @@ extern const char* const lang_names[LANG_COUNT];   /* in the language itself (UT
 
 /* the setting (ini language, LANG_*; English when the language is not installed) and Subtitles (ini subtitles:
    0 Off, 1 the game language's (older ini files), 2 + LANG_* that language's) */
+#ifdef ASHFORD_ANDROID_GAME_BRIDGE
+__attribute__((visibility("hidden"))) extern int* ashford_ptr_g_lang;
+__attribute__((visibility("hidden"))) extern int* ashford_ptr_g_subtitles;
+__attribute__((visibility("hidden"))) extern int ashford_sent_g_lang;
+__attribute__((visibility("hidden"))) extern int ashford_sent_g_subtitles;
+#define g_lang (*ashford_ptr_g_lang)
+#define g_subtitles (*ashford_ptr_g_subtitles)
+#else
 extern int g_lang, g_subtitles;
+#endif
 void lang_scan(void);                 /* which languages are installed (at start, after an import or a delete) */
 int  lang_installed(int l);           /* its folder is complete (English: always) */
 int  lang_old_import(int l);          /* an older import (lang.txt version 1: the item messages cut; 2: no text crawl, movies): import again */
@@ -96,8 +105,17 @@ void pc_lang_file_opened(const char* name, int src); /* a file the game opens (b
    max; their count, -1: the disc's file instead (a picture file with Translated Pictures off, nothing kept) */
 struct PcPart;
 int pc_lang_disc_parts(const char* name, FILE* f, uint32_t size, uint32_t lsn, uint32_t dsize, struct PcPart* out, int max);
+#ifdef ASHFORD_ANDROID_GAME_BRIDGE
+__attribute__((visibility("hidden"))) extern int* ashford_ptr_g_lang_pictures;
+__attribute__((visibility("hidden"))) extern int* ashford_ptr_g_lang_voices;
+__attribute__((visibility("hidden"))) extern int ashford_sent_g_lang_pictures;
+__attribute__((visibility("hidden"))) extern int ashford_sent_g_lang_voices;
+#define g_lang_pictures (*ashford_ptr_g_lang_pictures)
+#define g_lang_voices (*ashford_ptr_g_lang_voices)
+#else
 extern int g_lang_pictures;                         /* Translated Pictures (ini translated_pictures): 0 the disc's pictures */
 extern int g_lang_voices;                           /* Translated Title Call (ini translated_voices): 0 the disc's sounds */
+#endif
 float pc_font_width(unsigned short code);           /* the language font's width, < 0: the game's own */
 float pc_font_space(void);                          /* the advance of a space (0xFF01) at scale 1: 14, Japanese 28 */
 int  pc_font_glyph(int code, void** texlist, float* dx);   /* bhDispFont: the cell to draw (-1 none); *texlist another font's; *dx left shift */

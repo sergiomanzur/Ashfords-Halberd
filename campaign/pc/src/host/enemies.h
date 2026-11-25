@@ -32,7 +32,13 @@ typedef struct EnemyOpts {
     int cast_enemy;             /* the cutscene cast's "Enemy models" (cast.h CAST_ENEMY_*): what its creatures and scene zombies become */
     unsigned char cast_enemy_off[4];    /* ... its "Custom" list's unchecked entries (cast.h CAST_ENEMY_BYTES; recvx.ini enemy_custom_off) */
 } EnemyOpts;
+#ifdef ASHFORD_ANDROID_GAME_BRIDGE
+__attribute__((visibility("hidden"))) extern EnemyOpts* ashford_ptr_g_enemy_opts;
+__attribute__((visibility("hidden"))) extern EnemyOpts ashford_sent_g_enemy_opts;
+#define g_enemy_opts (*ashford_ptr_g_enemy_opts)
+#else
 extern EnemyOpts g_enemy_opts;  /* our settings (F1, recvx.ini) */
+#endif
 
 /* "Cutscene monsters" without the cutscene cast: a flag in the last bit of cast_enemy_off, past its list's entries.
    Set, the creatures and scene zombies are cast by cast_enemy (All enemies or Custom) while cast is off. */

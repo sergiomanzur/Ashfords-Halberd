@@ -27,7 +27,13 @@ typedef struct CheatState {
     char rooms[19][24];             /* the save menu's room names by RoomNameSwitch (1..18), "" until loaded */
 } CheatState;
 
+#ifdef ASHFORD_ANDROID_GAME_BRIDGE
+__attribute__((visibility("hidden"))) extern CheatState* ashford_ptr_g_cheat;
+__attribute__((visibility("hidden"))) extern CheatState ashford_sent_g_cheat;
+#define g_cheat (*ashford_ptr_g_cheat)
+#else
 extern CheatState g_cheat;
+#endif
 enum { CHEAT_GIVE_FULL, CHEAT_GIVE_INV, CHEAT_GIVE_BOX };
 int  cheat_give(int id, int count, int box);   /* game thread: immediate give (box: fall back to item box if inventory full) */
 void cheat_frame(void);             /* game thread */
