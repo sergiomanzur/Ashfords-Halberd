@@ -171,10 +171,10 @@
 **Interfaces:**
 - Produces: `ASHFORD_ALIGN32` (`__attribute__((aligned(32)))`) applied to every game buffer GCC's 32-byte rule currently covers implicitly; an audited symbol list (`Ps2_malloc_mem`, `Ps2_tex_mem`, `Ps2_PBUFF`, `Ps2_ot_list`, `tbuf`, `ene`, `EnemyInfo`, `RequestList`, plus each newly found symbol) asserted 32-byte aligned on device. Spec note: the spec's "compile-time offset asserts" sub-element is superseded by this stronger on-device per-symbol alignment audit (runtime truth beats a host-side static check that cannot see the loaded `.so` layout); the supersession is recorded here.
 
-- [ ] **Step 1: Add the failing alignment audit** — for each audited symbol (dlsym'd), assert `(addr & 31) == 0`. Run on device. Expected: FAIL on at least one GCC-implicitly-aligned buffer (the mingw toolchain comment predicts them); the failing set is this task's work list.
-- [ ] **Step 2: Fix each failing buffer via offline.patch** — append idempotent hunks adding explicit alignment (default visibility of the symbols is unchanged); re-apply patch check is the configure step's job (`apply-campaign-patch.py` reverses cleanly only when applied).
-- [ ] **Step 3: Run on device — expect PASS**; re-run the PC platform suite — alignment hunks must not shift any 32-bit layout behavior (GCC already aligned these; the attribute is a no-op there). Expected: both green.
-- [ ] **Step 4: Commit** — message `fix(android): explicit 32-byte alignment for EE packet buffers`.
+- [x] **Step 1: Add the failing alignment audit** — added 16-symbol alignment audit (`Ps2_malloc_mem`, `Ps2_tex_mem`, `Ps2_PBUFF`, `Ps2_ot_list`, `Ps2_DRAW_TMP`, `Ps2_tex_save`, `mbuf`, `palbuf`, `clear_buff`, `tbuf`, `ene`, `eff`, `sysp`, `np`, `EnemyInfo`, `RequestList`) to `test_window_load.c`. On RP6 TDD red caught 13 unaligned buffers (`Ps2_ot_list`, `Ps2_DRAW_TMP`, `Ps2_tex_save`, `mbuf`, `palbuf`, `clear_buff`, `tbuf`, `ene`, `eff`, `sysp`, `np`, `EnemyInfo`, `RequestList`).
+- [x] **Step 2: Fix each failing buffer via offline.patch** — defined `ASHFORD_ALIGN32` in `pc_prelude.h`, applied `TARGET_PC`-scoped `ASHFORD_ALIGN32` to all 14 buffers (the 13 failing + `Ps2_tex_mem`) across `main.c`, `ps2_dummy.c`, `ps2_loadtim2.c`, `ps2_texture.c`, `sdfunc.c`, `njplus.c` in `campaign/patches/offline.patch`; verified clean apply + idempotent re-apply via `apply-campaign-patch.py`.
+- [x] **Step 3: Run on device — expect PASS** — RP6 `test_window_load` PASS (all 16 buffers 32-byte aligned); Windows x86 platform suite 41/41 PASS.
+- [x] **Step 4: Commit** — message `fix(android): explicit 32-byte alignment for EE packet buffers`.
 
 ### Task 9: ELF snapshot manifest (quicksave foundation)
 

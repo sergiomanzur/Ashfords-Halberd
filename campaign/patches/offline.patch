@@ -1324,22 +1324,39 @@ index 837019fd..4316d7a6 100644
                  pwp = &ene[rom->enep[lp->lkno].wrk_no];
  #endif
 diff --git a/src/ps2/veronica/prog/main.c b/src/ps2/veronica/prog/main.c
-index 66f4beb9..b86d4338 100644
+index 66f4beb9..91b61cf5 100644
 --- a/src/ps2/veronica/prog/main.c
 +++ b/src/ps2/veronica/prog/main.c
-@@ -42,7 +42,11 @@ SYS_WORK sysp;
+@@ -32,18 +32,27 @@
+ typedef void(*bhSysTaskJumpTab_proc)();
+ 
+ #ifdef TARGET_PC
+-NJS_TEXMEMLIST tbuf[PC_TEX_ENTRIES];   /* PS2: 256 (pc_prelude.h) */
++NJS_TEXMEMLIST tbuf[PC_TEX_ENTRIES] ASHFORD_ALIGN32;   /* PS2: 256 (pc_prelude.h) */
+ #else
+ NJS_TEXMEMLIST tbuf[256];
+ #endif
+ NJS_VIEW view;
+ HWS_WORK hwsp;
++#ifdef TARGET_PC
++SYS_WORK sysp ASHFORD_ALIGN32;
++#else
+ SYS_WORK sysp;
++#endif
  ROM_WORK romp;
  CAM_WORK cam;
  BH_PWORK ply;
 +#ifdef TARGET_PC
-+BH_PWORK ene[PC_ENE_SLOTS];   /* 128 on the PS2 (pc_prelude.h) */
++BH_PWORK ene[PC_ENE_SLOTS] ASHFORD_ALIGN32;   /* 128 on the PS2 (pc_prelude.h) */
++O_WRK eff[512] ASHFORD_ALIGN32;
 +#else
  BH_PWORK ene[128];
-+#endif
  O_WRK eff[512];
++#endif
  unsigned char* freemem;
  unsigned char* keepmem;
-@@ -144,7 +148,11 @@ void njUserInit(void)
+ unsigned char* njpmemp __attribute__((aligned(64)));
+@@ -144,7 +153,11 @@ void njUserInit(void)
      
      njpmemp = freemem + (12255232 + PC_ARENA_EXTRA - hws->vtx_total); 
      
@@ -1352,7 +1369,7 @@ index 66f4beb9..b86d4338 100644
      
      vwbmemp = freemem + (12517376 + PC_ARENA_EXTRA - hws->vtx_total); 
      vebmemp = freemem + (12845056 + PC_ARENA_EXTRA - hws->vtx_total); 
-@@ -230,6 +238,9 @@ Sint32 njUserMain(void)
+@@ -230,6 +243,9 @@ Sint32 njUserMain(void)
      PS2_jikken(); 
      
      bhCheckSoftReset(); 
@@ -1517,6 +1534,22 @@ index caba0264..b54e52c6 100644
              continue;
          case 65282:
              dp++;
+diff --git a/src/ps2/veronica/prog/njplus.c b/src/ps2/veronica/prog/njplus.c
+index 456964cf..12c7e0d5 100644
+--- a/src/ps2/veronica/prog/njplus.c
++++ b/src/ps2/veronica/prog/njplus.c
+@@ -7,7 +7,11 @@
+ #include "../../../ps2/veronica/prog/ps2_NaMatrix.h"
+ #include "../../../ps2/veronica/prog/main.h"
+ 
++#ifdef TARGET_PC
++NP_WORK np ASHFORD_ALIGN32;
++#else
+ NP_WORK np;
++#endif
+ 
+ // 100% matching!
+ void npPlusInit() 
 diff --git a/src/ps2/veronica/prog/pad.c b/src/ps2/veronica/prog/pad.c
 index 43af36b6..532d1125 100644
 --- a/src/ps2/veronica/prog/pad.c
@@ -1900,6 +1933,79 @@ index 27eae686..0ef7f358 100644
      bhFontScaleSet(1.0f, 1.0f, 1.0f);
  }
  
+diff --git a/src/ps2/veronica/prog/ps2_dummy.c b/src/ps2/veronica/prog/ps2_dummy.c
+index c7463508..a308096b 100644
+--- a/src/ps2/veronica/prog/ps2_dummy.c
++++ b/src/ps2/veronica/prog/ps2_dummy.c
+@@ -28,7 +28,11 @@ unsigned int Ps2_vcount;
+ unsigned int Ps2_dbuff;
+ unsigned int Ps2_njControl3D_flag;
+ unsigned int Ps2_sys_cnt;
++#ifdef TARGET_PC
++unsigned char Ps2_DRAW_TMP[16384] ASHFORD_ALIGN32;
++#else
+ unsigned char Ps2_DRAW_TMP[16384];
++#endif
+ NJS_SCREEN _nj_screen_;
+ unsigned int _nj_control_3d_flag_;
+ NJS_VERTEX_BUF* _nj_vertex_buf_;
+@@ -37,18 +41,20 @@ unsigned int Ps2_use_pt_flag;
+ NJS_MATRIX crmat;
+ float cmmat[2][16]; 
+ NJS_MATRIX lcmat[12];
+-float mbuf[128][16];
+-unsigned int palbuf[4096];
+ #ifdef TARGET_PC
+-unsigned char Ps2_tex_mem[PC_TEX_HEAP_SIZE];   /* PS2: 10 MB (pc_prelude.h) */
++float mbuf[128][16] ASHFORD_ALIGN32;
++unsigned int palbuf[4096] ASHFORD_ALIGN32;
++unsigned char Ps2_tex_mem[PC_TEX_HEAP_SIZE] ASHFORD_ALIGN32;   /* PS2: 10 MB (pc_prelude.h) */
+ #else
++float mbuf[128][16];
++unsigned int palbuf[4096];
+ unsigned char Ps2_tex_mem[10485760];
+ #endif
+ PS2_OT* Ps2_OT[4096][2] __attribute__((aligned(128)));
+ #ifdef TARGET_PC
+ unsigned char Ps2_PBUFF[PC_PBUFF_SIZE] __attribute__((aligned(64)));   /* PS2: 1835008 (pc_prelude.h) */
+ void* Ps2_PP;
+-PS2_OT Ps2_ot_list[PC_OT_ENTRIES];                                      /* PS2: 8192 */
++PS2_OT Ps2_ot_list[PC_OT_ENTRIES] ASHFORD_ALIGN32;                     /* PS2: 8192 */
+ #else
+ unsigned char Ps2_PBUFF[1835008] __attribute__((aligned(64)));
+ void* Ps2_PP;
+diff --git a/src/ps2/veronica/prog/ps2_loadtim2.c b/src/ps2/veronica/prog/ps2_loadtim2.c
+index abca1d42..5758a56d 100644
+--- a/src/ps2/veronica/prog/ps2_loadtim2.c
++++ b/src/ps2/veronica/prog/ps2_loadtim2.c
+@@ -7,7 +7,11 @@
+ 
+ //#include <string.h>
+ 
++#ifdef TARGET_PC
++unsigned char clear_buff[1024] ASHFORD_ALIGN32;
++#else
+ unsigned char clear_buff[1024];
++#endif
+ 
+ // 100% matching! 
+ static int Tim2CalcBufWidth(int psm, int w)
+diff --git a/src/ps2/veronica/prog/ps2_texture.c b/src/ps2/veronica/prog/ps2_texture.c
+index 19be0f66..2d48b612 100644
+--- a/src/ps2/veronica/prog/ps2_texture.c
++++ b/src/ps2/veronica/prog/ps2_texture.c
+@@ -4,7 +4,11 @@
+ #include "../../../ps2/veronica/prog/main.h"
+ 
+ static NJS_TEXINFO info;
++#ifdef TARGET_PC
++PS2_TEX_SAVE Ps2_tex_save[2] ASHFORD_ALIGN32;
++#else
+ PS2_TEX_SAVE Ps2_tex_save[2];
++#endif
+ static NJS_TEXLIST tlist = { NULL, 1 }; 
+ /*char fname[128];
+ char BIO_CURRENT[0];
 diff --git a/src/ps2/veronica/prog/pwksub.c b/src/ps2/veronica/prog/pwksub.c
 index 7a3cc415..01d1cba0 100644
 --- a/src/ps2/veronica/prog/pwksub.c
@@ -1946,7 +2052,7 @@ index 46c8f3be..6dacc692 100644
      
      for (i = 0; i < rom->cut_n; i++, cp++)
 diff --git a/src/ps2/veronica/prog/sdfunc.c b/src/ps2/veronica/prog/sdfunc.c
-index 22cb48fc..df4bbc97 100644
+index 22cb48fc..9c3118a2 100644
 --- a/src/ps2/veronica/prog/sdfunc.c
 +++ b/src/ps2/veronica/prog/sdfunc.c
 @@ -50,10 +50,18 @@ int ReqFadeBgmNo;
@@ -1954,14 +2060,14 @@ index 22cb48fc..df4bbc97 100644
  NO_NAME_30 BgSePrmBuf[2];
  EnemySlot EnemySlotInfo[6];
 +#ifdef TARGET_PC   /* per enemy slot, and the effects' requests (zonzon1.c bhEne_CallEffectSE) */
-+Enemy EnemyInfo[PC_ENE_SLOTS + 1];
++Enemy EnemyInfo[PC_ENE_SLOTS + 1] ASHFORD_ALIGN32;
 +#else
  Enemy EnemyInfo[128];
 +#endif
  ObjectSlot ObjectSlotInfo[3];
  Object ObjectInfo[16];
 +#ifdef TARGET_PC
-+unsigned char RequestList[PC_ENE_SLOTS + 1];
++unsigned char RequestList[PC_ENE_SLOTS + 1] ASHFORD_ALIGN32;
 +#else
  unsigned char RequestList[128];
 +#endif

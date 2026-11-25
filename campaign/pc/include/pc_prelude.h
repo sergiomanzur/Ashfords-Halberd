@@ -12,6 +12,12 @@
 #define TARGET_PC 1
 #endif
 
+/* GCC aligns >=32-byte statics to 32 bytes implicitly; Clang (Android NDK) does
+   not. Apply explicitly to EE/DMA buffers so Clang matches GCC's alignment. */
+#ifndef ASHFORD_ALIGN32
+#define ASHFORD_ALIGN32 __attribute__((aligned(32)))
+#endif
+
 #include <stdint.h>
 #include <stddef.h>
 #include <stdarg.h>

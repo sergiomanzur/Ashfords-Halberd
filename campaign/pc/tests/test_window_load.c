@@ -247,6 +247,7 @@ int main(void)
 
     /* 9. Task 7: RECVX_DMA_MAP_AUDIT debug trap halts on out-of-map addresses and >=4 GiB pointers. */
     {
+        fflush(stdout);
         /* Valid addresses must pass even with audit enabled. */
         pid_t pid = fork();
         CHECK(pid >= 0);
@@ -290,6 +291,49 @@ int main(void)
     }
 
     ps2_dma_alloc(0, 0);
+
+    /* 10. Task 8: Clang layout parity — audited EE/DMA game buffers must be 32-byte aligned. */
+    {
+        static const char* const aligned_syms[] = {
+            "Ps2_malloc_mem",
+            "Ps2_tex_mem",
+            "Ps2_PBUFF",
+            "Ps2_ot_list",
+            "Ps2_DRAW_TMP",
+            "Ps2_tex_save",
+            "mbuf",
+            "palbuf",
+            "clear_buff",
+            "tbuf",
+            "ene",
+            "eff",
+            "sysp",
+            "np",
+            "EnemyInfo",
+            "RequestList",
+        };
+        int align_fails = 0;
+        for (size_t i = 0; i < sizeof(aligned_syms) / sizeof(aligned_syms[0]); i++) {
+            void* sym = dlsym(handle, aligned_syms[i]);
+            if (!sym) {
+                fprintf(stderr, "FAIL: missing audited symbol %s\n", aligned_syms[i]);
+                align_fails++;
+                continue;
+            }
+            uintptr_t addr = (uintptr_t)sym;
+            if (addr < ASHFORD_WINDOW_BASE || addr >= ASHFORD_WINDOW_LIMIT) {
+                fprintf(stderr, "FAIL: %s at 0x%lx outside window\n",
+                        aligned_syms[i], (unsigned long)addr);
+                align_fails++;
+            }
+            if ((addr & 31u) != 0) {
+                fprintf(stderr, "FAIL: %s at 0x%08lx is not 32-byte aligned (mod 32 = %lu)\n",
+                        aligned_syms[i], (unsigned long)addr, (unsigned long)(addr & 31u));
+                align_fails++;
+            }
+        }
+        CHECK(align_fails == 0);
+    }
 
     printf("test_window_load: PASS\n");
     return 0;
