@@ -78,6 +78,8 @@ void crash_thread_init(void);
 
 /* overlay (host/overlay.cpp) */
 void overlay_init(void* window, void* gl_context);
+void overlay_context_lost(int context_alive);
+void overlay_context_restore(void* window, void* gl_context);
 int  overlay_event(const void* sdl_event);   /* 1 if the overlay consumed it */
 void overlay_render(void);
 
@@ -87,6 +89,7 @@ void  gs_set_scale(float scale);
 void  gs_update_widescreen(void);   /* apply g_config.aspect / window aspect (between frames) */
 float gs_picture(float c);          /* a 0..1 grey through brightness/contrast/gamma, as the present shader */
 void host_pump_events(void);
+int  host_app_suspended(void);      /* 1 while Android app is backgrounded without a live GL context */
 void host_present(void);
 void host_quit(void);
 void host_fatal(const char* fmt, ...);

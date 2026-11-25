@@ -108,6 +108,8 @@ extern "C" {
 #endif
 int gs_color_buffer_float(void);   /* 1: RGBA16F render targets; 0: GLES RGBA8 fallback */
 int gs_is_gles(void);              /* 1: OpenGL ES 3.2 backend; 0: desktop OpenGL 3.3 */
+void gs_renderer_context_lost(int context_alive);
+void gs_renderer_context_restore(void);
 #ifdef __cplusplus
 }
 #endif

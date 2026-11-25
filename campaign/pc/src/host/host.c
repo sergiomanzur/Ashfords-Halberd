@@ -15,6 +15,8 @@
 extern char g_lang_us_iso[1024];   /* import/lang.c */
 #include "ashford_disc.h"
 #include "ashford_launcher.h"
+#include "quicksave.h"
+#include "../gs/gs.h"
 void render_loop(void);
 #include <SDL3/SDL.h>
 #include <stdarg.h>
@@ -119,6 +121,70 @@ HostConfig g_config = { .window_w = 1280, .window_h = 960, .borderless_extra = 1
                        .skip_doors = 1, .fast_loading = 1, .auto_stairs = 1, .skip_intro = 1, .battle_unlocked = 1, .difficulty_select = 1, .pause_menu = 1, .contrast = 100, .gamma = 10, .saturation = 100, .settings_preset = 2, .fog_intensity = 100 };   /* first-start defaults; recvx.ini overrides */
 SDL_Window* g_window;
 SDL_GLContext g_gl;
+static int g_app_suspended;
+
+int host_app_suspended(void) { return g_app_suspended; }
+
+static void host_apply_gl_attributes(void)
+{
+#if defined(__ANDROID__)
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+#else
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+#endif
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+}
+
+static void host_enter_background(void)
+{
+    if (g_app_suspended) return;
+    host_log("lifecycle: entering background\n");
+    config_save();
+    /* Request a safety auto-quicksave if the game is in a legal state, and
+       briefly service the render-thread snapshot barrier while GL is alive. */
+    if (g_gl) {
+        uint64_t deadline = SDL_GetTicks() + 400;
+        quicksave_request_auto();
+        while (SDL_GetTicks() < deadline) {
+            stream_snapshot_service();
+            if (!quicksave_auto_pending()) break;
+            SDL_Delay(2);
+        }
+        /* Let an already-started room_snapshot_capture finish its render barrier. */
+        deadline = SDL_GetTicks() + 400;
+        while (SDL_GetTicks() < deadline) {
+            if (stream_snapshot_service() != 0) break;
+            SDL_Delay(2);
+        }
+        (void)quicksave_take_auto(); /* clear if game thread was paused/blocked and did not consume */
+    }
+    overlay_context_lost(g_gl != NULL);
+    gs_renderer_context_lost(g_gl != NULL);
+    if (g_gl) {
+        SDL_GL_DestroyContext(g_gl);
+        g_gl = NULL;
+    }
+    g_app_suspended = 1;
+}
+
+static void host_enter_foreground(void)
+{
+    if (!g_app_suspended && g_gl) return;
+    host_log("lifecycle: resuming foreground\n");
+    if (!g_gl && g_window) {
+        host_apply_gl_attributes();
+        g_gl = SDL_GL_CreateContext(g_window);
+        if (!g_gl) host_fatal("SDL_GL_CreateContext (resume): %s", SDL_GetError());
+        SDL_GL_SetSwapInterval(g_config.vsync ? 1 : 0);
+        gs_renderer_context_restore();
+        overlay_context_restore(g_window, g_gl);
+    }
+    g_app_suspended = 0;
+}
 
 void log_keep(const char* fmt, va_list ap);   /* log.c: the last messages for the crash report */
 
@@ -170,6 +236,21 @@ void host_pump_events(void)
         tps_input_event(&ev);
         menu_mouse_event(&ev);
         switch (ev.type) {
+        case SDL_EVENT_WILL_ENTER_BACKGROUND:
+            host_enter_background();
+            break;
+        case SDL_EVENT_DID_ENTER_FOREGROUND:
+            host_enter_foreground();
+            break;
+        case SDL_EVENT_RENDER_DEVICE_RESET:
+            if (g_window) {
+                overlay_context_lost(0);
+                gs_renderer_context_lost(0);
+                if (g_gl) { SDL_GL_DestroyContext(g_gl); g_gl = NULL; }
+                g_app_suspended = 1;
+                host_enter_foreground();
+            }
+            break;
         case SDL_EVENT_QUIT:
             config_save();
             exit(0);
@@ -455,10 +536,7 @@ int main(int argc, char** argv)
     lang_scan();
     tr_init();
 
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    host_apply_gl_attributes();
     g_window = SDL_CreateWindow("Ashford's Halberd", g_config.window_w, g_config.window_h,
                                 SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN);
     if (!g_window) host_fatal("SDL_CreateWindow: %s", SDL_GetError());

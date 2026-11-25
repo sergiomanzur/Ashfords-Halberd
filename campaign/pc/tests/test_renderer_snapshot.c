@@ -17,6 +17,7 @@ int hdpack_active(void) { return 0; }
 void hdpack_note(unsigned int t,uint64_t a,uint64_t b,int f) { (void)t;(void)a;(void)b;(void)f; }
 unsigned int hdpack_bind(unsigned int t,float *s) { (void)s;return t; }
 void hdpack_forget(unsigned int t) { (void)t; } void hdpack_frame(int f) { (void)f; }
+void hdpack_reset_gl(void) {}
 void pc_view_changed(void) {} int pc_frame_fade(void) { return 0; }
 uint64_t pc_frame_view(float v[6],float c[STREAM_CAM]) { memset(v,0,6*sizeof(float));memset(c,0,STREAM_CAM*sizeof(float));return 0; }
 void glue_debug_frame(uint64_t f) { (void)f; }
@@ -178,6 +179,97 @@ static void postprocess_shaders(void)
     glDeleteTextures(1, &src);
     glDeleteTextures(1, &dst);
 }
+
+static void context_loss_recovery(void (*recreate_ctx)(void* ud), void* ud)
+{
+    /* 1. Graceful context loss (onPause / WILL_ENTER_BACKGROUND): live GPU RTs,
+       depth, final image, and captured + native textures must survive identical. */
+    float before_rt[8 * 8 * 4] = {0}, after_rt[8 * 8 * 4] = {0};
+    float before_img[8 * 8 * 4] = {0}, after_img[8 * 8 * 4] = {0};
+    GLint w = 0, h = 0, fmt = 0;
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, rts[0].tex);
+    snapshot_tex_level(GL_TEXTURE_2D, 0, 0x1000, &w);
+    snapshot_tex_level(GL_TEXTURE_2D, 0, 0x1001, &h);
+    snapshot_tex_level(GL_TEXTURE_2D, 0, 0x1003, &fmt);
+    CHECK(snapshot_read_texture_float(rts[0].tex, w, h, fmt, before_rt));
+    glBindTexture(GL_TEXTURE_2D, img[0].tex);
+    snapshot_tex_level(GL_TEXTURE_2D, 0, 0x1003, &fmt);
+    CHECK(snapshot_read_texture_float(img[0].tex, w, h, fmt, before_img));
+
+    gs_renderer_context_lost(1);
+    recreate_ctx(ud);
+    gs_renderer_context_restore();
+
+    CHECK(rts[0].used && rts[0].tex != 0 && rts[0].fbo != 0);
+    CHECK(img[0].tex != 0 && img[0].fbo != 0);
+    CHECK(dz[0].tex != 0);
+    CHECK(snapshot_gl_functions());
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, rts[0].tex);
+    snapshot_tex_level(GL_TEXTURE_2D, 0, 0x1003, &fmt);
+    CHECK(snapshot_read_texture_float(rts[0].tex, w, h, fmt, after_rt));
+    glBindTexture(GL_TEXTURE_2D, img[0].tex);
+    snapshot_tex_level(GL_TEXTURE_2D, 0, 0x1003, &fmt);
+    CHECK(snapshot_read_texture_float(img[0].tex, w, h, fmt, after_img));
+    for (int i = 0; i < 8 * 8 * 4; i++) {
+        CHECK(fabsf(before_rt[i] - after_rt[i]) < 0.01f);
+        CHECK(fabsf(before_img[i] - after_img[i]) < 0.01f);
+    }
+    expect_texture(dz[0].tex, 1, 0.375f);
+    {
+        GLuint t = 0; int tw = 0, th = 0;
+        uint64_t native = 128 | ((uint64_t)1 << 14) | ((uint64_t)1 << 26) | ((uint64_t)1 << 30);
+        CHECK(ntex_lookup(native, gs.texa, &t, &tw, &th) == 1);
+        CHECK(t != 0 && tw == 2 && th == 2);
+        unsigned char rgba[16] = {0};
+        CHECK(snapshot_read_texture_rgba8(t, tw, th, rgba));
+        CHECK(rgba[0] == 255 && rgba[1] == 0 && rgba[2] == 0 && rgba[4] == 0 && rgba[5] == 255);
+    }
+    postprocess_shaders();
+    CHECK(glGetError() == 0);
+
+    /* 2. Sudden/unwarned context loss (context_alive = 0): GL handles wiped without
+       pre-capture; CPU gs_mem and native texture definitions must rebuild cleanly. */
+    gs_renderer_context_lost(0);
+    recreate_ctx(ud);
+    gs_renderer_context_restore();
+
+    CHECK(!rts[0].used);
+    {
+        GLuint t = 0; int tw = 0, th = 0;
+        uint64_t native = 128 | ((uint64_t)1 << 14) | ((uint64_t)1 << 26) | ((uint64_t)1 << 30);
+        CHECK(ntex_lookup(native, gs.texa, &t, &tw, &th) == 1);
+        CHECK(t != 0 && tw == 2 && th == 2);
+        unsigned char rgba[16] = {0};
+        CHECK(snapshot_read_texture_rgba8(t, tw, th, rgba));
+        CHECK(rgba[0] == 255 && rgba[1] == 0 && rgba[2] == 0 && rgba[4] == 0 && rgba[5] == 255);
+    }
+    /* Rebuilding a render target lazily from authoritative CPU gs_mem must succeed. */
+    RenderTarget* rebuilt = rt_get(7, 1, PSMCT32);
+    CHECK(rebuilt != NULL && rebuilt->tex != 0 && rebuilt->fbo != 0);
+    postprocess_shaders();
+    CHECK(glGetError() == 0);
+}
+
+#if defined(__ANDROID__)
+static void recreate_android_egl(void* ud)
+{
+    AndroidEglTest* e = (AndroidEglTest*)ud;
+    android_egl_destroy_context(e);
+    CHECK(android_egl_create_context(e));
+}
+#else
+static void recreate_sdl_gl(void* ud)
+{
+    SDL_GLContext* ctx = (SDL_GLContext*)ud;
+    SDL_GL_DestroyContext(*ctx);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    *ctx = SDL_GL_CreateContext(g_window);
+    CHECK(*ctx != NULL);
+}
+#endif
+
 int main(void)
 {
 #if defined(__ANDROID__)
@@ -187,6 +279,7 @@ int main(void)
     CHECK(android_egl_init(&egl, 8, 8));
     g_config.scale=1;g_config.contrast=100;g_config.gamma=10;g_config.saturation=100;
     gs_renderer_init();stream_init();seed();roundtrip();barriers();postprocess_shaders();
+    context_loss_recovery(recreate_android_egl, &egl);
     android_egl_shutdown(&egl);
 #else
     CHECK(SDL_Init(SDL_INIT_VIDEO));
@@ -196,7 +289,8 @@ int main(void)
     SDL_GLContext context=SDL_GL_CreateContext(g_window);CHECK(context);
     g_config.scale=1;g_config.contrast=100;g_config.gamma=10;g_config.saturation=100;
     gs_renderer_init();stream_init();seed();roundtrip();barriers();postprocess_shaders();
+    context_loss_recovery(recreate_sdl_gl, &context);
     SDL_GL_DestroyContext(context);SDL_DestroyWindow(g_window);SDL_Quit();
 #endif
-    puts("renderer snapshot: real GPU/native-definition/parser roundtrip passed");return 0;
+    puts("renderer snapshot + context-loss recovery: all GPU roundtrips passed");return 0;
 }

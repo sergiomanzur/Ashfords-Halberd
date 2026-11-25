@@ -424,6 +424,18 @@ static GLuint decode(const Def* d, uint64_t tex0, uint64_t texa, int* w, int* h)
 
 int ntex_count(void) { int n = 0; for (int i = 0; i < MAX_NTEX; i++) n += ntex[i].used != 0; return n; }
 
+void ntex_reset_gl(void)
+{
+    memset(ntex, 0, sizeof(ntex));
+    ntex_bytes = 0;
+    for (unsigned i = 0; i < NTEX_ID_SLOTS; i++) {
+        if (defs[i].capture) {
+            defs[i].capture = 0;
+            defs[i].valid = 0;
+        }
+    }
+}
+
 int ntex_lookup(uint64_t tex0, uint64_t texa, unsigned int* out_tex, int* out_w, int* out_h)
 {
     uint32_t tbp = tex0 & 0x3FFF, psm = (tex0 >> 20) & 0x3F, pal;

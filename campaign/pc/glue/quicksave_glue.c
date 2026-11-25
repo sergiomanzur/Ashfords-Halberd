@@ -60,12 +60,14 @@ static void trace(const char* action)
 void quicksave_frame(void)
 {
     unsigned action = request;
+    int auto_req = 0;
     int result, reason, message;
     request = 0;
+    if (!action && quicksave_take_auto()) { action = 1; auto_req = 1; }
     if (!action) return;
     reason = blocked();
-    if (reason) { quicksave_notice_set(reason); return; }
-    if (!room_snapshot_available()) { quicksave_notice_set(QS_UNAVAILABLE); return; }
+    if (reason) { if (!auto_req) quicksave_notice_set(reason); return; }
+    if (!room_snapshot_available()) { if (!auto_req) quicksave_notice_set(QS_UNAVAILABLE); return; }
     if (action == 1) {
         result = room_snapshot_capture(quicksave_path());
         message = result == SNAP_OK ? QS_SAVED : result == SNAP_WRONG_BUILD ? QS_WRONG_BUILD : QS_WRITE_FAILED;
@@ -78,6 +80,6 @@ void quicksave_frame(void)
         message = result == SNAP_OK ? QS_RESTORED : result == SNAP_MISSING ? QS_MISSING :
             result == SNAP_WRONG_BUILD ? QS_WRONG_BUILD : result == SNAP_INVALID ? QS_CORRUPT : QS_READ_FAILED;
     }
-    quicksave_notice_set(message);
-    if (result == SNAP_OK) trace(action == 1 ? "saved" : "restored");
+    if (!auto_req || result == SNAP_OK) quicksave_notice_set(message);
+    if (result == SNAP_OK) trace(action == 1 ? (auto_req ? "auto-saved" : "saved") : "restored");
 }

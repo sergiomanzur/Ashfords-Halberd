@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 #include <stdio.h>
 static SDL_SpinLock notice_lock;
+static SDL_AtomicInt auto_save_req;
 static int notice_id;
 static Uint64 until;
 static const char* const notices[] = {
@@ -38,4 +39,16 @@ const char* quicksave_path(void)
     static char path[1200];
     if (!path[0]) snprintf(path, sizeof(path), "%s/quicksave.ahs", g_config.save_dir);
     return path;
+}
+void quicksave_request_auto(void)
+{
+    SDL_SetAtomicInt(&auto_save_req, 1);
+}
+int quicksave_auto_pending(void)
+{
+    return SDL_GetAtomicInt(&auto_save_req);
+}
+int quicksave_take_auto(void)
+{
+    return SDL_SetAtomicInt(&auto_save_req, 0);
 }

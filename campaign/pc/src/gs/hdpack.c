@@ -321,6 +321,19 @@ void hdpack_forget(unsigned int t)
     if (t < cmap) map[t] = 0;
 }
 
+void hdpack_reset_gl(void)
+{
+    if (map && cmap) memset(map, 0, cmap * sizeof(*map));
+    for (int i = 0; i < nents; i++) {
+        if (ents[i].st == 2) {
+            ents[i].gl = 0;
+            ents[i].st = 0;
+            ents[i].bytes = 0;
+        }
+    }
+    bytes = 0;
+}
+
 /* ---------------- DDS ---------------- */
 
 #define GL_COMPRESSED_RGBA_S3TC_DXT1_EXT 0x83F1

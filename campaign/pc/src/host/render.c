@@ -66,6 +66,10 @@ void render_loop(void)
         Frame* f;
         uint64_t now;
         host_pump_events();
+        if (host_app_suspended()) {
+            SDL_Delay(20);
+            continue;
+        }
         if (stream_snapshot_service() == 2) {
             stream_release(prev); stream_release(cur); prev=cur=NULL;
             arrived=pace_until=last_present=0; swap_avg=0; period=1001.0/30000.0*1e9; interp=shown=done=0;

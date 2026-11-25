@@ -17,11 +17,14 @@ typedef struct { SYS_WORK sys; BH_PWORK player, enemies[PC_ENE_SLOTS]; } RoomIma
 static RoomImage disk, golden;
 static unsigned held;
 static int reads, writes, pops, notice, knife, read_result, write_result, failures, checks;
-static int available = 1, busy;
+static int available = 1, busy, auto_req;
 unsigned pad_quicksave_actions(void) { return held; }
 int knife_switch_busy(void) { return knife; }
 const char* quicksave_path(void) { return "test_quicksave.ahs"; }
 void quicksave_notice_set(int n) { notice = n; }
+void quicksave_request_auto(void) { auto_req = 1; }
+int quicksave_auto_pending(void) { return auto_req; }
+int quicksave_take_auto(void) { int r = auto_req; auto_req = 0; return r; }
 int room_snapshot_available(void) { return available; }
 int room_snapshot_busy(void) { return busy; }
 int room_snapshot_capture(const char* path) {

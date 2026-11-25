@@ -55,9 +55,9 @@
 - Modify: `campaign/pc/src/host/host.c`, `campaign/pc/src/host/render.c` (SDL3 Android background/foreground lifecycle event handling, `onPause` safety auto-quicksave when legal, pause render loop while surface is gone, recreate GL context + restore GL objects on resume)
 - Create/Modify: `campaign/pc/tests/test_renderer_snapshot.c` (or dedicated `test_gl_context_loss.c`) verifying forced GL context destruction and recreation mid-run produces identical rendered frames before and after.
 
-- [ ] **Step 1:** Write the context-loss test first (verifying before/after frame equality across full GL context destroy + recreate).
-- [ ] **Step 2:** Implement `gs_renderer_context_lost`/`restore` and sub-module GL reset hooks (`aa`, `ntex`, `hdpack`, `overlay`) plus SDL3 background/foreground + `onPause` auto-quicksave handling in `host.c`/`render.c`.
-- [ ] **Step 3:** Verify test PASSES on Windows x86 and cross-compiles cleanly for Android arm64; commit (`feat(android): GL context-loss recovery and onPause auto-quicksave`).
+- [x] **Step 1:** Added `context_loss_recovery()` to `test_renderer_snapshot.c` testing both graceful (`context_alive=1`) and sudden (`context_alive=0`) real GL/EGL context destroy + recreate mid-run.
+- [x] **Step 2:** Implemented `gs_renderer_context_lost`/`restore` and sub-module GL reset hooks (`aa`, `ntex`, `hdpack`, `overlay`) plus SDL3 background/foreground lifecycle & `onPause` auto-quicksave handling in `host.c`/`render.c`/`quicksave_ui.c`/`quicksave_glue.c`.
+- [x] **Step 3:** Verified `renderer_snapshot` (including context-loss recovery in both `RGBA16F` and `RECVX_FORCE_RGBA8=1`) PASSES on Retroid Pocket 6 Adreno 740 (`0.4s`) and Windows x86 (`41/41`); commit (`feat(android): GL context-loss recovery and onPause auto-quicksave`).
 
 ---
 

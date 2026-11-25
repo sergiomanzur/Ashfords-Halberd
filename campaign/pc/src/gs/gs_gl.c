@@ -124,6 +124,7 @@ static int vcount;
    overwrites data the GPU may still be drawing from (no implicit sync per batch) */
 #define VBO_VERTS (MAX_VERTS * 8)
 static int vbo_first;
+static int vbo_next;
 /* parts of the batch drawn from the executed frame's vertices on the GPU (svbo, a replay's
    unblended native strips, gs_draw_native_cached) instead of vbuf: batch positions
    start..start+count-1 (vbuf has a gap there), static vertex first */
@@ -370,15 +371,8 @@ static void prog_build(int v)
 #undef U
 }
 
-void gs_renderer_init(void)
+static void gs_renderer_init_gl_objects(void)
 {
-    if (!gl_load(gl_getproc)) host_fatal("OpenGL 3.3 or OpenGL ES 3.2 is required. Update your graphics driver.");
-    host_log("gl: %s / %s (es=%d float_rt=%d clip_dist=%d s3tc=%d bptc=%d)\n",
-             glGetString(GL_RENDERER), glGetString(GL_VERSION),
-             g_gl_es, g_gl_color_buffer_float, g_gl_clip_distance, g_gl_s3tc, g_gl_bptc);
-    if (!gs_mem_selftest()) host_fatal("Graphics setup failed. Restart the game.");
-    gs_reset();
-
     for (int v = 0; v < (g_config.dithering ? NPROG : V_SMOOTH); v++) if (!(v & V_SMOOTH) || !(v & V_RTMIX)) prog_build(v);   /* (Dithering's too when on: no pause in play) */
     for (int d = 0; d < 2; d++) {
         static char fs[4096];
@@ -408,7 +402,17 @@ void gs_renderer_init(void)
         glEnableVertexAttribArray(4); glVertexAttribPointer(4, 2, GL_FLOAT, GL_FALSE, sizeof(GlVertex), (void*)offsetof(GlVertex, clip));
     }
     glBindVertexArray(vao);
+}
 
+void gs_renderer_init(void)
+{
+    if (!gl_load(gl_getproc)) host_fatal("OpenGL 3.3 or OpenGL ES 3.2 is required. Update your graphics driver.");
+    host_log("gl: %s / %s (es=%d float_rt=%d clip_dist=%d s3tc=%d bptc=%d)\n",
+             glGetString(GL_RENDERER), glGetString(GL_VERSION),
+             g_gl_es, g_gl_color_buffer_float, g_gl_clip_distance, g_gl_s3tc, g_gl_bptc);
+    if (!gs_mem_selftest()) host_fatal("Graphics setup failed. Restart the game.");
+    gs_reset();
+    gs_renderer_init_gl_objects();
     g_scale = gs_wanted_scale();
 }
 /* native 3D: near/far clipping by clip distances (the clip volume of the VU1 programs).
@@ -1015,10 +1019,10 @@ static void drs_sample(int exec, double ms);
 static void drs_exec(void);
 static void drs_update(uint64_t now);
 /* the slot's timing on: for the log, or for the dynamic resolution (each slot keeps its choice) */
+static int gt_done;
 static void gt_init(void)
 {
-    static int done;
-    if (!done++) {
+    if (!gt_done++) {
         int allow_es_timer = !g_gl_es || gl_has_extension("GL_EXT_disjoint_timer_query");
         gt.log = SDL_getenv("RECVX_GPU_TIME") ? SDL_atoi(SDL_getenv("RECVX_GPU_TIME")) : 0;
         if (allow_es_timer) {
@@ -1498,6 +1502,7 @@ static void prog_use(int v, const DrawState* st, int premul, int tme)
    glClear in the scissor, with the colour mask the draw would have. The same values (0 is exact
    in every format; depth 0 is what the sprite's z 0 gives), but the GPU clears the target's
    compression metadata instead of writing every pixel. RECVX_FAST_CLEAR=0: drawn. */
+static struct { GLuint tex, fbo, depth; int pw, ph; } fc_keep;
 static int fast_clear(const DrawState* st, int tme)
 {
     static int on = -1;
@@ -1507,7 +1512,6 @@ static int fast_clear(const DrawState* st, int tme)
     float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f, y1 = -1e9f;
     uint32_t fpsm = (st->ctx.frame >> 24) & 0x3F;
     int full = 0, keep0 = 0, keep1 = 0;
-    static struct { GLuint tex, fbo, depth; int pw, ph; } keep;
     if (on < 0) on = !SDL_getenv("RECVX_FAST_CLEAR") || SDL_atoi(SDL_getenv("RECVX_FAST_CLEAR")) != 0;
     if (!on || ab_off(1) || !batch_full_cover || vcount != 6 || nsruns || tme || ((st->prim >> 5) & 1) || (zte && ztst != 1)) return 0;
     for (int k = 0; k < 6; k++) {
@@ -1538,19 +1542,19 @@ static int fast_clear(const DrawState* st, int tme)
     }
     if (full) zrow_verify(!zmsk);
     if (full && keep1 > keep0) {
-        int kw = keep.pw, kh = keep.ph;
-        ensure_target(&keep.tex, &keep.fbo, &keep.pw, &keep.ph, cur_rt->pw, (int)(32 * g_scale) + 1);
-        if (!keep.depth || kw != keep.pw || kh != keep.ph) {   /* (and a depth of the same size: the blit takes both) */
-            if (!keep.depth) glGenTextures(1, &keep.depth);
-            glBindTexture(GL_TEXTURE_2D, keep.depth);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, keep.pw, keep.ph, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+        int kw = fc_keep.pw, kh = fc_keep.ph;
+        ensure_target(&fc_keep.tex, &fc_keep.fbo, &fc_keep.pw, &fc_keep.ph, cur_rt->pw, (int)(32 * g_scale) + 1);
+        if (!fc_keep.depth || kw != fc_keep.pw || kh != fc_keep.ph) {   /* (and a depth of the same size: the blit takes both) */
+            if (!fc_keep.depth) glGenTextures(1, &fc_keep.depth);
+            glBindTexture(GL_TEXTURE_2D, fc_keep.depth);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, fc_keep.pw, fc_keep.ph, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-            glBindFramebuffer(GL_FRAMEBUFFER, keep.fbo);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, keep.depth, 0);
+            glBindFramebuffer(GL_FRAMEBUFFER, fc_keep.fbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, fc_keep.depth, 0);
         }
         glBindFramebuffer(GL_READ_FRAMEBUFFER, cur_rt->fbo);
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, keep.fbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fc_keep.fbo);
         glDisable(GL_SCISSOR_TEST);
         glBlitFramebuffer(0, keep0, cur_rt->pw, keep1, 0, 0, cur_rt->pw, keep1 - keep0, GL_COLOR_BUFFER_BIT | (zmsk ? 0 : GL_DEPTH_BUFFER_BIT), GL_NEAREST);
         glBindFramebuffer(GL_FRAMEBUFFER, cur_rt->fbo);
@@ -1562,7 +1566,7 @@ static int fast_clear(const DrawState* st, int tme)
     glClear(GL_COLOR_BUFFER_BIT | (zmsk ? 0 : GL_DEPTH_BUFFER_BIT));
     if (full) {
         if (keep1 > keep0) {
-            glBindFramebuffer(GL_READ_FRAMEBUFFER, keep.fbo);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, fc_keep.fbo);
             glBlitFramebuffer(0, 0, cur_rt->pw, keep1 - keep0, 0, keep0, cur_rt->pw, keep1, GL_COLOR_BUFFER_BIT | (zmsk ? 0 : GL_DEPTH_BUFFER_BIT), GL_NEAREST);
             glBindFramebuffer(GL_FRAMEBUFFER, cur_rt->fbo);
         }
@@ -1752,7 +1756,6 @@ void gs_flush(void)
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     {
-        static int vbo_next;
         if (vbo_next + vcount > VBO_VERTS) {
             glBufferData(GL_ARRAY_BUFFER, VBO_VERTS * sizeof(GlVertex), NULL, GL_STREAM_DRAW);   /* orphan */
             vbo_next = 0;
@@ -2407,33 +2410,31 @@ static const char* movie_fs_es = "#version 320 es\nprecision highp float;\npreci
 /* Textures at TBP tbp are movie frame index from now until the next executed frame: the
    frame's planes are uploaded once and converted into mv_rgb (512 x 512, the TEX0 size the
    game's sprite uses, image at the top left). Replays bind the same frame again. */
+static struct { GLuint prog_yuv, planes[3], fbo; int pw, ph; uint32_t shown; } mv_gl;
 void gs_movie_bind(uint32_t tbp, int index)
 {
-    static GLuint prog_yuv, planes[3], fbo;
-    static int pw, ph;
-    static uint32_t shown;
     uint32_t serial;
     int w, h, stride;
     const uint8_t* yuv;
     gs_flush();   /* draws before this sample what was bound before */
     mv_tbp = tbp;
-    if (!prog_yuv) {
-        prog_yuv = compile(g_gl_es ? movie_vs_es : movie_vs, g_gl_es ? movie_fs_es : movie_fs);
-        glUseProgram(prog_yuv);
-        glUniform1i(glGetUniformLocation(prog_yuv, "u_y"), 1);
-        glUniform1i(glGetUniformLocation(prog_yuv, "u_cb"), 2);
-        glUniform1i(glGetUniformLocation(prog_yuv, "u_cr"), 3);
-        glGenTextures(3, planes);
+    if (!mv_gl.prog_yuv) {
+        mv_gl.prog_yuv = compile(g_gl_es ? movie_vs_es : movie_vs, g_gl_es ? movie_fs_es : movie_fs);
+        glUseProgram(mv_gl.prog_yuv);
+        glUniform1i(glGetUniformLocation(mv_gl.prog_yuv, "u_y"), 1);
+        glUniform1i(glGetUniformLocation(mv_gl.prog_yuv, "u_cb"), 2);
+        glUniform1i(glGetUniformLocation(mv_gl.prog_yuv, "u_cr"), 3);
+        glGenTextures(3, mv_gl.planes);
         glGenTextures(1, &mv_rgb);
         glBindTexture(GL_TEXTURE_2D, mv_rgb);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 512, 512, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-        glGenFramebuffers(1, &fbo);
-        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glGenFramebuffers(1, &mv_gl.fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, mv_gl.fbo);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, mv_rgb, 0);
     }
     yuv = movie_lock_frame(index, &serial, &w, &h, &stride);
-    if (yuv && serial == shown) { movie_unlock_frame(); return; }
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    if (yuv && serial == mv_gl.shown) { movie_unlock_frame(); return; }
+    glBindFramebuffer(GL_FRAMEBUFFER, mv_gl.fbo);
     fb_forget();
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_DEPTH_TEST);
@@ -2444,7 +2445,7 @@ void gs_movie_bind(uint32_t tbp, int index)
         if (yuv) movie_unlock_frame();
         glClearColor(0, 0, 0, 128.0f / 255.0f);
         glClear(GL_COLOR_BUFFER_BIT);
-        shown = 0;
+        mv_gl.shown = 0;
         return;
     }
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -2452,9 +2453,9 @@ void gs_movie_bind(uint32_t tbp, int index)
         int cw = i ? w / 2 : w, ch = i ? h / 2 : h;
         const uint8_t* src = yuv + (i ? (size_t)stride * h + (size_t)(i - 1) * (stride / 2) * (h / 2) : 0);
         glActiveTexture(GL_TEXTURE0 + 1 + i);
-        glBindTexture(GL_TEXTURE_2D, planes[i]);
+        glBindTexture(GL_TEXTURE_2D, mv_gl.planes[i]);
         glPixelStorei(GL_UNPACK_ROW_LENGTH, i ? stride / 2 : stride);
-        if (w != pw || h != ph) {
+        if (w != mv_gl.pw || h != mv_gl.ph) {
             glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, cw, ch, 0, GL_RED, GL_UNSIGNED_BYTE, src);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -2467,9 +2468,9 @@ void gs_movie_bind(uint32_t tbp, int index)
     movie_unlock_frame();
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    pw = w; ph = h; shown = serial;
+    mv_gl.pw = w; mv_gl.ph = h; mv_gl.shown = serial;
     glViewport(0, 0, w, h);
-    glUseProgram(prog_yuv);
+    glUseProgram(mv_gl.prog_yuv);
     glBindVertexArray(present_vao);
     glDrawArrays(0x0005 /* GL_TRIANGLE_STRIP */, 0, 4);
     glActiveTexture(GL_TEXTURE0);
@@ -2691,6 +2692,7 @@ static int snapshot_gl_functions(void)
 }
 static int snapshot_read_texture_float(GLuint texture, GLint width, GLint height, GLint format, float *pixels)
 {
+    if (!snapshot_gl_functions()) return 0;
     if (!g_gl_es) {
         glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, texture);
         glPixelStorei(GL_PACK_ALIGNMENT, 4);
@@ -2802,6 +2804,7 @@ static int snapshot_read_texture_float(GLuint texture, GLint width, GLint height
 }
 static int snapshot_read_texture_rgba8(GLuint texture, GLint width, GLint height, unsigned char *rgba)
 {
+    if (!snapshot_gl_functions()) return 0;
     if (!g_gl_es) {
         glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, texture);
         glPixelStorei(GL_PACK_ALIGNMENT, 4);
@@ -3084,4 +3087,92 @@ int gs_snapshot_restore(const SnapshotBlob *in)
     final_dumped=interp_dumped=1; fb_forget();
     glBindFramebuffer(GL_FRAMEBUFFER,0); renderer_stage_free(s);
     return 1;
+}
+
+/* ---------------- Android/EGL context loss & rebuild ---------------- */
+static SnapshotBlob ctx_lost_snap;
+
+void gs_renderer_context_lost(int context_alive)
+{
+    extern void aa_reset_gl(void);
+    free(ctx_lost_snap.data);
+    ctx_lost_snap.data = NULL;
+    ctx_lost_snap.size = 0;
+    if (context_alive && vao) {
+        if (!gs_snapshot_capture(&ctx_lost_snap)) {
+            free(ctx_lost_snap.data);
+            ctx_lost_snap.data = NULL;
+            ctx_lost_snap.size = 0;
+        }
+    }
+    /* Drop every GL object handle without invoking glDelete* (context may already be gone). */
+    vao = vbo = svao = svbo = present_vao = 0;
+    vbo_first = vbo_next = 0;
+    memset(progs, 0, sizeof(progs));
+    memset(pu, 0, sizeof(pu));
+    pcur = &pu[0];
+    memset(present_progs, 0, sizeof(present_progs));
+    memset(uknown, 0, sizeof(uknown));
+    clip_on = 0;
+    memset(rts, 0, sizeof(rts));
+    memset(rts_snap, 0, sizeof(rts_snap));
+    memset(shadow, 0, sizeof(shadow));
+    memset(first, 0, sizeof(first));
+    cur_rt = NULL;
+    disp_end = -1;
+    memset(dz, 0, sizeof(dz));
+    dz_cur = 0;
+    fb_forget();
+    memset(texcache, 0, sizeof(texcache));
+    ndoomed = 0;
+    memset(memo, 0, sizeof(memo));
+    memo_gen = 1;
+    memset(reloads, 0, sizeof(reloads));
+    nreloads = 0;
+    memset(img, 0, sizeof(img));
+    fin = sti = fin_fresh = start_valid = 0;
+    final_vw = final_vh = 0;
+    memset(rcap, 0, sizeof(rcap));
+    memset(cpool, 0, sizeof(cpool));
+    aa_spare_tex = aa_spare_fbo = 0;
+    aa_spare_pw = aa_spare_ph = 0;
+    memset(&fc_keep, 0, sizeof(fc_keep));
+    memset(&mv_gl, 0, sizeof(mv_gl));
+    mv_rgb = 0;
+    mv_tbp = UINT32_MAX;
+    memset(gpu_fence, 0, sizeof(gpu_fence));
+    gt_done = 0;
+    memset(&gt, 0, sizeof(gt));
+    free(gp.ts); free(gp.sp); free(gp.cat); free(gp.ph);
+    memset(&gp, 0, sizeof(gp));
+    snapshot_depth_prog_f32 = 0;
+    snapshot_depth_prog_u8 = 0;
+    snapshot_tex_level = NULL;
+    snapshot_tex_image = NULL;
+    snapshot_integer = NULL;
+    ncache_on_gpu = 0;
+    snapshot_valid = 0;
+    batch_valid = 0;
+    batch_native.valid = 0;
+    vcount = nsruns = npgrp = 0;
+    scene_smooth = scene_dith = 0;
+    page_hash_init = 0;
+    memset(page_dirty, 1, sizeof(page_dirty));
+    aa_reset_gl();
+    ntex_reset_gl();
+    hdpack_reset_gl();
+}
+
+void gs_renderer_context_restore(void)
+{
+    if (!gl_load(gl_getproc)) host_fatal("OpenGL 3.3 or OpenGL ES 3.2 is required after context restore.");
+    gs_renderer_init_gl_objects();
+    if (ctx_lost_snap.data) {
+        if (!gs_snapshot_restore(&ctx_lost_snap)) {
+            host_log("gs: context restore snapshot unavailable, rebuilding from GS memory\n");
+        }
+        free(ctx_lost_snap.data);
+        ctx_lost_snap.data = NULL;
+        ctx_lost_snap.size = 0;
+    }
 }

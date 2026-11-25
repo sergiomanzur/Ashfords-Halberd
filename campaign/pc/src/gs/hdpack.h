@@ -16,3 +16,5 @@ void hdpack_frame(int faded);
 void hdpack_forget(unsigned int t);
 /* a pack is loaded (the GS memory pages of a texture must be current before hdpack_note) */
 int hdpack_active(void);
+/* GL context lost: drop uploaded GL texture names while preserving pack index and verdicts */
+void hdpack_reset_gl(void);

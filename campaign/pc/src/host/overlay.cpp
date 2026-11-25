@@ -90,6 +90,28 @@ void overlay_init(void* window, void* gl_context)
     if (show && !strcmp(show, "2")) ashford::panel_select_page(SP_CHEATS);
 }
 
+void overlay_context_lost(int context_alive)
+{
+    if (!ready) return;
+    if (context_alive) {
+        if (hud_tex) glDeleteTextures(1, &hud_tex);
+        ImGui_ImplOpenGL3_DestroyDeviceObjects();
+    }
+    hud_tex = 0;
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
+    ready = false;
+}
+
+void overlay_context_restore(void* window, void* gl_context)
+{
+    if (ready || !ImGui::GetCurrentContext()) return;
+    win = (SDL_Window*)window;
+    ImGui_ImplSDL3_InitForOpenGL(win, (SDL_GLContext)gl_context);
+    ImGui_ImplOpenGL3_Init(g_gl_es ? "#version 300 es" : "#version 330 core");
+    ready = true;
+}
+
 int overlay_event(const void* e)
 {
     const SDL_Event* ev = (const SDL_Event*)e;
