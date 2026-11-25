@@ -40,8 +40,8 @@ void host_fatal(const char* fmt, ...)
 
 /* ------------------------------------------------------- ROM_WORK fixture */
 
-/* A synthetic room file: RDT header words, the 32-bit ROM_WORK at word
-   offset ROMW/4, then the CUT/LGT/EVC arrays and the EVT block. */
+/* A synthetic room file: RDT header words, the 32-bit ROM_WORK at byte
+   offset ROMW, then the CUT/LGT/EVC arrays and the EVT block. */
 static unsigned char room_file[0x8000];
 #define ROMW      0x40u   /* byte offset of the ROM_WORK inside room_file (word-aligned) */
 #define CUT_REL   0x480u  /* byte offsets the ROM's pointer words name (relative to room_file) */
@@ -55,7 +55,7 @@ static void build_room_file(void)
 {
     memset(room_file, 0xAB, sizeof(room_file));
     wf(room_file + 0, 1.8f);          /* version */
-    w32(room_file + 16, ROMW / 4);    /* the ROM_WORK, in words like &rdtp[val] */
+    w32(room_file + 16, ROMW);        /* the ROM_WORK, a byte offset like &rdtp[val] */
 
     unsigned char* r = room_file + ROMW;
     /* the 16 leading pointer words: room-file-relative offsets */
@@ -112,7 +112,7 @@ static void build_room_file(void)
     /* CUT_WORK array: 2 x 0x2A8 */
     {
         unsigned char* c = room_file + CUT_REL;
-        w32(c + 4, 0x70);         /* cuttp as a word index, like &rdtp[val] */
+        w32(c + 4, 0x70);         /* cuttp as a byte offset, like &rdtp[val] */
         wf(c + 8, 11.0f);         /* cx */
         c[0] = 7; c[1] = 8; c[2] = 9; c[3] = 10;
         c += 0x2A8;
@@ -190,7 +190,7 @@ static int test_rom_work(void)
         /* the unpacked CUT array */
         CHECK(in_bounds(rom.cutp, LP64_SLOT_ROOM));
         CHECK(rom.cutp[0].flg == 7 && rom.cutp[0].type == 8 && rom.cutp[1].ctab_n == 10);
-        CHECK(rom.cutp[0].cuttp == (CUT_WRK*)(room_file + 0x70 * 4));
+        CHECK(rom.cutp[0].cuttp == (CUT_WRK*)(room_file + 0x70));
         CHECK(rom.cutp[0].cx == 11.0f && rom.cutp[1].cw == 12.0f);
 
         /* the unpacked LGT arrays (lgtp and evlp): scalars copied, scratch zeroed */

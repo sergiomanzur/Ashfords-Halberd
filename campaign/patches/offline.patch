@@ -497,7 +497,7 @@ index 2ba1053e..fd9ea126 100644
                  plmtnp = &dp[mtsz];
              } 
 diff --git a/src/ps2/veronica/prog/effect.c b/src/ps2/veronica/prog/effect.c
-index 9f2507ff..c1624da5 100644
+index 9f2507ff..f0b29736 100644
 --- a/src/ps2/veronica/prog/effect.c
 +++ b/src/ps2/veronica/prog/effect.c
 @@ -74,7 +74,10 @@ void bhInitEffect()
@@ -596,7 +596,7 @@ index 9f2507ff..c1624da5 100644
      if (((sys->sp_flg & 0x8)) || ((sys->ef_flg & 0x1))) 
      {
          entp = &sys->ef_poln;
-@@ -873,6 +908,9 @@ void bhControlEffect()
+@@ -873,63 +908,89 @@ void bhControlEffect()
              }
          } 
      }
@@ -606,7 +606,27 @@ index 9f2507ff..c1624da5 100644
  }
  
  // 100% matching!
-@@ -880,6 +918,9 @@ void bhDrawEffect()
++#if defined(TARGET_PC) && defined(__LP64__)
++/* The decomp's effect draw loops take `unsigned int*` and stride 4 bytes per
++   pointer (32-bit PS2 layout). On LP64 SYS_WORK's ef_* arrays are O_WRK*[N]
++   with 8-byte entries, so the 4-byte stride reads the high half of a pointer
++   (zero for a window address) on every other iteration -> NULL op deref.
++   Flatten the low 32 bits into a stack array before calling the unchanged
++   32-bit-stride loop. All game pointers are window addresses (< 4 GiB). */
++#define EF_DRAW_LIST(fn, arr, n) do {                                  \
++        uint32_t ef_flat[512];                                         \
++        int ef_n_ = (int)(n);                                          \
++        int ef_i_;                                                     \
++        if (ef_n_ > 512) ef_n_ = 512;                                  \
++        for (ef_i_ = 0; ef_i_ < ef_n_; ef_i_++)                        \
++            ef_flat[ef_i_] = (uint32_t)(uintptr_t)(arr)[ef_i_];         \
++        fn(ef_flat, ef_n_);                                            \
++    } while (0)
++#else
++#define EF_DRAW_LIST(fn, arr, n) fn((unsigned int*)(arr), (n))
++#endif
++
+ void bhDrawEffect()
  {
      int i;
  
@@ -616,7 +636,88 @@ index 9f2507ff..c1624da5 100644
      njSetMatrix(NULL, cam.mtx);
      
      njControl3D(0x100);
-@@ -976,6 +1017,9 @@ void bhDrawEffect()
+     
+     if (sys->ef_poln != 0) 
+     {
+-        bhDrawPolEffect((unsigned int*)sys->ef_pol, sys->ef_poln);
++        EF_DRAW_LIST(bhDrawPolEffect, sys->ef_pol, sys->ef_poln);
+     }
+     
+     njControl3D(0x2400);
+     
+     if (sys->ef_mdfn != 0) 
+     {
+-        bhDrawMdfEffect((unsigned int*)sys->ef_mdf, sys->ef_mdfn);
++        EF_DRAW_LIST(bhDrawMdfEffect, sys->ef_mdf, sys->ef_mdfn);
+     }
+     
+     njControl3D(0x100);
+     
+     if (sys->ef_linn != 0) 
+     {
+-        bhDrawLinEffect((unsigned int*)sys->ef_lin, sys->ef_linn);
++        EF_DRAW_LIST(bhDrawLinEffect, sys->ef_lin, sys->ef_linn);
+     }
+     
+     if (sys->ef_ntxn != 0) 
+     {
+-        bhDrawNtxEffect3D((unsigned int*)sys->ef_ntx, sys->ef_ntxn);
++        EF_DRAW_LIST(bhDrawNtxEffect3D, sys->ef_ntx, sys->ef_ntxn);
+     }
+     
+     if (sys->ef_trsn != 0) 
+     {
+-        bhDrawTrsEffect3D((unsigned int*)sys->ef_trs, sys->ef_trsn);
++        EF_DRAW_LIST(bhDrawTrsEffect3D, sys->ef_trs, sys->ef_trsn);
+     }
+     
+     njControl3D(0x4000);
+     
+     if (sys->ef_pncn != 0) 
+     {
+-        bhDrawTrsEffect3D((unsigned int*)sys->ef_pnc, sys->ef_pncn);
++        EF_DRAW_LIST(bhDrawTrsEffect3D, sys->ef_pnc, sys->ef_pncn);
+     }
+     
+     njControl3D(0);
+     
+     if (sys->ef_opqn != 0) 
+     {
+-        bhDrawOpqEffect3D((unsigned int*)sys->ef_opq, sys->ef_opqn);
++        EF_DRAW_LIST(bhDrawOpqEffect3D, sys->ef_opq, sys->ef_opqn);
+     }
+     
+     if (sys->ef_thln != 0) 
+     {
+-        bhDrawThlEffect3D((unsigned int*)sys->ef_thl, sys->ef_thln);
++        EF_DRAW_LIST(bhDrawThlEffect3D, sys->ef_thl, sys->ef_thln);
+     }
+ #ifdef TARGET_PC
+     pc_effect_tag(NULL);
+@@ -937,19 +998,19 @@ void bhDrawEffect()
+     
+     if (sys->ef_ntx2dn != 0) 
+     {
+-        bhDrawNtxEffect2D((unsigned int*)sys->ef_ntx2d, sys->ef_ntx2dn);
++        EF_DRAW_LIST(bhDrawNtxEffect2D, sys->ef_ntx2d, sys->ef_ntx2dn);
+     }
+     
+     if (sys->ef_trs2dn != 0) 
+     {
+-        bhDrawTrsEffect2D((unsigned int*)sys->ef_trs2d, sys->ef_trs2dn);
++        EF_DRAW_LIST(bhDrawTrsEffect2D, sys->ef_trs2d, sys->ef_trs2dn);
+     }
+     
+     njControl3D(0x4000);
+     
+     if (sys->ef_pnc2dn != 0) 
+     {
+-        bhDrawTrsEffect2D((unsigned int*)sys->ef_pnc2d, sys->ef_pnc2dn);
++        EF_DRAW_LIST(bhDrawTrsEffect2D, sys->ef_pnc2d, sys->ef_pnc2dn);
+     }
+     
+     njControl3D(0);
+@@ -976,6 +1037,9 @@ void bhDrawEffect()
      {
          bhDrawThunder(sys->rom_no, sys);
      }
@@ -626,7 +727,7 @@ index 9f2507ff..c1624da5 100644
  }
  
  // 99.84% matching
-@@ -1773,17 +1817,24 @@ label:
+@@ -1773,17 +1837,24 @@ label:
  void bhDrawNtxEffect2D(unsigned int* owp, int ct)
  {
      O_WRK* op;
@@ -1285,6 +1386,324 @@ index ad87e6c3..3a270360 100644
      
      a0->loop = -1;
      
+diff --git a/src/ps2/veronica/prog/face_bh.c b/src/ps2/veronica/prog/face_bh.c
+index 7da2bf4d..260855f7 100644
+--- a/src/ps2/veronica/prog/face_bh.c
++++ b/src/ps2/veronica/prog/face_bh.c
+@@ -830,6 +830,28 @@ void _fmCnkCalcMuscle(MASK_WORK* fm)
+     .set reorder
+     " : "=r"(n), "=r"(jaw) : "r"(jaw->id), "r"(svp), "r"(dvp) : "t0", "t1", "t2", "t3", "memory" 
+     );
++#else
++#ifdef __LP64__
++    {   /* asm2c on LP64: svp/dvp are disc/heap window pointers and jaw is a heap
++           pointer, but the ee_lq/ee_sq address is formed inside a 32-bit EE
++           register view. Keep every pointer whole (16-byte lq/sq). */
++        ee_reg R11 = {{0}};
++        int ee_n = n;
++        const char* jawp = (const char*)jaw;
++        uint32_t ofs;
++        if (ee_n <= 0) goto lbl_8C_lp64;
++        for (;;) {
++            ofs = *(const uint32_t*)(jawp + offsetof(TANG_WORK, id)) * 32u;
++            memcpy(&R11, (const char*)svp + ofs, 16);
++            jawp += 8;
++            ee_n -= 1;
++            memcpy((char*)dvp + ofs, &R11, 16);
++            if (ee_n <= 0) break;
++        }
++    lbl_8C_lp64:;
++        n = ee_n;
++        jaw = (TANG_WORK*)jawp;
++    }
+ #else
+     { /* asm2c */
+         ee_reg R8 = {{0}}, R9 = {{0}}, R10 = {{0}}, R11 = {{0}};
+@@ -861,6 +883,7 @@ void _fmCnkCalcMuscle(MASK_WORK* fm)
+         n = (__typeof__(n))(uintptr_t)op0.w[0];
+         jaw = (__typeof__(jaw))(uintptr_t)op1.w[0];
+     }
++#endif
+ #endif
+     
+     con = fm->list;
+@@ -968,6 +991,47 @@ void _fmCnkCalcMuscle(MASK_WORK* fm)
+         " : "=r"(svp), "=r"(dvp), "=r"(p0), "=r"(p1) : "f"(rsum), "r"(mvp), "r"(mrp), "r"(m)
+           : "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "t0", "t1", "memory"
+         );
++#else
++#ifdef __LP64__
++        {   /* asm2c on LP64: mvec/mrate are caller stack arrays, so p0/p1/mvp/
++               mrp are stack pointers, and the vector pointer loaded from mvec
++               must stay whole too. The pre-decrement pointer walk and the float
++               arithmetic are copied verbatim. */
++            ee_reg R8 = {{0}};
++            float F1 = 0.0f, F2 = 0.0f, F3 = 0.0f, F4 = 0.0f, F5 = 0.0f, F6 = 0.0f, F7 = 0.0f, F8 = 0.0f;
++            float* d = dvp;
++            const void* const* pp0 = (const void* const*)p0;
++            const float* pp1 = (const float*)p1;
++            const float* vp;
++            int cnt = m;
++            R8.sd[0] = (int32_t)(ee_f2u((float)(rsum)));
++            F8 = ee_u2f(R8.w[0]);
++            if (cnt <= 0) goto lbl_220_lp64;
++            pp0--; pp1--; cnt--;
++            F7 = pp1[0];
++            vp = (const float*)pp0[0];
++            F1 = d[0]; F2 = d[1]; F3 = d[2];
++        lbl_1D0_lp64:;
++            F7 = vu_clampf(F7 * F8);
++            F4 = vp[0]; F5 = vp[1]; F6 = vp[2];
++            pp1--;
++            F4 = vu_clampf(F4 * F7);
++            F5 = vu_clampf(F5 * F7);
++            F6 = vu_clampf(F6 * F7);
++            pp0--;
++            F1 = vu_clampf(F1 + F4);
++            F2 = vu_clampf(F2 + F5);
++            F3 = vu_clampf(F3 + F6);
++            cnt--;
++            F7 = pp1[0];
++            vp = (const float*)pp0[0];
++            if (cnt >= 0) goto lbl_1D0_lp64;
++            d[0] = F1; d[1] = F2; d[2] = F3;
++        lbl_220_lp64:;
++            dvp = d;
++            p0 = (void*)pp0;
++            p1 = (void*)pp1;
++        }
+ #else
+         { /* asm2c */
+             ee_reg R8 = {{0}}, R9 = {{0}};
+@@ -1026,6 +1090,7 @@ void _fmCnkCalcMuscle(MASK_WORK* fm)
+             p0 = (__typeof__(p0))(uintptr_t)op2.w[0];
+             p1 = (__typeof__(p1))(uintptr_t)op3.w[0];
+         }
++#endif
+ #endif
+     }
+ }
+@@ -1109,6 +1174,29 @@ void _fmCnkCalcJaw(MASK_WORK* fm)
+                 .set reorder
+                 " : : "r"(&vec), "r"(mat), "r"(dvp1) : 
+                 );
++#else
++#ifdef __LP64__
++                {   /* asm2c on LP64: &vec and mat are caller buffers (host stack); they do not
++                       survive the emulated 32-bit EE register view. The block is one 12-byte
++                       vertex read (ldl/ldr + lw + pcpyld), a matrix x vertex transform, and a
++                       12-byte unaligned write (sdl/sdr + sw: x,y from the low half, z from the
++                       upper word). The VU sequence is copied verbatim. */
++                    ee_reg R8 = {{0}};
++                    memcpy(&R8, dvp1, 12);
++                    R8.w[3] = 0;
++                    vu_load_vf(4, &R8);
++                    vu_load_vf(5, (const char*)mat + 0);
++                    vu_load_vf(6, (const char*)mat + 16);
++                    vu_load_vf(7, (const char*)mat + 32);
++                    vu_load_vf(8, (const char*)mat + 48);
++                    vu_upper(U_MULA, 14, 0, 5, 4, BC_X);
++                    vu_upper(U_MADDA, 14, 0, 6, 4, BC_Y);
++                    vu_upper(U_MADDA, 14, 0, 7, 4, BC_Z);
++                    vu_upper(U_MADD, 14, 18, 8, 0, BC_W);
++                    vu_store_vf(&R8, 18);
++                    memcpy(&vec, &R8, 8);
++                    memcpy((char*)&vec + 8, (char*)&R8 + 8, 4);
++                }
+ #else
+                 { /* asm2c */
+                     ee_reg R8 = {{0}}, R9 = {{0}};
+@@ -1137,6 +1225,7 @@ void _fmCnkCalcJaw(MASK_WORK* fm)
+                     ee_sdr((op0.w[0] + (uint32_t)(0)), R8.d[0]);
+                     EE_SW((op0.w[0] + (uint32_t)(offsetof(NJS_POINT4, z))), R9.d[0]);
+                 }
++#endif
+ #endif 
+             } 
+             else 
+@@ -1216,6 +1305,53 @@ void _fmCnkCalcJaw(MASK_WORK* fm)
+                 .set reorder
+                 " : : "r"(&vec), "r"(dvp1), "r"(jmat1), "r"(mat2), "f"(jawtrans) : 
+                 );
++#else
++#ifdef __LP64__
++                {   /* asm2c on LP64: &vec and mat2 are caller buffers (host stack); they do not
++                       survive the emulated 32-bit EE register view. Same 12-byte vertex read /
++                       write and 16-byte matrix reads as the sibling block, with the VU sequence
++                       copied verbatim. */
++                    ee_reg R8 = {{0}};
++                    ee_reg op4 = {{0}};
++                    op4.f[0] = (float)(jawtrans);
++                    R8.sd[0] = (int32_t)(ee_f2u(op4.f[0]));
++                    vu_load_vf(5, (const char*)mat2 + 0);
++                    vu_load_vf(6, (const char*)mat2 + 16);
++                    vu_load_vf(7, (const char*)mat2 + 32);
++                    vu_load_vf(8, (const char*)mat2 + 48);
++                    vu_load_vf(4, &R8);
++                    vu_load_vf(9, (const char*)jmat1 + 0);
++                    vu_load_vf(10, (const char*)jmat1 + 16);
++                    vu_load_vf(11, (const char*)jmat1 + 32);
++                    vu_load_vf(12, (const char*)jmat1 + 48);
++                    vu_upper(U_MULA, 14, 0, 5, 4, BC_X);
++                    vu_upper(U_MADDA, 14, 0, 6, 0, BC_X);
++                    vu_upper(U_MADDA, 14, 0, 7, 0, BC_X);
++                    vu_upper(U_MADD, 14, 8, 8, 0, BC_W);
++                    memcpy(&R8, dvp1, 12);
++                    R8.w[3] = 0;
++                    vu_upper(U_MULA, 14, 0, 5, 9, BC_X);
++                    vu_upper(U_MADDA, 14, 0, 6, 9, BC_Y);
++                    vu_upper(U_MADD, 14, 9, 7, 9, BC_Z);
++                    vu_upper(U_MULA, 14, 0, 5, 10, BC_X);
++                    vu_upper(U_MADDA, 14, 0, 6, 10, BC_Y);
++                    vu_upper(U_MADD, 14, 10, 7, 10, BC_Z);
++                    vu_load_vf(13, &R8);
++                    vu_upper(U_MULA, 14, 0, 5, 11, BC_X);
++                    vu_upper(U_MADDA, 14, 0, 6, 11, BC_Y);
++                    vu_upper(U_MADD, 14, 11, 7, 11, BC_Z);
++                    vu_upper(U_MULA, 14, 0, 5, 12, BC_X);
++                    vu_upper(U_MADDA, 14, 0, 6, 12, BC_Y);
++                    vu_upper(U_MADDA, 14, 0, 7, 12, BC_Z);
++                    vu_upper(U_MADD, 14, 12, 8, 0, BC_W);
++                    vu_upper(U_MULA, 14, 0, 9, 13, BC_X);
++                    vu_upper(U_MADDA, 14, 0, 10, 13, BC_Y);
++                    vu_upper(U_MADDA, 14, 0, 11, 13, BC_Z);
++                    vu_upper(U_MADD, 14, 18, 12, 0, BC_W);
++                    vu_store_vf(&R8, 18);
++                    memcpy(&vec, &R8, 8);
++                    memcpy((char*)&vec + 8, (char*)&R8 + 8, 4);
++                }
+ #else
+                 { /* asm2c */
+                     ee_reg R8 = {{0}}, R9 = {{0}};
+@@ -1271,6 +1407,7 @@ void _fmCnkCalcJaw(MASK_WORK* fm)
+                     ee_sdr((op0.w[0] + (uint32_t)(0)), R8.d[0]);
+                     EE_SW((op0.w[0] + (uint32_t)(offsetof(NJS_POINT4, z))), R9.d[0]);
+                 }
++#endif
+ #endif 
+             }
+             
+@@ -1379,6 +1516,43 @@ void _fmCnkCalcEye(MASK_WORK* fm)
+             .set reorder
+             " : : "r"(&fm->eyemat[i]), "r"(&obj->pos), "r"(&q3), "r"(&t3), "r"(&r3), "r"(&fm->param.eye) : 
+             );
++#else
++#ifdef __LP64__
++            /* asm2c on LP64: q3/t3/r3 are caller stack buffers; all pointers kept
++               whole. Three 12-byte vertex reads, four 16-byte matrix reads, two
++               12-byte writes; the VU sequence is copied verbatim. */
++            {
++                ee_reg R8 = {{0}}, R10 = {{0}}, R12 = {{0}};
++                memcpy(&R8, &obj->pos, 12);
++                R8.w[3] = 0;
++                memcpy(&R10, &t3, 12);
++                R10.w[3] = 0;
++                memcpy(&R12, &fm->param.eye, 12);
++                R12.w[3] = 0;
++                vu_load_vf(4, &R8);
++                vu_load_vf(5, &R10);
++                vu_load_vf(6, &R12);
++                vu_load_vf(7, (const char*)&fm->eyemat[i] + 0);
++                vu_load_vf(8, (const char*)&fm->eyemat[i] + 16);
++                vu_load_vf(9, (const char*)&fm->eyemat[i] + 32);
++                vu_load_vf(10, (const char*)&fm->eyemat[i] + 48);
++                vu_upper(U_MULA, 14, 0, 7, 4, BC_X);
++                vu_upper(U_MADDA, 14, 0, 8, 4, BC_Y);
++                vu_upper(U_MADDA, 14, 0, 9, 4, BC_Z);
++                vu_upper(U_MADD, 14, 11, 10, 0, BC_W);
++                vu_upper(U_MULA, 14, 0, 7, 5, BC_X);
++                vu_upper(U_MADDA, 14, 0, 8, 5, BC_Y);
++                vu_upper(U_MADDA, 14, 0, 9, 5, BC_Z);
++                vu_upper(U_MADD, 14, 12, 10, 0, BC_W);
++                vu_upper(U_ADD, 14, 7, 11, 6, BC_NONE);
++                vu_upper(U_SUB, 14, 8, 7, 11, BC_NONE);
++                vu_store_vf(&R8, 12);
++                vu_store_vf(&R10, 8);
++                memcpy(&r3, &R8, 8);
++                memcpy((char*)&r3 + 8, (char*)&R8 + 8, 4);
++                memcpy(&q3, &R10, 8);
++                memcpy((char*)&q3 + 8, (char*)&R10 + 8, 4);
++            }
+ #else
+             { /* asm2c */
+                 ee_reg R8 = {{0}}, R9 = {{0}}, R10 = {{0}}, R11 = {{0}}, R12 = {{0}}, R13 = {{0}};
+@@ -1434,6 +1608,7 @@ void _fmCnkCalcEye(MASK_WORK* fm)
+                 ee_sdr((op2.w[0] + (uint32_t)(0)), R10.d[0]);
+                 EE_SW((op2.w[0] + (uint32_t)(offsetof(NJS_POINT3, z))), R11.d[0]);
+             }
++#endif
+ #endif 
+ 
+             dx = q3.x;
+@@ -1513,6 +1688,20 @@ void _fmCnkCalcTang(MASK_WORK* fm)
+             .set reorder
+             " : : "r"(mat) : 
+             );
++#else
++#ifdef __LP64__
++            /* asm2c on LP64: mat is a caller stack buffer; whole pointer, four
++               16-byte sqc2 stores. VU sequence copied verbatim. */
++            {
++                vu_upper(U_MUL, 15, 4, 0, 0, BC_W);
++                vu_mr32(15, 5, 4);
++                vu_mr32(15, 6, 5);
++                vu_mr32(15, 7, 6);
++                vu_store_vf((char*)mat + 48, 4);
++                vu_store_vf((char*)mat + 32, 5);
++                vu_store_vf((char*)mat + 16, 6);
++                vu_store_vf((char*)mat + 0, 7);
++            }
+ #else
+             { /* asm2c */
+                 ee_reg op0 = {{0}};
+@@ -1526,6 +1715,7 @@ void _fmCnkCalcTang(MASK_WORK* fm)
+                 vu_store_vf(EE_PTR((op0.w[0] + (uint32_t)(16))), 6);
+                 vu_store_vf(EE_PTR((op0.w[0] + (uint32_t)(0))), 7);
+             }
++#endif
+ #endif 
+             
+             njRotateX(mat, (int)(182.04445f * (tangx * tang->rate)) & 0xFFFF);
+@@ -1572,6 +1762,31 @@ void _fmCnkCalcTang(MASK_WORK* fm)
+             .set reorder
+             " : : "r"(&svp[calc_ofs]), "r"(&dvp[calc_ofs]), "f"(tangz), "r"(mat) : 
+             );
++#else
++#ifdef __LP64__
++            /* asm2c on LP64: mat is a caller stack buffer; the two vertex pointers
++               are kept whole too. The block is a 12-byte read, a matrix x vertex
++               transform, and a 12-byte write; VU sequence copied verbatim. */
++            {
++                ee_reg R8 = {{0}}, R10 = {{0}};
++                R10.sd[0] = (int32_t)(ee_f2u((float)(tangz)));
++                memcpy(&R8, &svp[calc_ofs], 12);
++                R8.w[3] = 0;
++                vu_load_vf(9, &R10);
++                vu_load_vf(4, &R8);
++                vu_load_vf(5, (const char*)mat + 0);
++                vu_load_vf(6, (const char*)mat + 16);
++                vu_load_vf(7, (const char*)mat + 32);
++                vu_load_vf(8, (const char*)mat + 48);
++                vu_upper(U_MUL, 14, 7, 7, 9, BC_X);
++                vu_upper(U_MULA, 14, 0, 5, 4, BC_X);
++                vu_upper(U_MADDA, 14, 0, 6, 4, BC_Y);
++                vu_upper(U_MADDA, 14, 0, 7, 4, BC_Z);
++                vu_upper(U_MADD, 14, 18, 8, 0, BC_W);
++                vu_store_vf(&R8, 18);
++                memcpy(&dvp[calc_ofs], &R8, 8);
++                memcpy((char*)&dvp[calc_ofs] + 8, (char*)&R8 + 8, 4);
++            }
+ #else
+             { /* asm2c */
+                 ee_reg R8 = {{0}}, R9 = {{0}}, R10 = {{0}};
+@@ -1605,6 +1820,7 @@ void _fmCnkCalcTang(MASK_WORK* fm)
+                 ee_sdr((op1.w[0] + (uint32_t)(0)), R8.d[0]);
+                 EE_SW((op1.w[0] + (uint32_t)(8)), R9.d[0]);
+             }
++#endif
+ #endif
+             
+             tang++; 
 diff --git a/src/ps2/veronica/prog/fileview.c b/src/ps2/veronica/prog/fileview.c
 index 03b56852..73add66e 100644
 --- a/src/ps2/veronica/prog/fileview.c
@@ -1836,7 +2255,7 @@ index caba0264..b54e52c6 100644
          case 65282:
              dp++;
 diff --git a/src/ps2/veronica/prog/njplus.c b/src/ps2/veronica/prog/njplus.c
-index 456964cf..12c7e0d5 100644
+index 456964cf..38787a96 100644
 --- a/src/ps2/veronica/prog/njplus.c
 +++ b/src/ps2/veronica/prog/njplus.c
 @@ -7,7 +7,11 @@
@@ -1851,6 +2270,95 @@ index 456964cf..12c7e0d5 100644
  
  // 100% matching!
  void npPlusInit() 
+@@ -782,6 +786,25 @@ void npTransform(NJS_CNK_OBJECT* srcobj, NJS_CNK_OBJECT* dstobj, register float
+ 
+             .set reorder
+             }
++#else
++#ifdef __LP64__
++            {   /* asm2c on LP64: keep the host pointers whole (see ps2_NaMatrix.c) */
++                ee_reg R8 = {{0}};
++                R8.sd[0] = (int32_t)(ee_f2u(no));
++                vu_load_vf(4, (const char*)sp + 0);
++                vu_load_vf(5, (const char*)dp + 0);
++                vu_load_vf(6, (const char*)sp + 16);
++                vu_load_vf(7, (const char*)dp + 16);
++                vu_load_vf(12, &R8);
++                vu_upper(U_SUB, 14, 5, 5, 4, BC_NONE);
++                vu_upper(U_SUB, 14, 7, 7, 6, BC_NONE);
++                vu_upper(U_MUL, 14, 5, 5, 12, BC_X);
++                vu_upper(U_MUL, 14, 7, 7, 12, BC_X);
++                vu_upper(U_ADD, 14, 5, 5, 4, BC_NONE);
++                vu_upper(U_ADD, 14, 7, 7, 6, BC_NONE);
++                vu_store_vf((char*)fp + 0, 5);
++                vu_store_vf((char*)fp + 16, 7);
++            }
+ #else
+             { /* asm2c */
+                 ee_reg R8 = {{0}};
+@@ -809,26 +832,35 @@ void npTransform(NJS_CNK_OBJECT* srcobj, NJS_CNK_OBJECT* dstobj, register float
+                 vu_store_vf(EE_PTR((cv_fp.w[0] + (uint32_t)(16))), 7);
+             }
+ #endif
+-                
+-            fp += 2; 
+-            sp += 2; 
++#endif
++
++            fp += 2;
++            sp += 2;
+             dp += 2;
+-        } 
+-        else 
+-        { 
++        }
++        else
++        {
+ #ifndef TARGET_PC
+             asm volatile
+             {
+                 .set noreorder
+-                
+-                lqc2 vf4, 0x0(sp) 
++
++                lqc2 vf4, 0x0(sp)
+                 lqc2 vf6, 0x10(sp)
+-                    
++
+                 sqc2 vf4, 0x0(fp)
+                 sqc2 vf6, 0x10(fp)
+ 
+                 .set reorder
+             }
++#else
++#ifdef __LP64__
++            {   /* asm2c on LP64: whole pointers (see above) */
++                vu_load_vf(4, (const char*)sp + 0);
++                vu_load_vf(6, (const char*)sp + 16);
++                vu_store_vf((char*)fp + 0, 4);
++                vu_store_vf((char*)fp + 16, 6);
++            }
+ #else
+             { /* asm2c */
+                 ee_reg cv_fp = {{0}};
+@@ -841,12 +873,13 @@ void npTransform(NJS_CNK_OBJECT* srcobj, NJS_CNK_OBJECT* dstobj, register float
+                 vu_store_vf(EE_PTR((cv_fp.w[0] + (uint32_t)(16))), 6);
+             }
+ #endif
+-            
+-            fp += 2; 
++#endif
++
++            fp += 2;
+             sp += 2;
+             dp += 2;
+-        } 
+-    } 
++        }
++    }
+ 
+     ((HDR_PS*)fp)->ucType = 0xFF; 
+ 
 diff --git a/src/ps2/veronica/prog/objitm.c b/src/ps2/veronica/prog/objitm.c
 index 365b5256..a91163e2 100644
 --- a/src/ps2/veronica/prog/objitm.c
@@ -2174,6 +2682,911 @@ index ad46867d..29f32571 100644
      return Type_Space[pFileInfo->saveroom - 1][0] - pFileInfo->ply_id;
  }
  
+diff --git a/src/ps2/veronica/prog/ps2_NaDraw2D.c b/src/ps2/veronica/prog/ps2_NaDraw2D.c
+index afa57305..95b1404b 100644
+--- a/src/ps2/veronica/prog/ps2_NaDraw2D.c
++++ b/src/ps2/veronica/prog/ps2_NaDraw2D.c
+@@ -29,11 +29,20 @@ void sceVu0ITOF12Vector(sceVu0FVECTOR v0, sceVu0IVECTOR v1)
+ 	{ /* asm2c */
+ 	    ee_reg op0 = {{0}};
+ 	    ee_reg op1 = {{0}};
++#ifdef __LP64__
++	    /* LP64: these vectors are caller stack buffers; their addresses must survive
++	       the emulated 32-bit EE register view (window addresses do; stack does not).
++	       Keep the pointers whole and bypass EE_PTR's 32-bit truncation. */
++	    vu_load_vf(4, (const void*)(uintptr_t)v1);
++	    vu_upper(U_ITOF12, 15, 5, 4, 0, BC_NONE);
++	    vu_store_vf((void*)(uintptr_t)v0, 5);
++#else
+ 	    op0.sd[0] = (int32_t)(uintptr_t)(v0);
+ 	    op1.sd[0] = (int32_t)(uintptr_t)(v1);
+ 	    vu_load_vf(4, EE_PTR((op1.w[0] + (uint32_t)(0))));
+ 	    vu_upper(U_ITOF12, 15, 5, 4, 0, BC_NONE);
+ 	    vu_store_vf(EE_PTR((op0.w[0] + (uint32_t)(0))), 5);
++#endif
+ 	}
+ #endif
+ }
+diff --git a/src/ps2/veronica/prog/ps2_NaMath.c b/src/ps2/veronica/prog/ps2_NaMath.c
+index 8eb43e66..00eb5a3e 100644
+--- a/src/ps2/veronica/prog/ps2_NaMath.c
++++ b/src/ps2/veronica/prog/ps2_NaMath.c
+@@ -242,6 +242,53 @@ void njSinCos(int lAngle, float* sin, float* cos)
+     .set reorder
+     " : : "r"(&lAngle), "r"(sin), "r"(cos), "r"(SinTable) : 
+     );
++#else
++#ifdef __LP64__
++    {   /* asm2c on LP64: &lAngle is the caller's stack slot (the PS2 ABI takes the angle
++           by reference) and sin/cos are caller buffers; those addresses do not survive the
++           emulated 32-bit EE register view. Keep them whole: read the angle, index
++           SinTable directly and store each 4-byte result. The vf11/vf12 side effect (the
++           original's qmtc2) is kept. */
++        ee_reg R8 = {{0}}, R9 = {{0}}, R10 = {{0}}, R11 = {{0}}, R12 = {{0}}, R13 = {{0}}, R14 = {{0}}, R15 = {{0}};
++        float F4 = 0.0f, F5 = 0.0f, F6 = 0.0f, F7 = 0.0f;
++        int ee_cond;
++        const int angle = lAngle;   /* the original's lw through &lAngle */
++        R8.sd[0] = (int32_t)angle;
++        R10.sd[0] = (int32_t)(0 + (uint32_t)(16383));
++        R11.d[0] = R8.d[0] & (uint64_t)(uint16_t)(16384);
++        ee_cond = (R11.sd[0] == 0);
++        R9.d[0] = R8.d[0] & R10.d[0];
++        if (ee_cond) goto l_002D7E4C;
++        F4 = SinTable[16383 - R9.w[0]];
++        F5 = SinTable[R9.w[0]];
++        F6 = -F4;
++        F7 = -F5;
++        R12.sd[0] = (int32_t)(ee_f2u(F6));
++        R13.sd[0] = (int32_t)(ee_f2u(F5));
++        R14.sd[0] = (int32_t)(ee_f2u(F4));
++        R15.sd[0] = (int32_t)(ee_f2u(F7));
++        R8.d[0] = R8.d[0] & (uint64_t)(uint16_t)(32768);
++        if (R8.d[0] == 0) R12.d[0] = R14.d[0];
++        if (R8.d[0] == 0) R13.d[0] = R15.d[0];
++        goto l_002D7E9C;
++    l_002D7E4C:;
++        F4 = SinTable[R9.w[0]];
++        F5 = SinTable[16383 - R9.w[0]];
++        F6 = -F4;
++        F7 = -F5;
++        R12.sd[0] = (int32_t)(ee_f2u(F4));
++        R13.sd[0] = (int32_t)(ee_f2u(F5));
++        R14.sd[0] = (int32_t)(ee_f2u(F6));
++        R15.sd[0] = (int32_t)(ee_f2u(F7));
++        R8.d[0] = R8.d[0] & (uint64_t)(uint16_t)(32768);
++        if (R8.d[0] != 0) R12.d[0] = R14.d[0];
++        if (R8.d[0] != 0) R13.d[0] = R15.d[0];
++    l_002D7E9C:;
++        memcpy(sin, &R12, sizeof(float));
++        memcpy(cos, &R13, sizeof(float));
++        vu_load_vf(11, &R12);
++        vu_load_vf(12, &R13);
++    }
+ #else
+     { /* asm2c */
+         ee_reg R3 = {{0}}, R8 = {{0}}, R9 = {{0}}, R10 = {{0}}, R11 = {{0}}, R12 = {{0}}, R13 = {{0}}, R14 = {{0}}, R15 = {{0}};
+@@ -304,6 +351,7 @@ void njSinCos(int lAngle, float* sin, float* cos)
+         vu_load_vf(12, &R13);
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching! 
+diff --git a/src/ps2/veronica/prog/ps2_NaMatrix.c b/src/ps2/veronica/prog/ps2_NaMatrix.c
+index 4d65ad4b..b0b0899b 100644
+--- a/src/ps2/veronica/prog/ps2_NaMatrix.c
++++ b/src/ps2/veronica/prog/ps2_NaMatrix.c
+@@ -305,6 +305,9 @@ void    njUnitTransPortion(NJS_MATRIX *m)
+     .set reorder
+     " : : "r"(m) : 
+     );
++#else
++#ifdef __LP64__
++    vu_store_vf((char*)m + 48, 0);   /* asm2c on LP64: the whole pointer (sqc2 vf0, 0x30) */
+ #else
+     { /* asm2c */
+         ee_reg op0 = {{0}};
+@@ -312,6 +315,7 @@ void    njUnitTransPortion(NJS_MATRIX *m)
+         vu_store_vf(EE_PTR((op0.w[0] + (uint32_t)(48))), 0);
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching! 
+@@ -338,6 +342,16 @@ void    njUnitRotPortion(NJS_MATRIX *m)
+     .set reorder
+     " : : "r"(m) : 
+     );
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: the whole pointer; the three sqc2 stores are 16 bytes each */
++    vu_upper(U_MUL, 15, 4, 0, 0, BC_W);
++    vu_mr32(15, 5, 4);
++    vu_mr32(15, 6, 5);
++    vu_mr32(15, 7, 6);
++    vu_store_vf((char*)m + 32, 5);
++    vu_store_vf((char*)m + 16, 6);
++    vu_store_vf((char*)m + 0, 7);
+ #else
+     { /* asm2c */
+         ee_reg op0 = {{0}};
+@@ -351,6 +365,7 @@ void    njUnitRotPortion(NJS_MATRIX *m)
+         vu_store_vf(EE_PTR((op0.w[0] + (uint32_t)(0))), 7);
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching!
+@@ -405,6 +420,10 @@ Bool	njPushMatrix(NJS_MATRIX *m)
+     .set reorder
+     " : : "r"(fpSrc), "r"(fpDst) : 
+     );
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: the whole pointers; lqc2/sqc2 move exactly 64 bytes */
++    memcpy(fpDst, fpSrc, 64);
+ #else
+     { /* asm2c */
+         ee_reg op0 = {{0}};
+@@ -420,6 +439,7 @@ Bool	njPushMatrix(NJS_MATRIX *m)
+         vu_store_vf(EE_PTR((op1.w[0] + (uint32_t)(32))), 6);
+         vu_store_vf(EE_PTR((op1.w[0] + (uint32_t)(48))), 7);
+     }
++#endif
+ #endif
+ 
+     return TRUE;
+@@ -470,6 +490,17 @@ void	njUnitMatrix(register NJS_MATRIX *m)
+         
+     .set reorder
+     }
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: the whole pointer; the four sqc2 stores are 16 bytes each */
++    vu_upper(U_MUL, 15, 4, 0, 0, BC_W);
++    vu_mr32(15, 5, 4);
++    vu_mr32(15, 6, 5);
++    vu_mr32(15, 7, 6);
++    vu_store_vf((char*)m + 48, 4);
++    vu_store_vf((char*)m + 32, 5);
++    vu_store_vf((char*)m + 16, 6);
++    vu_store_vf((char*)m + 0, 7);
+ #else
+     { /* asm2c */
+         ee_reg cv_m = {{0}};
+@@ -484,6 +515,7 @@ void	njUnitMatrix(register NJS_MATRIX *m)
+         vu_store_vf(EE_PTR((cv_m.w[0] + (uint32_t)(0))), 7);
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching!
+@@ -512,6 +544,11 @@ void	njSetMatrix(NJS_MATRIX *md, NJS_MATRIX *ms)
+         
+     .set reorder
+     }
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: the pointers are caller buffers (often host stack); they do not
++       survive the emulated 32-bit EE register view. lqc2/sqc2 move exactly 64 bytes. */
++    memcpy(fpDst, fpSrc, 64);
+ #else
+     { /* asm2c */
+         ee_reg cv_fpDst = {{0}};
+@@ -528,6 +565,7 @@ void	njSetMatrix(NJS_MATRIX *md, NJS_MATRIX *ms)
+         vu_store_vf(EE_PTR((cv_fpDst.w[0] + (uint32_t)(48))), 7);
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching!
+@@ -544,6 +582,13 @@ void njSetMatrixCN(NJS_MATRIX* pMat)
+     .set reorder 
+     " : : "r"(pMat) : 
+     );
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: the whole pointer; the four lqc2 reads fill vf28..vf31 (16 bytes each) */
++    vu_load_vf(28, (const char*)pMat + 0);
++    vu_load_vf(29, (const char*)pMat + 16);
++    vu_load_vf(30, (const char*)pMat + 32);
++    vu_load_vf(31, (const char*)pMat + 48);
+ #else
+     { /* asm2c */
+         ee_reg op0 = {{0}};
+@@ -554,6 +599,7 @@ void njSetMatrixCN(NJS_MATRIX* pMat)
+         vu_load_vf(31, EE_PTR((op0.w[0] + (uint32_t)(48))));
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching!
+@@ -582,6 +628,10 @@ void	njGetMatrix(NJS_MATRIX *m)
+         
+     .set reorder
+     }
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: the whole pointers; lqc2/sqc2 move exactly 64 bytes */
++    memcpy(fpDst, fpSrc, 64);
+ #else
+     { /* asm2c */
+         ee_reg cv_fpDst = {{0}};
+@@ -598,6 +648,7 @@ void	njGetMatrix(NJS_MATRIX *m)
+         vu_store_vf(EE_PTR((cv_fpDst.w[0] + (uint32_t)(48))), 7);
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching!
+@@ -649,6 +700,34 @@ void	njMultiMatrix(NJS_MATRIX *md, NJS_MATRIX *ms)
+     .set reorder
+     " : : "r"(md), "r"(ms) : 
+     );
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: whole pointers; the lqc2/sq2 lanes are 16 bytes each */
++    vu_load_vf(4, (const char*)md + 0);
++    vu_load_vf(5, (const char*)md + 16);
++    vu_load_vf(6, (const char*)md + 32);
++    vu_load_vf(7, (const char*)md + 48);
++    vu_load_vf(8, (const char*)ms + 0);
++    vu_load_vf(9, (const char*)ms + 16);
++    vu_load_vf(10, (const char*)ms + 32);
++    vu_load_vf(11, (const char*)ms + 48);
++    vu_upper(U_MULA, 14, 0, 4, 8, BC_X);
++    vu_upper(U_MADDA, 14, 0, 5, 8, BC_Y);
++    vu_upper(U_MADD, 14, 8, 6, 8, BC_Z);
++    vu_upper(U_MULA, 14, 0, 4, 9, BC_X);
++    vu_upper(U_MADDA, 14, 0, 5, 9, BC_Y);
++    vu_upper(U_MADD, 14, 9, 6, 9, BC_Z);
++    vu_upper(U_MULA, 14, 0, 4, 10, BC_X);
++    vu_upper(U_MADDA, 14, 0, 5, 10, BC_Y);
++    vu_upper(U_MADD, 14, 10, 6, 10, BC_Z);
++    vu_upper(U_MULA, 14, 0, 4, 11, BC_X);
++    vu_upper(U_MADDA, 14, 0, 5, 11, BC_Y);
++    vu_upper(U_MADDA, 14, 0, 6, 11, BC_Z);
++    vu_upper(U_MADD, 14, 11, 7, 0, BC_W);
++    vu_store_vf((char*)md + 0, 8);
++    vu_store_vf((char*)md + 16, 9);
++    vu_store_vf((char*)md + 32, 10);
++    vu_store_vf((char*)md + 48, 11);
+ #else
+     { /* asm2c */
+         ee_reg op0 = {{0}};
+@@ -682,6 +761,7 @@ void	njMultiMatrix(NJS_MATRIX *md, NJS_MATRIX *ms)
+         vu_store_vf(EE_PTR((op0.w[0] + (uint32_t)(48))), 11);
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching!
+@@ -719,6 +799,33 @@ void	njTranslate(NJS_MATRIX *m, Float x, Float y, Float z)
+     .set reorder
+     " : : "r"(m), "f"(x), "f"(y), "f"(z) : 
+     );
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: m is a caller buffer (often host stack); it does not survive
++       the emulated 32-bit EE register view. The four lqc2 reads and the sqc2 store
++       are 16 bytes each; the scalar-to-VF loads are unchanged. */
++    {
++        ee_reg R8 = {{0}}, R9 = {{0}}, R10 = {{0}};
++        ee_reg op1 = {{0}}, op2 = {{0}}, op3 = {{0}};
++        op1.f[0] = (float)(x);
++        op2.f[0] = (float)(y);
++        op3.f[0] = (float)(z);
++        R8.sd[0] = (int32_t)(ee_f2u(op1.f[0]));
++        R9.sd[0] = (int32_t)(ee_f2u(op2.f[0]));
++        R10.sd[0] = (int32_t)(ee_f2u(op3.f[0]));
++        vu_load_vf(4, &R8);
++        vu_load_vf(5, &R9);
++        vu_load_vf(6, &R10);
++        vu_load_vf(7, (const char*)m + 0);
++        vu_load_vf(8, (const char*)m + 16);
++        vu_load_vf(9, (const char*)m + 32);
++        vu_load_vf(10, (const char*)m + 48);
++        vu_upper(U_MULA, 14, 0, 7, 4, BC_X);
++        vu_upper(U_MADDA, 14, 0, 8, 5, BC_X);
++        vu_upper(U_MADDA, 14, 0, 9, 6, BC_X);
++        vu_upper(U_MADD, 14, 11, 10, 0, BC_W);
++        vu_store_vf((char*)m + 48, 11);
++    }
+ #else
+     { /* asm2c */
+         ee_reg R8 = {{0}}, R9 = {{0}}, R10 = {{0}};
+@@ -747,6 +854,7 @@ void	njTranslate(NJS_MATRIX *m, Float x, Float y, Float z)
+         vu_store_vf(EE_PTR((op0.w[0] + (uint32_t)(48))), 11);
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching!
+@@ -853,6 +961,32 @@ void	njRotateX(NJS_MATRIX *m, Angle ang)
+     .set reorder
+     " : : "r"(m), "f"(fSin), "f"(fCos) : 
+     );
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: m is a caller buffer (often host stack); it does not survive
++       the emulated 32-bit EE register view. The two lqc2 reads and two sqc2 stores
++       are 16 bytes each; the VU sequence is copied verbatim. */
++    {
++        ee_reg R14 = {{0}}, R15 = {{0}};
++        ee_reg op1 = {{0}}, op2 = {{0}};
++        op1.f[0] = (float)(fSin);
++        op2.f[0] = (float)(fCos);
++        R14.sd[0] = (int32_t)(ee_f2u(op1.f[0]));
++        R15.sd[0] = (int32_t)(ee_f2u(op2.f[0]));
++        vu_load_vf(11, &R14);
++        vu_load_vf(12, &R15);
++        vu_load_vf(4, (const char*)m + 16);
++        vu_load_vf(5, (const char*)m + 32);
++        vu_upper(U_SUB, 8, 10, 0, 11, BC_NONE);
++        vu_upper(U_MUL, 14, 6, 4, 12, BC_X);
++        vu_upper(U_MUL, 14, 7, 5, 11, BC_X);
++        vu_upper(U_MUL, 14, 4, 4, 10, BC_X);
++        vu_upper(U_MUL, 14, 5, 5, 12, BC_X);
++        vu_upper(U_ADD, 14, 8, 6, 7, BC_NONE);
++        vu_upper(U_ADD, 14, 9, 4, 5, BC_NONE);
++        vu_store_vf((char*)m + 16, 8);
++        vu_store_vf((char*)m + 32, 9);
++    }
+ #else
+     { /* asm2c */
+         ee_reg R14 = {{0}}, R15 = {{0}};
+@@ -879,6 +1013,7 @@ void	njRotateX(NJS_MATRIX *m, Angle ang)
+         vu_store_vf(EE_PTR((op0.w[0] + (uint32_t)(32))), 9);
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching!
+@@ -924,6 +1059,32 @@ void	njRotateY(NJS_MATRIX *m, Angle ang)
+     .set reorder
+     " : : "r"(m), "f"(fSin), "f"(fCos) : 
+     );
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: m is a caller buffer (often host stack); it does not survive
++       the emulated 32-bit EE register view. The two lqc2 reads and two sqc2 stores
++       are 16 bytes each; the VU sequence is copied verbatim. */
++    {
++        ee_reg R14 = {{0}}, R15 = {{0}};
++        ee_reg op1 = {{0}}, op2 = {{0}};
++        op1.f[0] = (float)(fSin);
++        op2.f[0] = (float)(fCos);
++        R14.sd[0] = (int32_t)(ee_f2u(op1.f[0]));
++        R15.sd[0] = (int32_t)(ee_f2u(op2.f[0]));
++        vu_load_vf(11, &R14);
++        vu_load_vf(12, &R15);
++        vu_load_vf(4, (const char*)m + 0);
++        vu_load_vf(5, (const char*)m + 32);
++        vu_upper(U_SUB, 8, 10, 0, 11, BC_NONE);
++        vu_upper(U_MUL, 14, 6, 4, 12, BC_X);
++        vu_upper(U_MUL, 14, 7, 5, 10, BC_X);
++        vu_upper(U_MUL, 14, 4, 4, 11, BC_X);
++        vu_upper(U_MUL, 14, 5, 5, 12, BC_X);
++        vu_upper(U_ADD, 14, 8, 6, 7, BC_NONE);
++        vu_upper(U_ADD, 14, 9, 4, 5, BC_NONE);
++        vu_store_vf((char*)m + 0, 8);
++        vu_store_vf((char*)m + 32, 9);
++    }
+ #else
+     { /* asm2c */
+         ee_reg R14 = {{0}}, R15 = {{0}};
+@@ -950,6 +1111,7 @@ void	njRotateY(NJS_MATRIX *m, Angle ang)
+         vu_store_vf(EE_PTR((op0.w[0] + (uint32_t)(32))), 9);
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching!
+@@ -1931,6 +2093,30 @@ void	njCalcPoint(NJS_MATRIX *m, NJS_POINT3 *ps, NJS_POINT3 *pd)
+     .set reorder
+     " : : "r"(m), "r"(ps), "r"(pd) : 
+     );
++#else
++#ifdef __LP64__
++    {   /* asm2c on LP64: the pointers are caller buffers (often host stack); they do not
++           survive the emulated 32-bit EE register view. The block is one 12-byte vertex
++           read (ps: NJS_POINT3; the original reads exactly 12 bytes via ldl/ldr + lw, the
++           4th register lane never entering the .xyz-masked transform), a matrix x vertex
++           transform (m's four rows), and a 12-byte unaligned write (pd): x, y from the
++           result's low half, z from its upper word (the original drops w). */
++        ee_reg R8 = {{0}};
++        memcpy(&R8, ps, 12);
++        ((uint32_t*)&R8)[3] = 0;
++        vu_load_vf(4, &R8);
++        vu_load_vf(5, (const char*)m + 0);
++        vu_load_vf(6, (const char*)m + 16);
++        vu_load_vf(7, (const char*)m + 32);
++        vu_load_vf(8, (const char*)m + 48);
++        vu_upper(U_MULA, 14, 0, 5, 4, BC_X);
++        vu_upper(U_MADDA, 14, 0, 6, 4, BC_Y);
++        vu_upper(U_MADDA, 14, 0, 7, 4, BC_Z);
++        vu_upper(U_MADD, 14, 18, 8, 0, BC_W);
++        vu_store_vf(&R8, 18);
++        memcpy(pd, &R8, 8);
++        memcpy((char*)pd + 8, (char*)&R8 + 8, 4);
++    }
+ #else
+     { /* asm2c */
+         ee_reg R8 = {{0}}, R9 = {{0}};
+@@ -1960,6 +2146,7 @@ void	njCalcPoint(NJS_MATRIX *m, NJS_POINT3 *ps, NJS_POINT3 *pd)
+         EE_SW((op2.w[0] + (uint32_t)(8)), R9.d[0]);
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching!
+@@ -1990,6 +2177,24 @@ void njCalcPoint4(NJS_MATRIX* pMatrix, NJS_POINT4* pSrcPoint, NJS_POINT4* pDstPo
+     .set reorder
+     " : : "r"(pMatrix), "r"(pSrcPoint), "r"(pDstPoint) : 
+     );
++#else
++#ifdef __LP64__
++    {   /* asm2c on LP64: the pointers are caller buffers (often host stack) and do not
++           survive the emulated 32-bit EE register view; keep them whole. The block is
++           one 16-byte point read, a matrix x point transform, and a 16-byte write. */
++        ee_reg R8 = {{0}};
++        memcpy(&R8, pSrcPoint, 16);
++        vu_load_vf(4, &R8);
++        vu_load_vf(5, (const char*)pMatrix + 0);
++        vu_load_vf(6, (const char*)pMatrix + 16);
++        vu_load_vf(7, (const char*)pMatrix + 32);
++        vu_load_vf(8, (const char*)pMatrix + 48);
++        vu_upper(U_MULA, 14, 0, 5, 4, BC_X);
++        vu_upper(U_MADDA, 14, 0, 6, 4, BC_Y);
++        vu_upper(U_MADDA, 14, 0, 7, 4, BC_Z);
++        vu_upper(U_MADD, 14, 18, 8, 0, BC_W);
++        vu_store_vf(pDstPoint, 18);
++    }
+ #else
+     { /* asm2c */
+         ee_reg op0 = {{0}};
+@@ -2010,6 +2215,7 @@ void njCalcPoint4(NJS_MATRIX* pMatrix, NJS_POINT4* pSrcPoint, NJS_POINT4* pDstPo
+         vu_store_vf(EE_PTR((op2.w[0] + (uint32_t)(0))), 18);
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching!
+@@ -2046,6 +2252,23 @@ void njCalcPointCN(NJS_POINT3* pSrcPoint, NJS_POINT3* pDstPoint)
+     .set reorder
+     " : : "r"(pSrcPoint), "r"(pDstPoint) : 
+     );
++#else
++#ifdef __LP64__
++    {   /* asm2c on LP64: keep the caller pointers whole (see njCalcPoint). The block is
++           a 12-byte point read (src), a CN-matrix (vf28-31) transform, and a 12-byte
++           write (dst): the transform's W input is 0, as the original's pcpyld zeroed it. */
++        ee_reg R8 = {{0}};
++        memcpy(&R8, pSrcPoint, 12);
++        ((uint32_t*)&R8)[3] = 0;
++        vu_load_vf(4, &R8);
++        vu_upper(U_MULA, 14, 0, 28, 4, BC_X);
++        vu_upper(U_MADDA, 14, 0, 29, 4, BC_Y);
++        vu_upper(U_MADDA, 14, 0, 30, 4, BC_Z);
++        vu_upper(U_MADD, 14, 18, 31, 0, BC_W);
++        vu_store_vf(&R8, 18);
++        memcpy(pDstPoint, &R8, 8);
++        memcpy((char*)pDstPoint + 8, (char*)&R8 + 8, 4);
++    }
+ #else
+     { /* asm2c */
+         ee_reg R8 = {{0}}, R9 = {{0}}, R10 = {{0}}, R11 = {{0}};
+@@ -2069,6 +2292,7 @@ void njCalcPointCN(NJS_POINT3* pSrcPoint, NJS_POINT3* pDstPoint)
+         EE_SW((op1.w[0] + (uint32_t)(8)), R9.d[0]);
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching!
+@@ -2096,6 +2320,18 @@ void	njAddVector(NJS_VECTOR *vd, NJS_VECTOR *vs)
+     .set reorder
+     " : : "r"(vd), "r"(vs) : 
+     );
++#else
++#ifdef __LP64__
++	{ /* asm2c on LP64: whole pointers; scalar float ops copied verbatim */
++	    float* d = (float*)vd;
++	    const float* s = (const float*)vs;
++	    float F8 = d[0], F9 = d[1], F10 = d[2];
++	    float F11 = s[0], F12 = s[1], F13 = s[2];
++	    F8 = vu_clampf(F8 + F11);
++	    F9 = vu_clampf(F9 + F12);
++	    F10 = vu_clampf(F10 + F13);
++	    d[0] = F8; d[1] = F9; d[2] = F10;
++	}
+ #else
+ 	{ /* asm2c */
+ 	    float F8 = 0.0f, F9 = 0.0f, F10 = 0.0f, F11 = 0.0f, F12 = 0.0f, F13 = 0.0f;
+@@ -2117,6 +2353,7 @@ void	njAddVector(NJS_VECTOR *vd, NJS_VECTOR *vs)
+ 	    EE_SWF((op0.w[0] + (uint32_t)(offsetof(NJS_VECTOR, z))), F10);
+ 	}
+ #endif
++#endif
+ }
+ 
+ // 100% matching!
+@@ -2144,6 +2381,18 @@ void	njSubVector(NJS_VECTOR *vd, NJS_VECTOR *vs)
+     .set reorder
+     " : : "r"(vd), "r"(vs) : 
+     );
++#else
++#ifdef __LP64__
++	{ /* asm2c on LP64: whole pointers; scalar float ops copied verbatim */
++	    float* d = (float*)vd;
++	    const float* s = (const float*)vs;
++	    float F8 = d[0], F9 = d[1], F10 = d[2];
++	    float F11 = s[0], F12 = s[1], F13 = s[2];
++	    F8 = vu_clampf(F8 - F11);
++	    F9 = vu_clampf(F9 - F12);
++	    F10 = vu_clampf(F10 - F13);
++	    d[0] = F8; d[1] = F9; d[2] = F10;
++	}
+ #else
+ 	{ /* asm2c */
+ 	    float F8 = 0.0f, F9 = 0.0f, F10 = 0.0f, F11 = 0.0f, F12 = 0.0f, F13 = 0.0f;
+@@ -2165,6 +2414,7 @@ void	njSubVector(NJS_VECTOR *vd, NJS_VECTOR *vs)
+ 	    EE_SWF((op0.w[0] + (uint32_t)(offsetof(NJS_VECTOR, z))), F10);
+ 	}
+ #endif
++#endif
+ }
+ 
+ // 100% matching!
+@@ -2208,6 +2458,26 @@ void	njCalcVector(NJS_MATRIX *m, NJS_VECTOR *vs, NJS_VECTOR *vd)
+     .set reorder
+     " : : "r"(m), "r"(vs), "r"(vd) : 
+     );
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: vs is a caller stack vector (bhMakeCameraVector's local `pos`);
++       keep all pointers whole. The block is a 12-byte read, three 16-byte matrix
++       reads, and a 12-byte write; the VU sequence is copied verbatim. */
++    {
++        ee_reg R8 = {{0}};
++        memcpy(&R8, vs, 12);
++        R8.w[3] = 0;
++        vu_load_vf(4, &R8);
++        vu_load_vf(7, (const char*)m + 0);
++        vu_load_vf(8, (const char*)m + 16);
++        vu_load_vf(9, (const char*)m + 32);
++        vu_upper(U_MULA, 14, 0, 7, 4, BC_X);
++        vu_upper(U_MADDA, 14, 0, 8, 4, BC_Y);
++        vu_upper(U_MADD, 14, 18, 9, 4, BC_Z);
++        vu_store_vf(&R8, 18);
++        memcpy(vd, &R8, 8);
++        memcpy((char*)vd + 8, (char*)&R8 + 8, 4);
++    }
+ #else
+     { /* asm2c */
+         ee_reg R8 = {{0}}, R9 = {{0}};
+@@ -2235,6 +2505,7 @@ void	njCalcVector(NJS_MATRIX *m, NJS_VECTOR *vs, NJS_VECTOR *vd)
+         EE_SW((op2.w[0] + (uint32_t)(8)), R9.d[0]);
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching!
+@@ -2282,6 +2553,27 @@ Float	njUnitVector(NJS_VECTOR *v)
+     .set reorder
+     " : "=r"(ret) : "r"(v) : 
+     );
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: v may be a caller stack vector; keep it whole. 12-byte
++       read/write, VU sequence copied verbatim (including the rsqrt/Q pipe). */
++    {
++        ee_reg R8 = {{0}}, R10 = {{0}}, R2 = {{0}};
++        memcpy(&R8, v, 12);
++        R8.w[3] = 0;
++        vu_load_vf(4, &R8);
++        vu_upper(U_MUL, 14, 5, 4, 4, BC_NONE);
++        vu_upper(U_ADD, 8, 5, 5, 5, BC_Y);
++        vu_upper(U_ADD, 8, 5, 5, 5, BC_Z);
++        vu_rsqrt(0, 3, 5, 0);
++        vu_upper(U_MUL, 14, 6, 4, 0, BC_Q);
++        vu_upper(U_MUL, 8, 7, 5, 0, BC_Q);
++        vu_store_vf(&R10, 6);
++        memcpy(v, &R10, 8);
++        memcpy((char*)v + 8, (char*)&R10 + 8, 4);
++        vu_store_vf(&R2, 7);
++        ret = ee_u2f(R2.w[0]);
++    }
+ #else
+     { /* asm2c */
+         ee_reg R2 = {{0}}, R8 = {{0}}, R9 = {{0}}, R10 = {{0}}, R11 = {{0}};
+@@ -2309,6 +2601,7 @@ Float	njUnitVector(NJS_VECTOR *v)
+         op0.f[0] = ee_u2f(R2.w[0]);
+         ret = op0.f[0];
+     }
++#endif
+ #endif
+ 
+     return ret;
+@@ -2349,6 +2642,21 @@ Float	njScalor(NJS_VECTOR *v)
+     .set reorder
+     " : "=r"(ret) : "r"(v) : 
+     );
++#else
++#ifdef __LP64__
++    { /* asm2c on LP64: whole pointer; 12-byte vertex read, VU sequence verbatim */
++        ee_reg R8 = {{0}}, R2 = {{0}};
++        memcpy(&R8, v, 12);
++        R8.w[3] = 0;
++        vu_load_vf(4, &R8);
++        vu_upper(U_MUL, 14, 5, 4, 4, BC_NONE);
++        vu_upper(U_ADD, 8, 5, 5, 5, BC_Y);
++        vu_upper(U_ADD, 8, 5, 5, 5, BC_Z);
++        vu_sqrt(5, 0);
++        vu_upper(U_ADD, 8, 6, 0, 0, BC_Q);
++        vu_store_vf(&R2, 6);
++        ret = ee_u2f(R2.w[0]);
++    }
+ #else
+     { /* asm2c */
+         ee_reg R2 = {{0}}, R8 = {{0}}, R9 = {{0}};
+@@ -2370,6 +2678,7 @@ Float	njScalor(NJS_VECTOR *v)
+         op0.f[0] = ee_u2f(R2.w[0]);
+         ret = op0.f[0];
+     }
++#endif
+ #endif
+ 
+     return ret;
+@@ -2404,6 +2713,19 @@ Float	njScalor2(NJS_VECTOR *v)
+     .set reorder
+     " : "=r"(ret) : "r"(v) : 
+     );
++#else
++#ifdef __LP64__
++    { /* asm2c on LP64: whole pointer; 12-byte vertex read, VU sequence verbatim */
++        ee_reg R8 = {{0}}, R2 = {{0}};
++        memcpy(&R8, v, 12);
++        R8.w[3] = 0;
++        vu_load_vf(4, &R8);
++        vu_upper(U_MUL, 14, 5, 4, 4, BC_NONE);
++        vu_upper(U_ADD, 8, 5, 5, 5, BC_Y);
++        vu_upper(U_ADD, 8, 6, 5, 5, BC_Z);
++        vu_store_vf(&R2, 6);
++        ret = ee_u2f(R2.w[0]);
++    }
+ #else
+     { /* asm2c */
+         ee_reg R2 = {{0}}, R8 = {{0}}, R9 = {{0}};
+@@ -2423,6 +2745,7 @@ Float	njScalor2(NJS_VECTOR *v)
+         op0.f[0] = ee_u2f(R2.w[0]);
+         ret = op0.f[0];
+     }
++#endif
+ #endif
+ 
+     return ret;
+@@ -2478,6 +2801,29 @@ void	njProjectScreen(NJS_MATRIX *m, NJS_POINT3 *p3, NJS_POINT2 *p2)
+     .set reorder
+     " : : "r"(p2), "r"(&Point), "f"(_nj_screen_.dist) : 
+     );
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: p2 and the local Point are caller stack buffers; keep both
++       whole. 8-byte write to p2 (NJS_POINT2 x/y) + 4-byte z write to Point. */
++    {
++        ee_reg R8 = {{0}}, R9 = {{0}}, R10 = {{0}};
++        ee_reg op2 = {{0}};
++        op2.f[0] = (float)(_nj_screen_.dist);
++        R8.sd[0] = (int32_t)(ee_f2u(op2.f[0]));
++        vu_load_vf(4, &R8);
++        vu_div(4, 0, 18, 2);
++        R9.sd[0] = EE_LW((uint32_t)(uintptr_t)&fNaViwOffsetX);
++        R10.sd[0] = EE_LW((uint32_t)(uintptr_t)&fNaViwOffsetY);
++        vu_load_vf(5, &R9);
++        vu_load_vf(6, &R10);
++        vu_upper(U_ADD, 2, 8, 0, 0, BC_Q);
++        vu_upper(U_MUL, 12, 7, 18, 0, BC_Q);
++        vu_upper(U_ADD, 8, 8, 7, 5, BC_X);
++        vu_upper(U_ADD, 4, 8, 7, 6, BC_X);
++        vu_store_vf(&R8, 8);
++        memcpy(p2, &R8, 8);
++        *(uint32_t*)((char*)&Point + 8) = R8.w[2];
++    }
+ #else
+     { /* asm2c */
+         ee_reg R8 = {{0}}, R9 = {{0}}, R10 = {{0}};
+@@ -2505,6 +2851,7 @@ void	njProjectScreen(NJS_MATRIX *m, NJS_POINT3 *p3, NJS_POINT2 *p2)
+         EE_SW((op1.w[0] + (uint32_t)(8)), R9.d[0]);
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching! 
+@@ -2561,6 +2908,31 @@ Float	njOuterProduct(NJS_VECTOR *v1, NJS_VECTOR *v2, NJS_VECTOR *ov)
+     .set reorder
+     " : "=r"(ret) : "r"(v1), "r"(v2), "r"(ov) : 
+     );
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: whole pointers, two 12-byte vector reads and one 12-byte
++       write; VU sequence copied verbatim. */
++    {
++        ee_reg R8 = {{0}}, R10 = {{0}}, R2 = {{0}};
++        memcpy(&R8, v1, 12);
++        R8.w[3] = 0;
++        memcpy(&R10, v2, 12);
++        R10.w[3] = 0;
++        vu_load_vf(4, &R8);
++        vu_load_vf(5, &R10);
++        vu_upper(U_OPMULA, 14, 0, 4, 5, BC_NONE);
++        vu_upper(U_OPMSUB, 14, 6, 5, 4, BC_NONE);
++        vu_upper(U_MUL, 14, 7, 6, 6, BC_NONE);
++        vu_upper(U_ADD, 8, 7, 7, 7, BC_Y);
++        vu_upper(U_ADD, 8, 7, 7, 7, BC_Z);
++        vu_sqrt(7, 0);
++        vu_store_vf(&R8, 6);
++        memcpy(ov, &R8, 8);
++        memcpy((char*)ov + 8, (char*)&R8 + 8, 4);
++        vu_upper(U_ADD, 8, 8, 0, 0, BC_Q);
++        vu_store_vf(&R2, 8);
++        ret = ee_u2f(R2.w[0]);
++    }
+ #else
+ 	{ /* asm2c */
+ 	    ee_reg R2 = {{0}}, R8 = {{0}}, R9 = {{0}}, R10 = {{0}}, R11 = {{0}};
+@@ -2598,6 +2970,7 @@ Float	njOuterProduct(NJS_VECTOR *v1, NJS_VECTOR *v2, NJS_VECTOR *ov)
+ 	    op0.f[0] = ee_u2f(R2.w[0]);
+ 	    ret = op0.f[0];
+ 	}
++#endif
+ #endif
+ 
+     return ret;
+@@ -2639,6 +3012,23 @@ Float	njInnerProduct(NJS_VECTOR *v1, NJS_VECTOR *v2)
+     .set reorder
+     " : "=r"(ret) : "r"(v1), "r"(v2) : 
+     );
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: whole pointers; two 12-byte vector reads, VU verbatim */
++    {
++        ee_reg R8 = {{0}}, R10 = {{0}}, R2 = {{0}};
++        memcpy(&R8, v1, 12);
++        R8.w[3] = 0;
++        memcpy(&R10, v2, 12);
++        R10.w[3] = 0;
++        vu_load_vf(4, &R8);
++        vu_load_vf(5, &R10);
++        vu_upper(U_MUL, 14, 6, 4, 5, BC_NONE);
++        vu_upper(U_ADD, 8, 6, 6, 6, BC_Y);
++        vu_upper(U_ADD, 8, 14, 6, 6, BC_Z);
++        vu_store_vf(&R2, 14);
++        ret = ee_u2f(R2.w[0]);
++    }
+ #else
+ 	{ /* asm2c */
+ 	    ee_reg R2 = {{0}}, R8 = {{0}}, R9 = {{0}}, R10 = {{0}}, R11 = {{0}};
+@@ -2665,6 +3055,7 @@ Float	njInnerProduct(NJS_VECTOR *v1, NJS_VECTOR *v2)
+ 	    op0.f[0] = ee_u2f(R2.w[0]);
+ 	    ret = op0.f[0];
+ 	}
++#endif
+ #endif
+ 
+     return ret;
+@@ -2854,6 +3245,28 @@ void njRotTransPers(NJS_POINT3* pPoint, NJS_SCRVECTOR* pScreen)
+     .set reorder
+     " : : "r"(pPoint), "r"(pScreen), "f"(_nj_screen_.dist) : 
+     );
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: pScreen is a caller stack buffer; keep it whole. The
++       sdl/sdr + sw write is 8 + 4 bytes (x/y then iz). VU verbatim. */
++    {
++        ee_reg R8 = {{0}}, R9 = {{0}}, R10 = {{0}};
++        vu_div(0, 3, 18, 2);
++        R8.sd[0] = (int32_t)(ee_f2u((float)(_nj_screen_.dist)));
++        R9.sd[0] = EE_LW((uint32_t)(uintptr_t)&fNaViwOffsetX);
++        R10.sd[0] = EE_LW((uint32_t)(uintptr_t)&fNaViwOffsetY);
++        vu_load_vf(4, &R8);
++        vu_load_vf(5, &R9);
++        vu_load_vf(6, &R10);
++        vu_upper(U_MUL, 8, 8, 4, 0, BC_Q);
++        vu_upper(U_ADD, 2, 14, 0, 0, BC_Q);
++        vu_upper(U_MUL, 12, 8, 18, 8, BC_X);
++        vu_upper(U_ADD, 8, 14, 8, 5, BC_X);
++        vu_upper(U_ADD, 4, 14, 8, 6, BC_X);
++        vu_store_vf(&R10, 14);
++        memcpy(pScreen, &R10, 8);
++        *(uint32_t*)((char*)pScreen + offsetof(NJS_SCRVECTOR, iz)) = R10.w[2];
++    }
+ #else
+     { /* asm2c */
+         ee_reg R8 = {{0}}, R9 = {{0}}, R10 = {{0}}, R11 = {{0}};
+@@ -2879,6 +3292,7 @@ void njRotTransPers(NJS_POINT3* pPoint, NJS_SCRVECTOR* pScreen)
+         ee_sdr((op1.w[0] + (uint32_t)(0)), R10.d[0]);
+         EE_SW((op1.w[0] + (uint32_t)(offsetof(NJS_SCRVECTOR, iz))), R11.d[0]);
+     }
++#endif
+ #endif
+ 
+     pScreen->fog = njCalcFogPower(pScreen->z);
+@@ -2941,6 +3355,31 @@ void njPers(NJS_SCRVECTOR* pScreen)
+     .set reorder
+     " : : "r"(pScreen), "f"(_nj_screen_.dist) : 
+     );
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: pScreen is a caller stack buffer; keep it whole. A 12-byte
++       vertex view read (vf18), the VU divide/project, then an 8+4 byte write. */
++    {
++        ee_reg R8 = {{0}}, R10 = {{0}}, R9 = {{0}};
++        memcpy(&R8, pScreen, 12);
++        R8.w[3] = 0;
++        vu_load_vf(18, &R8);
++        vu_div(0, 3, 18, 2);
++        R8.sd[0] = (int32_t)(ee_f2u((float)(_nj_screen_.dist)));
++        R9.sd[0] = EE_LW((uint32_t)(uintptr_t)&fNaViwOffsetX);
++        R10.sd[0] = EE_LW((uint32_t)(uintptr_t)&fNaViwOffsetY);
++        vu_load_vf(4, &R8);
++        vu_load_vf(5, &R9);
++        vu_load_vf(6, &R10);
++        vu_upper(U_MUL, 8, 8, 4, 0, BC_Q);
++        vu_upper(U_ADD, 2, 14, 0, 0, BC_Q);
++        vu_upper(U_MUL, 12, 8, 18, 8, BC_X);
++        vu_upper(U_ADD, 8, 14, 8, 5, BC_X);
++        vu_upper(U_ADD, 4, 14, 8, 6, BC_X);
++        vu_store_vf(&R10, 14);
++        memcpy(pScreen, &R10, 8);
++        *(uint32_t*)((char*)pScreen + 12) = R10.w[2];
++    }
+ #else
+     { /* asm2c */
+         ee_reg R8 = {{0}}, R9 = {{0}}, R10 = {{0}}, R11 = {{0}};
+@@ -2972,6 +3411,7 @@ void njPers(NJS_SCRVECTOR* pScreen)
+         EE_SW((op0.w[0] + (uint32_t)(12)), R11.d[0]);
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching!
+@@ -2993,6 +3433,11 @@ void njCopyMatrix(NJS_MATRIX* pDstMat, NJS_MATRIX* pSrcMat)
+     .set reorder
+     " : : "r"(pDstMat), "r"(pSrcMat) : 
+     );
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: whole pointers; the four lqc2 reads and four sqc2 stores
++       move exactly 64 bytes (same as njSetMatrix / njGetMatrix). */
++    memcpy(pDstMat, pSrcMat, 64);
+ #else
+     { /* asm2c */
+         ee_reg op0 = {{0}};
+@@ -3009,6 +3454,7 @@ void njCopyMatrix(NJS_MATRIX* pDstMat, NJS_MATRIX* pSrcMat)
+         vu_store_vf(EE_PTR((op0.w[0] + (uint32_t)(48))), 7);
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching!
 diff --git a/src/ps2/veronica/prog/ps2_NaSystem.c b/src/ps2/veronica/prog/ps2_NaSystem.c
 index 76f3e1ef..ccaa97b4 100644
 --- a/src/ps2/veronica/prog/ps2_NaSystem.c
@@ -2228,6 +3641,55 @@ index 3b6f2116..ce66fd52 100644
          
          if (p->globalIndex != -1)
          {
+diff --git a/src/ps2/veronica/prog/ps2_NinjaCnk.c b/src/ps2/veronica/prog/ps2_NinjaCnk.c
+index b00c1274..97d83770 100644
+--- a/src/ps2/veronica/prog/ps2_NinjaCnk.c
++++ b/src/ps2/veronica/prog/ps2_NinjaCnk.c
+@@ -865,6 +865,12 @@ static int njCnkDrawModelLocalMod_(NJS_CNK_MODEL* pModel);
+ int njCnkDrawModelLocalMod(NJS_CNK_MODEL* pModel)
+ {
+     int r;
++#if defined(TARGET_PC) && defined(__LP64__)
++    /* The LP64 disc unpack maps an object's 0xFFFFFFFF model sentinel to NULL
++       (lp64_realize.c); the original 32-bit in-place tree never had a host
++       NULL here. Skip such an object instead of dereferencing it. */
++    if (pModel == NULL) return 0;
++#endif
+     pc_mesh_begin(pModel);
+     r = njCnkDrawModelLocalMod_(pModel);
+     pc_mesh_end();
+@@ -1471,6 +1477,23 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
+     .set reorder
+     " : : "r"(v) : "$v1", "memory" 
+     );
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: v is a caller stack array (float v[11][4]); keep the whole
++       pointer. The eleven lqc2 reads are 16 bytes each. */
++    {
++        vu_load_vf(4, (const char*)v + 0);
++        vu_load_vf(5, (const char*)v + 16);
++        vu_load_vf(6, (const char*)v + 32);
++        vu_load_vf(7, (const char*)v + 48);
++        vu_load_vf(8, (const char*)v + 64);
++        vu_load_vf(9, (const char*)v + 80);
++        vu_load_vf(10, (const char*)v + 96);
++        vu_load_vf(11, (const char*)v + 112);
++        vu_load_vf(12, (const char*)v + 128);
++        vu_load_vf(13, (const char*)v + 144);
++        vu_load_vf(14, (const char*)v + 160);
++    }
+ #else
+     { /* asm2c */
+         ee_reg R3 = {{0}};
+@@ -1489,6 +1512,7 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
+         vu_load_vf(13, EE_PTR((R3.w[0] + (uint32_t)(144))));
+         vu_load_vf(14, EE_PTR((R3.w[0] + (uint32_t)(160))));
+     }
++#endif
+ #endif 
+         
+     pCnk = (CHUNK_HEAD*)((int)pCnk | 0x30000000);
 diff --git a/src/ps2/veronica/prog/ps2_SaveScreen.c b/src/ps2/veronica/prog/ps2_SaveScreen.c
 index 27eae686..0ef7f358 100644
 --- a/src/ps2/veronica/prog/ps2_SaveScreen.c
@@ -2252,6 +3714,67 @@ index 27eae686..0ef7f358 100644
      bhFontScaleSet(1.0f, 1.0f, 1.0f);
  }
  
+diff --git a/src/ps2/veronica/prog/ps2_Vu1Strip.c b/src/ps2/veronica/prog/ps2_Vu1Strip.c
+index 11f7aae1..5381c91f 100644
+--- a/src/ps2/veronica/prog/ps2_Vu1Strip.c
++++ b/src/ps2/veronica/prog/ps2_Vu1Strip.c
+@@ -430,6 +430,20 @@ int _Clip_ViewVolume(float* clip, float local_clip[4], float* vertex)
+         cfc2         v0, vi18
+     " : : "r"(clip), "r"(vertex) : 
+     );
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: clip/vertex are caller stack buffers; keep them whole.
++       lqc2/sqc2 move 16 bytes; VU sequence copied verbatim. */
++    {
++        vu_load_vf(4, vertex);
++        vu_upper(U_MULA, 15, 0, 24, 4, BC_X);
++        vu_upper(U_MADDA, 15, 0, 25, 4, BC_Y);
++        vu_upper(U_MADDA, 15, 0, 26, 4, BC_Z);
++        vu_upper(U_MADD, 15, 5, 27, 0, BC_W);
++        vu_clipw(5, 5);
++        vu_store_vf(clip, 5);
++        return (int)vu_cfc2(18); /* the asm returned in v0 */
++    }
+ #else
+     { /* asm2c */
+         ee_reg R2 = {{0}};
+@@ -448,6 +462,7 @@ int _Clip_ViewVolume(float* clip, float local_clip[4], float* vertex)
+         return R2.sw[0]; /* the asm returned in v0 */
+     }
+ #endif
++#endif
+ }
+ 
+ // 100% matching!
+@@ -1552,6 +1567,19 @@ int _Clip_Screen(float* clip)
+         cfc2       %0, vi18
+     " : "=r"(ret) : "f"(clip), "r"(&para) :
+     );
++#else
++#ifdef __LP64__
++    /* asm2c on LP64: clip is a caller stack buffer; keep it whole. `para` is a
++       static array (window address). VU sequence copied verbatim. */
++    {
++        vu_load_vf(4, clip);
++        vu_load_vf(5, (const char*)&para + 0);
++        vu_load_vf(6, (const char*)&para + 16);
++        vu_upper(U_SUB, 12, 4, 4, 5, BC_NONE);
++        vu_upper(U_MUL, 15, 4, 4, 6, BC_NONE);
++        vu_clipw(4, 5);
++        ret = (int)vu_cfc2(18);
++    }
+ #else
+     { /* asm2c */
+         ee_reg op0 = {{0}};
+@@ -1569,6 +1597,7 @@ int _Clip_Screen(float* clip)
+         op0.sd[0] = (int32_t)(vu_cfc2(18));
+         ret = (__typeof__(ret))(uintptr_t)op0.w[0];
+     }
++#endif
+ #endif
+ 
+     return ret;
 diff --git a/src/ps2/veronica/prog/ps2_dummy.c b/src/ps2/veronica/prog/ps2_dummy.c
 index c7463508..a308096b 100644
 --- a/src/ps2/veronica/prog/ps2_dummy.c
@@ -2309,6 +3832,60 @@ index abca1d42..5758a56d 100644
  
  // 100% matching! 
  static int Tim2CalcBufWidth(int psm, int w)
+diff --git a/src/ps2/veronica/prog/ps2_sg_gd.c b/src/ps2/veronica/prog/ps2_sg_gd.c
+index f9fcfe1e..2de7fea0 100644
+--- a/src/ps2/veronica/prog/ps2_sg_gd.c
++++ b/src/ps2/veronica/prog/ps2_sg_gd.c
+@@ -11,6 +11,18 @@ static GDFS_WORK* __gds_fs_work;
+ GDFS_DIRREC_ENT* __gdfs_dir_ent;
+ GDFS_DIRREC_TBL* __current_dir;
+ 
++#if defined(TARGET_PC) && defined(__LP64__)
++/* LP64 (Android arm64): GDFS_HANDLE's pointer fields grew it from 84 to 112 bytes, so the
++   PS2's in-buffer handle table at +4308 no longer fits gdlib.c's 5,484-byte work
++   allocation: the 14 handles overran 332 bytes past the block and destroyed the next
++   heap block's header, killing the syMalloc chain (freemem = NULL, then
++   ReadFileEx(DISCID.BIN, NULL) crashed the retail boot). The port keeps the handles in
++   their own storage instead; 32-bit hosts keep the original in-buffer table.
++   (If a Windows x64 build is ever contemplated, widen the predicate to also match
++   _WIN64: __LP64__ alone would put it back on the overflowing in-buffer path.) */
++static GDFS_HANDLE pc_gdfs_handles[16] __attribute__((aligned(64)));
++#endif
++
+ // 100% matching! 
+ void  gdFsClose(GDFS gdfs)
+ {
+@@ -126,7 +138,11 @@ Sint32  gdFsInit(Sint32 max_open, void *gdfs_work, Sint32 max_dirent, void *dirb
+         0
+     }; 
+     
++#if defined(TARGET_PC) && defined(__LP64__)
++    __file_handle = pc_gdfs_handles;   /* LP64: out of the 5,484-byte work buffer (see above) */
++#else
+     __file_handle = (GDFS_HANDLE*)((int)gdfs_work + 4308);
++#endif
+     
+     __gds_fs_work = gdfs_work;
+     
+diff --git a/src/ps2/veronica/prog/ps2_sg_sd.c b/src/ps2/veronica/prog/ps2_sg_sd.c
+index 4232ad1a..a5d8c498 100644
+--- a/src/ps2/veronica/prog/ps2_sg_sd.c
++++ b/src/ps2/veronica/prog/ps2_sg_sd.c
+@@ -218,7 +218,13 @@ SDE_ERR	sdDrvInit( SDMEMBLK handle)
+     {
+         printf("IOP memory 0x%08x(size:%d) is allocated\n", iop_zero_buff, 2048);
+         
+-        _0_buf = (char*)((int)&trans_0_buff[127] & ~0x7F);
++        _0_buf = (char*)
++#if defined(TARGET_PC) && defined(__LP64__)
++            ((uintptr_t)&trans_0_buff[127] & ~(uintptr_t)0x7F)   /* LP64: a stack address does not survive (int) truncation; 32-bit hosts keep the original */
++#else
++            ((int)&trans_0_buff[127] & ~0x7F)
++#endif
++        ;
+         
+         memset(_0_buf, 0, 2048);
+         
 diff --git a/src/ps2/veronica/prog/ps2_texture.c b/src/ps2/veronica/prog/ps2_texture.c
 index 19be0f66..2d48b612 100644
 --- a/src/ps2/veronica/prog/ps2_texture.c

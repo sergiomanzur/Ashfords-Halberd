@@ -548,6 +548,7 @@ int main(int argc, char** argv)
 
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD))
         host_fatal("SDL_Init: %s", SDL_GetError());
+    { extern void crash_log_ready(void); crash_log_ready(); }   /* Android: the crash report has a writable home before any of this can die */
     bind_apply_source();   /* Gamepad only: gamepads also in the background */
 
     if (!skip_launcher) {

@@ -165,7 +165,7 @@ static CUT_WORK* lp64_cut_unpack(const unsigned char* disc, unsigned count, cons
         d->type = disc[1];
         d->flr_no = disc[2];
         d->ctab_n = disc[3];
-        d->cuttp = (CUT_WRK*)reloff(rdtp, rd32(disc + 4) * 4u);   /* &rdtp[idx] */
+        d->cuttp = (CUT_WRK*)reloff(rdtp, rd32(disc + 4));   /* &rdtp[byte offset] */
         memcpy(&d->cx, disc + 8, 0x2A0);   /* cx..cd, cam[2], exd[256]: no pointers */
     }
     return arr;
@@ -211,7 +211,7 @@ static EVC_WORK* lp64_evc_unpack(const unsigned char* disc, unsigned count)
 
 int lp64_room_rom(ROM_WORK* rom, const unsigned char* rdtp)
 {
-    const unsigned char* disc = rdtp + rd32(rdtp + 16) * 4u;   /* &rdtp[rd32(rdtp+16)] */
+    const unsigned char* disc = rdtp + rd32(rdtp + 16);   /* &rdtp[byte offset] */
     EVT_WORK* evt;
     unsigned cut_n, lgt_n, evc_n;
     unsigned i;

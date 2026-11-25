@@ -90,6 +90,7 @@ static void last_dump(void (*out)(void*, const char*, size_t), void* ud)
 #endif
 
 static int log_fd = -1, console_fd = 2, pipe_rd = -1;
+static int crash_fd = -1;   /* Android: pre-opened in the app's user-data dir (the cwd may be unwritable) */
 static uint64_t t0;
 
 static void write_all(int fd, const char* p, size_t n)
@@ -170,6 +171,10 @@ static void on_fatal(int sig, siginfo_t* si, void* uc)
     int fd;
     long tid = syscall(SYS_gettid);
     char msg[256], *p = msg;
+#if defined(__aarch64__)
+    char aux[640];
+    size_t aux_len = 0;
+#endif
     if (__atomic_exchange_n(&entered, 1, __ATOMIC_ACQ_REL)) for (;;) pause();   /* another thread is writing the report; the process ends with it */
     /* first what write() alone can give: the signal, the address, the thread */
     p = put_s(p, "\nfatal signal "); p = put_u(p, (unsigned)sig, 10);
@@ -188,11 +193,55 @@ static void on_fatal(int sig, siginfo_t* si, void* uc)
     p = put_s(p, tid == getpid() ? " (main)\n" : "\n");
     write_all(console_fd, msg, (size_t)(p - msg));
     if (log_fd >= 0) write_all(log_fd, msg, (size_t)(p - msg));
+#if defined(__aarch64__)
+    /* registers the unwinder cannot recover when optimized code omits frame pointers:
+       the link register plus the raw stack words under sp, so the real callers can be
+       symbolized from the report. Captured here, written to every sink below. */
+    {
+        ucontext_t* ucx = (ucontext_t*)uc;
+        char* r = aux;
+        int i;
+        r = put_s(r, "regs: lr 0x"); r = put_u(r, (unsigned long)ucx->uc_mcontext.regs[30], 16);
+        r = put_s(r, " sp 0x"); r = put_u(r, (unsigned long)ucx->uc_mcontext.sp, 16);
+        r = put_s(r, " fp 0x"); r = put_u(r, (unsigned long)ucx->uc_mcontext.regs[29], 16);
+        r = put_s(r, " x0 0x"); r = put_u(r, (unsigned long)ucx->uc_mcontext.regs[0], 16);
+        r = put_s(r, " x1 0x"); r = put_u(r, (unsigned long)ucx->uc_mcontext.regs[1], 16);
+        r = put_s(r, " x19 0x"); r = put_u(r, (unsigned long)ucx->uc_mcontext.regs[19], 16);
+        r = put_s(r, " x20 0x"); r = put_u(r, (unsigned long)ucx->uc_mcontext.regs[20], 16);
+        *r++ = '\n';
+        for (i = 0; i < 32; i++) {   /* sp is valid memory: the alt stack keeps it mapped */
+            unsigned long w = *(const unsigned long*)((const unsigned char*)ucx->uc_mcontext.sp + 8 * i);
+            r = put_s(r, "wsp"); *r++ = (char)('0' + i / 10); *r++ = (char)('0' + i % 10);
+            r = put_s(r, " 0x"); r = put_u(r, w, 16); *r++ = '\n';
+        }
+        aux_len = (size_t)(r - aux);
+        write_all(console_fd, aux, aux_len);
+        if (log_fd >= 0) write_all(log_fd, aux, aux_len);
+    }
+#endif
     if ((fd = open(crash_path, O_WRONLY | O_CREAT | O_TRUNC, 0644)) >= 0) {
         write_all(fd, crash_head, strlen(crash_head));
         write_all(fd, msg + 1, (size_t)(p - msg) - 1);
+#if defined(__aarch64__)
+        if (aux_len) write_all(fd, aux, aux_len);
+#endif
         fsync(fd);
     }
+#if defined(__ANDROID__)
+    else {
+        /* the game can die before the working directory became writable: the
+           pre-opened report in the app's user-data directory (crash_log_ready) */
+        fd = crash_fd;
+        if (fd >= 0) {
+            write_all(fd, crash_head, strlen(crash_head));
+            write_all(fd, msg + 1, (size_t)(p - msg) - 1);
+#if defined(__aarch64__)
+            if (aux_len) write_all(fd, aux, aux_len);
+#endif
+            fsync(fd);
+        }
+    }
+#endif
     /* then the backtrace (backtrace() was primed at start: no library loading here) and the last messages */
 #if defined(__ANDROID__)
     {
@@ -280,6 +329,24 @@ void crash_init(const char* version)
     sa.sa_sigaction = on_fatal;
     sa.sa_flags = SA_ONSTACK | SA_SIGINFO;
     for (unsigned i = 0; i < sizeof(sigs) / sizeof(sigs[0]); i++) sigaction(sigs[i], &sa, NULL);
+}
+
+/* Android, once SDL is up (host.c, after SDL_Init): the working directory may
+   never become writable before a crash, so the crash report is pre-opened in
+   the app's user-data directory, where a player's bug report can reach it. */
+void crash_log_ready(void)
+{
+#if defined(__ANDROID__)
+    if (crash_fd < 0) {
+        char* base = SDL_GetPrefPath("", "AshfordsHalberd");
+        if (base) {
+            char path[256];
+            if (SDL_snprintf(path, sizeof path, "%sAshfordsHalberd-crash.log", base) < (int)sizeof path)
+                crash_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            SDL_free(base);
+        }
+    }
+#endif
 }
 
 void log_start(const char* path)
