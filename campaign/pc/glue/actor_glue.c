@@ -28,6 +28,7 @@
 #include <ps2/veronica/prog/binfunc.h>
 #include <ps2/veronica/prog/njplus.h>
 #include <ps2/veronica/prog/expand.h>
+#include "lp64_realize.h"
 #include <ps2/veronica/prog/Motion.h>
 #include <ps2/veronica/prog/MdlPut.h>
 #include <ps2/veronica/prog/ps2_texture.h>
@@ -825,17 +826,17 @@ static const unsigned char* end;        /* of the room file in `room` */
 static int room_ok(uint32_t n)
 {
     const RDT_WORK* hdr = (const RDT_WORK*)room;
-    const ROM_WORK* rw;
+    const unsigned char* rw;
     const ETTY_WORK* recs;
     uint32_t i, k = 1, ene_n, cnt;
-    if (n < sizeof(RDT_WORK) || hdr->ver < 1.72f || !pc_range_ok(hdr->hed00, sizeof(ROM_WORK), n)) return 0;
-    rw = (const ROM_WORK*)(room + hdr->hed00);
-    ene_n = (uint32_t)rw->ene_n;
-    if (!pc_range_ok((uint32_t)rw->enep, (uint64_t)ene_n * sizeof(ETTY_WORK), n) ||
-        !pc_range_ok((uint32_t)rw->effp, (uint64_t)(uint32_t)rw->eff_n * sizeof(EF_WRK), n) ||
+    if (n < sizeof(RDT_WORK) || hdr->ver < 1.72f || !pc_range_ok(hdr->hed00, LP64_ROM_DISC_SIZE, n)) return 0;
+    rw = room + hdr->hed00;   /* the disc's 32-bit ROM_WORK: read by disc offsets (LP64 layout differs) */
+    ene_n = lp64_rom_field(rw, LP64_RO_OFF_ENE_N);
+    if (!pc_range_ok(lp64_rom_field(rw, LP64_RO_OFF_ENEP), (uint64_t)ene_n * sizeof(ETTY_WORK), n) ||
+        !pc_range_ok(lp64_rom_field(rw, LP64_RO_OFF_EFFP), (uint64_t)lp64_rom_field(rw, LP64_RO_OFF_EFF_N) * sizeof(EF_WRK), n) ||
         !pc_range_ok(hdr->hed02, (uint64_t)ene_n * 4, n) || !pc_range_ok(hdr->hed04, 4, n))
         return 0;
-    recs = (const ETTY_WORK*)(room + (uint32_t)rw->enep);
+    recs = (const ETTY_WORK*)(room + lp64_rom_field(rw, LP64_RO_OFF_ENEP));
     for (i = 0; i < ene_n; i++) {
         if (rd32(room + hdr->hed02 + 4 * i) >= n) return 0;
         if (!(recs[i].flg & 0x1)) continue;
@@ -881,7 +882,7 @@ const unsigned char* actor_room_file(int rm, int* len, unsigned char** scratch, 
 int actor_find(const ActorModel* am, ActorData* out)
 {
     RDT_WORK* hdr = (RDT_WORK*)room;
-    const ROM_WORK* rw;
+    const unsigned char* rw;
     const ETTY_WORK* recs;
     const unsigned int* mdltab;
     const unsigned char* p;
@@ -891,9 +892,9 @@ int actor_find(const ActorModel* am, ActorData* out)
     memset(out, 0, sizeof(*out));
     snprintf(name, sizeof(name), "RM_%04d.RDX", am->room);
     if (!load_rdx(am->room)) return 0;
-    rw = (const ROM_WORK*)(room + hdr->hed00);
-    recs = (const ETTY_WORK*)(room + (unsigned int)rw->enep);
-    n = rw->ene_n;
+    rw = room + hdr->hed00;   /* the disc's 32-bit ROM_WORK (LP64 layout differs) */
+    recs = (const ETTY_WORK*)(room + lp64_rom_field(rw, LP64_RO_OFF_ENEP));
+    n = (int)lp64_rom_field(rw, LP64_RO_OFF_ENE_N);
     if (am->rec >= n || recs[am->rec].id != am->id || recs[am->rec].mdlver != am->mdlver || !(recs[am->rec].flg & 0x1)) {
         host_log("actor: %s: record %d of %s is not type %d version %d\n", am->name, am->rec, name, am->id, am->mdlver);
         return 0;
@@ -925,14 +926,14 @@ int actor_find(const ActorModel* am, ActorData* out)
 const unsigned char* actor_fx_tex(int rm, int fx)
 {
     const RDT_WORK* hdr = (const RDT_WORK*)room;
-    const ROM_WORK* rw;
+    const unsigned char* rw;
     const EF_WRK* e;
     const unsigned char* texdat;
     int ids[64], m = 0, i, j, k = -1, cnt;
     if (!load_rdx(rm)) return NULL;
-    rw = (const ROM_WORK*)(room + hdr->hed00);
-    e = (const EF_WRK*)(room + (unsigned int)rw->effp);
-    for (i = 0; i < rw->eff_n && m < 64; i++)
+    rw = room + hdr->hed00;   /* the disc's 32-bit ROM_WORK (LP64 layout differs) */
+    e = (const EF_WRK*)(room + lp64_rom_field(rw, LP64_RO_OFF_EFFP));
+    for (i = 0; i < (int)lp64_rom_field(rw, LP64_RO_OFF_EFF_N) && m < 64; i++)
         if ((e[i].id >= 30 && e[i].id < 100) || e[i].id >= 400) {
             for (j = 0; j < m && ids[j] != e[i].id; j++);
             if (j < m) continue;

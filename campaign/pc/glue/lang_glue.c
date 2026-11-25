@@ -12,6 +12,7 @@
 #include "../src/host/fileio.h"
 #include "../src/import/import.h"
 #include "../include/pc_parse.h"
+#include "lp64_realize.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -966,7 +967,7 @@ void lang_snapshot_after_restore(void)
     uintptr_t raddr = (uintptr_t)sys->rdtp;
     if (raddr < 0x30000000u || raddr >= 0x40000000u) return;
     unsigned int hed = *(unsigned int*)(sys->rdtp + 16);
-    unsigned int off = *(unsigned int*)(sys->rdtp + hed + offsetof(ROM_WORK, mesp));
+    unsigned int off = *(unsigned int*)(sys->rdtp + hed + LP64_RO_OFF_MESP);   /* the disc's 32-bit ROM_WORK.mesp (offsetof only matches on 32-bit hosts) */
     unsigned int* us_mesp = (unsigned int*)(sys->rdtp + off);
     room_src = LF_DISC;
     rom->mesp = pc_lang_room_mes(us_mesp);

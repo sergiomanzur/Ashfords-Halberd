@@ -268,6 +268,24 @@ extern int pc_enemy_refused;       /* eneset.c: the enemy's code runs on a playe
 void  pc_enemy_mark_added(void);   /* eneset.c: sets it, the shared helper functions as they are then kept for the room's earlier children */
 void  enemy_room_finished(void);   /* room.c bhFinishRoom: enemy options (pc/glue/enemyopt_glue.c) */
 
+/* LP64 on-disc binary struct realization (pc/glue/lp64_realize.{h,c}, Android arm64).
+   On 32-bit hosts every hook is a no-op returning 0 and the game runs its original
+   in-place realize code; on LP64 the hooks unpack the disc's 32-bit structures into
+   host-layout arena copies (ROM_WORK field-exact, CUT/LGT/EVC arrays, the Ninja
+   object/model/meshset/texname/motion trees with their 0xFFFFFFFF sentinels),
+   leaving the disc bytes pristine. */
+struct ROM_WORK;
+struct ML_WORK;
+struct MN_WORK;
+int    pc_lp64_room_rom(struct ROM_WORK* rom, const unsigned char* rdtp);   /* room.c bhSetRoom: 1 = rom/cutp/lgtp/evlp/evcp/evtp unpacked */
+int    pc_lp64_active(void);                                                /* room.c: the evtp assignment is done */
+ptrdiff_t pc_lp64_evt_offset(unsigned evt_id);                              /* event.c Event_init: the per-event offset word */
+int    pc_lp64_mlb_room(void* bin_datP, struct ML_WORK* mlwP);              /* bhMlbBinRealize call sites tied to the room's lifetime */
+int    pc_lp64_mlb_session(void* bin_datP, struct ML_WORK* mlwP);           /* dread.c player/weapon + itemview.c: kept across rooms */
+int    pc_lp64_mnb_room(void* bin_datP, struct MN_WORK* mnwP);              /* bhMnbBinRealize: room motions */
+int    pc_lp64_mnb_session(void* bin_datP, struct MN_WORK* mnwP);          /* dread.c player/weapon motions */
+void   pc_lp64_room_reset(void);                                            /* room.c bhSetRoom start: the room arena and its dedup go */
+
 /* Single-player title menu pointer controls and EXIT row (pc/glue/options_glue.c). */
 void  pc_title_menu_init(void);                  /* Adv_BioCvTitle mode 0: append EXIT row */
 void  pc_title_plates(int cursor, int n, float fade, int flag);   /* DisplayGameModePlate */

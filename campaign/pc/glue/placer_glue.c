@@ -19,6 +19,7 @@
 #include <ps2/veronica/prog/binfunc.h>
 #include <ps2/veronica/prog/njplus.h>
 #include <ps2/veronica/prog/MdlPut.h>
+#include "lp64_realize.h"
 #include <ps2/veronica/prog/pwksub.h>
 #include <ps2/veronica/prog/hitchk.h>
 #include <ps2/veronica/prog/light.h>
@@ -80,13 +81,16 @@ static int ok_range(unsigned int off, unsigned int len) { return pc_range_ok(off
 static int chunk_len(unsigned int off)
 {
     const RDT_WORK* h = (const RDT_WORK*)rf;
-    const ROM_WORK* rw = (const ROM_WORK*)(rf + h->hed00);
+    const unsigned char* rw = rf + h->hed00;   /* the disc's 32-bit ROM_WORK (LP64 layout differs) */
     unsigned int best = (unsigned int)rlen, i, n, v;
+    unsigned int ene_n = lp64_rom_field(rw, LP64_RO_OFF_ENE_N);
+    unsigned int obj_n = lp64_rom_field(rw, LP64_RO_OFF_OBJ_N);
+    unsigned int itm_n = lp64_rom_field(rw, LP64_RO_OFF_ITM_N);
     unsigned int heads[4] = { h->hed01, h->hed02, h->hed03, h->hed04 };
     for (i = 0; i < 4; i++) if (heads[i] > off && heads[i] < best) best = heads[i];
-    n = 1 + (unsigned int)rw->ene_n + (unsigned int)(rw->obj_n > 4 ? rw->obj_n - 4 : 0) + (unsigned int)rw->itm_n;
+    n = 1 + ene_n + (obj_n > 4 ? obj_n - 4 : 0) + itm_n;
     for (i = 0; i < n && ok_range(h->hed01 + 4 * i, 4); i++) if ((v = rd32(rf + h->hed01 + 4 * i)) > off && v < best) best = v;
-    for (i = 0; i < (unsigned int)rw->ene_n + 3 && ok_range(h->hed02 + 4 * i, 4); i++)
+    for (i = 0; i < ene_n + 3 && ok_range(h->hed02 + 4 * i, 4); i++)
         if ((v = rd32(rf + h->hed02 + 4 * i)) > off && v < best) best = v;
     if (ok_range(h->hed04, 4))
         for (i = 0, n = rd32(rf + h->hed04); i < n && ok_range(h->hed04 + 4 + 4 * i, 4); i++)
@@ -347,9 +351,10 @@ static int load_type(int t)
 {
     const PlacerDef* d = &placer_defs[t];
     const RDT_WORK* h;
-    const ROM_WORK* rw;
+    const unsigned char* rw;
     const ETTY_WORK *ene, *obj, *itm;
     unsigned int mdltab, texn, ent[64];
+    unsigned int ene_n, obj_n, itm_n, enep, objp, itmp;
 #define LIST(k) (ent[k] < texn ? rd32(rf + h->hed04 + 4 + 4 * ent[k]) : 0u)
     int i, j, ne = 0, nobjs, e = 0, keep0 = keep_used, idx;
     float org[3] = { 0, 0, 0 };
@@ -360,30 +365,36 @@ static int load_type(int t)
     if (!(rf = actor_room_file(d->room, &rlen, &scratch, &scratch_cap))) goto fail;
     why = "bad room file";
     h = (const RDT_WORK*)rf;
-    if (!ok_range(h->hed00, sizeof(ROM_WORK))) goto fail;
-    rw = (const ROM_WORK*)(rf + h->hed00);
-    if (!ok_range((unsigned int)rw->enep, (unsigned int)rw->ene_n * sizeof(ETTY_WORK)) ||
-        !ok_range((unsigned int)rw->objp, (unsigned int)rw->obj_n * sizeof(ETTY_WORK)) ||
-        !ok_range((unsigned int)rw->itmp, (unsigned int)rw->itm_n * sizeof(ETTY_WORK)) || rw->obj_n > 64 || !ok_range(h->hed04, 4))
+    if (!ok_range(h->hed00, LP64_ROM_DISC_SIZE)) goto fail;
+    rw = rf + h->hed00;   /* the disc's 32-bit ROM_WORK (LP64 layout differs) */
+    ene_n = lp64_rom_field(rw, LP64_RO_OFF_ENE_N);
+    obj_n = lp64_rom_field(rw, LP64_RO_OFF_OBJ_N);
+    itm_n = lp64_rom_field(rw, LP64_RO_OFF_ITM_N);
+    enep = lp64_rom_field(rw, LP64_RO_OFF_ENEP);
+    objp = lp64_rom_field(rw, LP64_RO_OFF_OBJP);
+    itmp = lp64_rom_field(rw, LP64_RO_OFF_ITMP);
+    if (!ok_range(enep, ene_n * sizeof(ETTY_WORK)) ||
+        !ok_range(objp, obj_n * sizeof(ETTY_WORK)) ||
+        !ok_range(itmp, itm_n * sizeof(ETTY_WORK)) || obj_n > 64 || !ok_range(h->hed04, 4))
         goto fail;
-    ene = (const ETTY_WORK*)(rf + (unsigned int)rw->enep);
-    obj = (const ETTY_WORK*)(rf + (unsigned int)rw->objp);
-    itm = (const ETTY_WORK*)(rf + (unsigned int)rw->itmp);
-    for (i = 0; i < rw->ene_n; i++) ne += ene[i].flg & 0x1;
+    ene = (const ETTY_WORK*)(rf + enep);
+    obj = (const ETTY_WORK*)(rf + objp);
+    itm = (const ETTY_WORK*)(rf + itmp);
+    for (i = 0; i < (int)ene_n; i++) ne += ene[i].flg & 0x1;
     if (ne) { why = "the source room has enemies"; goto fail; }
-    nobjs = rw->obj_n > 4 ? rw->obj_n - 4 : 0;
+    nobjs = obj_n > 4 ? obj_n - 4 : 0;
     mdltab = h->hed01;
     texn = rd32(rf + h->hed04);
-    if (!ok_range(mdltab, 4 * (1 + nobjs + rw->itm_n)) || !ok_range(h->hed04 + 4, 4 * texn)) goto fail;
-    for (i = 0; i < 1 + nobjs + rw->itm_n; i++) if (!ok_range(rd32(rf + mdltab + 4 * i), 16)) goto fail;
+    if (!ok_range(mdltab, 4 * (1 + nobjs + itm_n)) || !ok_range(h->hed04 + 4, 4 * texn)) goto fail;
+    for (i = 0; i < 1 + (int)nobjs + (int)itm_n; i++) if (!ok_range(rd32(rf + mdltab + 4 * i), 16)) goto fail;
     for (i = 0; i < 64; i++) ent[i] = (unsigned int)-1;
     e = mlb_textured(rf + rd32(rf + mdltab));
-    for (i = 4; i < rw->obj_n; i++)
+    for (i = 4; i < (int)obj_n; i++)
         if (mlb_textured(obj_mlb(rf + rd32(rf + mdltab + 4 * (1 + i - 4))))) {
             for (j = 4; j < i && !(obj[j].id == obj[i].id && ent[j] != (unsigned int)-1); j++);
             ent[i] = j < i ? ent[j] : (unsigned int)e++;
         }
-    for (i = 0; i < rw->itm_n && i < 32; i++)
+    for (i = 0; i < (int)itm_n && i < 32; i++)
         if (mlb_textured(rf + rd32(rf + mdltab + 4 * (1 + nobjs + i)))) {
             for (j = 0; j < i && !(itm[j].id == itm[i].id && ent[32 + j] != (unsigned int)-1); j++);
             ent[32 + i] = j < i ? ent[32 + j] : (unsigned int)e++;
@@ -398,15 +409,15 @@ static int load_type(int t)
     if (d->kind == PLK_PIECE) {
         if (!mlb_textured(rf + rd32(rf + mdltab)) || !build_piece(d, rf + rd32(rf + mdltab), rd32(rf + h->hed04 + 4), part[t][0], org)) goto fail;
     } else if (d->kind == PLK_OBJ) {
-        if (idx >= 4 && idx < rw->obj_n && d->item && obj[idx].id != d->item) { why = "the object record is another object"; goto fail; }
-        if (idx < 4 || idx >= rw->obj_n || !build_record(rd32(rf + mdltab + 4 * (1 + idx - 4)), 1, LIST(idx), part[t][0])) goto fail;
+        if (idx >= 4 && idx < (int)obj_n && d->item && obj[idx].id != d->item) { why = "the object record is another object"; goto fail; }
+        if (idx < 4 || idx >= (int)obj_n || !build_record(rd32(rf + mdltab + 4 * (1 + idx - 4)), 1, LIST(idx), part[t][0])) goto fail;
     } else {
-        if (idx < 0 || idx >= rw->itm_n || idx >= 32 || itm[idx].id != d->item) { why = "the item record is another item"; goto fail; }
+        if (idx < 0 || idx >= (int)itm_n || idx >= 32 || itm[idx].id != d->item) { why = "the item record is another item"; goto fail; }
         if (!build_record(rd32(rf + mdltab + 4 * (1 + nobjs + idx)), 0, LIST(32 + idx), part[t][0])) goto fail;
     }
     if (d->lid >= 0) {   /* linked to node 0, where the room has it next to the body */
         O_WRK* w = &part[t][1]->w;
-        if (d->lid < 4 || d->lid >= rw->obj_n || !build_record(rd32(rf + mdltab + 4 * (1 + d->lid - 4)), 1, LIST(d->lid), part[t][1])) goto fail;
+        if (d->lid < 4 || d->lid >= (int)obj_n || !build_record(rd32(rf + mdltab + 4 * (1 + d->lid - 4)), 1, LIST(d->lid), part[t][1])) goto fail;
         w->flg = 0x80;
         w->lkwkp = (unsigned char*)&part[t][0]->w;
         w->lkono = 0;

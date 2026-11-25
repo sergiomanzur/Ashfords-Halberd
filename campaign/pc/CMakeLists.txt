@@ -383,6 +383,29 @@ target_include_directories(test_rumble PRIVATE ${CMAKE_CURRENT_BINARY_DIR} inclu
 target_link_libraries(test_rumble PRIVATE SDL3::SDL3)
 add_test(NAME rumble COMMAND test_rumble)
 
+# LP64 on-disc binary struct realization against synthetic 32-bit disc
+# fixtures (pc/glue/lp64_realize.{h,c}): portable, needs no window or SDL.
+# Compiled with the same flags the glue sees inside recvx_game (pc_prelude.h
+# force-included, Katana headers as -idirafter), so the LP64/32-bit split is
+# the one the game build uses.
+add_executable(test_lp64_realize tests/test_lp64_realize.c glue/lp64_realize.c)
+target_include_directories(test_lp64_realize PRIVATE
+    ${DECOMP}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/sdk
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ps2
+    ${CMAKE_CURRENT_SOURCE_DIR}/glue
+    ${CASEFOLD_DIR})
+target_compile_options(test_lp64_realize PRIVATE
+    "SHELL:-idirafter \"${KATANA_INC}\""
+    "SHELL:-idirafter \"${CASEFOLD_DIR}\""
+    "SHELL:-idirafter \"${DECOMP}/include/recvx-decomp-cri/cri/mwlib/include\""
+    "SHELL:-idirafter \"${DECOMP}/include/recvx-decomp-cri/cri/mwlib/ee/include\""
+    "SHELL:-include \"${CMAKE_CURRENT_SOURCE_DIR}/include/pc_prelude.h\""
+    -std=gnu11 -fno-strict-aliasing -fwrapv -fsigned-char -ffp-contract=off -fno-tree-vectorize
+)
+add_test(NAME lp64_realize COMMAND test_lp64_realize)
+
 if(NOT ASHFORD_PLATFORM_TESTS_ONLY)
 set(MOVIE_RETURN_TEST ${CMAKE_CURRENT_BINARY_DIR}/movie_return_test.inc)
 add_custom_command(OUTPUT "${MOVIE_RETURN_TEST}"

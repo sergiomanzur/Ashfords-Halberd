@@ -388,11 +388,91 @@ index 922ba8b1..9b7387bb 100644
              sys->typ_md0 = 2;
              sys->typ_md1 = 0;
              
+diff --git a/src/ps2/veronica/prog/camera.c b/src/ps2/veronica/prog/camera.c
+index b6c88042..a9e6a56f 100644
+--- a/src/ps2/veronica/prog/camera.c
++++ b/src/ps2/veronica/prog/camera.c
+@@ -5,7 +5,11 @@
+ 
+ // 100% matching!
+ void bhInitCamera() {
++#ifdef TARGET_PC
++    npSetMemory((unsigned char*)&cam, sizeof(cam), 0);   /* LP64: the struct grew; 32-bit: 0x4AC */
++#else
+     npSetMemory((unsigned char*)&cam, 0x4AC, 0);
++#endif
+     cam.flg = 0;
+     cam.ln = 0x100;
+     cam.pers = 0x2000;
+diff --git a/src/ps2/veronica/prog/door.c b/src/ps2/veronica/prog/door.c
+index 250abb95..8f78d4ac 100644
+--- a/src/ps2/veronica/prog/door.c
++++ b/src/ps2/veronica/prog/door.c
+@@ -115,7 +115,10 @@ int bhReadDoorData()
+                 
+                 if (next != -1) 
+                 {
+-                    bhMlbBinRealize(pacP, &dwP->dor_mdl);
++#ifdef TARGET_PC
++                    if (!pc_lp64_mlb_room(pacP, &dwP->dor_mdl))   /* LP64: unpacked into the room arena */
++#endif
++                        bhMlbBinRealize(pacP, &dwP->dor_mdl);
+                     
+                     pacP = (int*)((int)pacP + next);
+                     
 diff --git a/src/ps2/veronica/prog/dread.c b/src/ps2/veronica/prog/dread.c
-index 2ba1053e..8d75b59f 100644
+index 2ba1053e..fd9ea126 100644
 --- a/src/ps2/veronica/prog/dread.c
 +++ b/src/ps2/veronica/prog/dread.c
-@@ -308,6 +308,11 @@ void bhReadWeaponData()
+@@ -53,7 +53,10 @@ void bhReadPlayerData()
+             }
+             else
+             {
+-                bhMlbBinRealize(plmdlp, mdlp);
++#ifdef TARGET_PC
++                if (!pc_lp64_mlb_session(plmdlp, mdlp))   /* LP64: unpacked into the session arena */
++#endif
++                    bhMlbBinRealize(plmdlp, mdlp);
+                 
+                 if (plp->skp[plp->mdl_n] != NULL) 
+                 {
+@@ -99,7 +102,10 @@ void bhReadPlayerData()
+         {
+             plmtnp += 4;
+             
+-            bhMnbBinRealize(plmtnp, mtnp);
++#ifdef TARGET_PC
++            if (!pc_lp64_mnb_session(plmtnp, mtnp))   /* LP64: MDATA2 unpacked into the session arena */
++#endif
++                bhMnbBinRealize(plmtnp, mtnp);
+             
+             plmtnp = &plmtnp[temp]; 
+         } 
+@@ -207,7 +213,10 @@ void bhReadWeaponData()
+         
+         op->mlwP = op->mdl;
+         
+-        bhMlbBinRealize(mp, op->mlwP);
++#ifdef TARGET_PC
++        if (!pc_lp64_mlb_session(mp, op->mlwP))   /* LP64: unpacked into the session arena */
++#endif
++            bhMlbBinRealize(mp, op->mlwP);
+     }
+     
+     dp = &dp[msz];
+@@ -268,7 +277,10 @@ void bhReadWeaponData()
+         
+         op->mlwP = op->mdl;
+         
+-        bhMlbBinRealize(mp, op->mlwP);
++#ifdef TARGET_PC
++        if (!pc_lp64_mlb_session(mp, op->mlwP))   /* LP64: unpacked into the session arena */
++#endif
++            bhMlbBinRealize(mp, op->mlwP);
+     }
+     
+     dp = &dp[msz];
+@@ -308,6 +320,11 @@ void bhReadWeaponData()
      
      sz = *(unsigned int*)dp;
      
@@ -404,11 +484,100 @@ index 2ba1053e..8d75b59f 100644
      if (sz != 0) 
      {
          plmtnp = sys->plwmtp;
+@@ -324,7 +341,10 @@ void bhReadWeaponData()
+             {
+                 dp = plmtnp + 4;
+                 
+-                bhMnbBinRealize(dp, mtnp);
++#ifdef TARGET_PC
++                if (!pc_lp64_mnb_session(dp, mtnp))   /* LP64: MDATA2 unpacked into the session arena */
++#endif
++                    bhMnbBinRealize(dp, mtnp);
+                 
+                 plmtnp = &dp[mtsz];
+             } 
 diff --git a/src/ps2/veronica/prog/effect.c b/src/ps2/veronica/prog/effect.c
-index 9f2507ff..68f51166 100644
+index 9f2507ff..c1624da5 100644
 --- a/src/ps2/veronica/prog/effect.c
 +++ b/src/ps2/veronica/prog/effect.c
-@@ -437,7 +437,7 @@ int bhSetEffect(int effno, POINT* pnt, unsigned char* lkp, int lkono)
+@@ -74,7 +74,10 @@ void bhInitEffect()
+         
+         if ((ef_info[i].flg & 0x1))
+         {
+-            bhMlbBinRealize(dp, (ML_WORK*)&sys->efm[i]);
++#ifdef TARGET_PC
++            if (!pc_lp64_mlb_room(dp, (ML_WORK*)&sys->efm[i]))   /* LP64: unpacked into the room arena */
++#endif
++                bhMlbBinRealize(dp, (ML_WORK*)&sys->efm[i]);
+             
+             ef[poln++] = i;
+ 
+@@ -213,10 +216,15 @@ int bhPushEffectWork()
+     unsigned int pssz;
+     int nb; // not from the debugging symbols
+ 
++#ifdef TARGET_PC
++    /* LP64: the eff struct and the SYS span are sized at runtime; 32-bit: 0x9C000 == sizeof(eff) */
++    pssz = (unsigned int)((uintptr_t)&sys->ob_nlgn - (uintptr_t)&sys->ef_poln) + sizeof(eff);
++#else
+     pssz = ((int)&sys->ob_nlgn - (int)&sys->ef_poln) + 0x9C000; 
++#endif
+     
+     sys->ef_psp = (unsigned char*)((unsigned int)(sys->memp + 3) & ~0x3);
+-
++    
+     if ((unsigned int)&sys->ef_psp[pssz] >= (unsigned int)sys->endp)
+     {
+         sys->ef_psp = NULL;
+@@ -224,11 +232,23 @@ int bhPushEffectWork()
+         return 0;
+     }
+     
++#ifdef TARGET_PC
++    njMemCopy4(sys->ef_psp, eff, sizeof(eff) / 4);   /* 32-bit: 0x27000 */
++#else
+     njMemCopy4(sys->ef_psp, eff, 0x27000);
++#endif
+     
++#ifdef TARGET_PC
++    nb = (int)(uintptr_t)&sys->ob_nlgn - (int)(uintptr_t)&sys->ef_poln;
++#else
+     nb = (int)&sys->ob_nlgn - (int)&sys->ef_poln;
++#endif
+     
++#ifdef TARGET_PC
++    njMemCopy4(sys->ef_psp + sizeof(eff), &sys->ef_poln, (unsigned int)nb / 4);   /* 32-bit: 0x9C000 */
++#else
+     njMemCopy4(sys->ef_psp + 0x9C000, &sys->ef_poln, (unsigned int)nb / 4);
++#endif
+     
+     return 1;
+ }
+@@ -240,11 +260,23 @@ void bhPopEffectWork()
+ 
+     if (sys->ef_psp != NULL) 
+     {
++#ifdef TARGET_PC
++        njMemCopy4(eff, sys->ef_psp, sizeof(eff) / 4);   /* 32-bit: 0x27000 */
++#else
+         njMemCopy4(eff, sys->ef_psp, 0x27000);
++#endif
+         
++#ifdef TARGET_PC
++        nb = (int)(uintptr_t)&sys->ob_nlgn - (int)(uintptr_t)&sys->ef_poln;
++#else
+         nb = (int)&sys->ob_nlgn - (int)&sys->ef_poln;
++#endif
+         
++#ifdef TARGET_PC
++        njMemCopy4(&sys->ef_poln, sys->ef_psp + sizeof(eff), (unsigned int)nb / 4);   /* 32-bit: 0x9C000 */
++#else
+         njMemCopy4(&sys->ef_poln, sys->ef_psp + 0x9C000, (unsigned int)nb / 4);
++#endif
+     }
+ }
+ 
+@@ -437,7 +469,7 @@ int bhSetEffect(int effno, POINT* pnt, unsigned char* lkp, int lkono)
  
  #ifdef TARGET_PC
  /* per effect slot, the enemy type whose code made it (-1: none), for its sounds (a Black Widow's acid
@@ -417,7 +586,7 @@ index 9f2507ff..68f51166 100644
  short pc_eff_owner[512][2];   /* type, effect id + 1 */
  int pc_enemy_sound_type(int slot);
  int pc_fx_tex_missing(int id, int tex_id);   /* spawn_glue.c */
-@@ -762,6 +762,9 @@ void bhControlEffect()
+@@ -762,6 +794,9 @@ void bhControlEffect()
      int i;        
      int* entp;    
      
@@ -427,7 +596,7 @@ index 9f2507ff..68f51166 100644
      if (((sys->sp_flg & 0x8)) || ((sys->ef_flg & 0x1))) 
      {
          entp = &sys->ef_poln;
-@@ -873,6 +876,9 @@ void bhControlEffect()
+@@ -873,6 +908,9 @@ void bhControlEffect()
              }
          } 
      }
@@ -437,7 +606,7 @@ index 9f2507ff..68f51166 100644
  }
  
  // 100% matching!
-@@ -880,6 +886,9 @@ void bhDrawEffect()
+@@ -880,6 +918,9 @@ void bhDrawEffect()
  {
      int i;
  
@@ -447,7 +616,7 @@ index 9f2507ff..68f51166 100644
      njSetMatrix(NULL, cam.mtx);
      
      njControl3D(0x100);
-@@ -976,6 +985,9 @@ void bhDrawEffect()
+@@ -976,6 +1017,9 @@ void bhDrawEffect()
      {
          bhDrawThunder(sys->rom_no, sys);
      }
@@ -457,7 +626,7 @@ index 9f2507ff..68f51166 100644
  }
  
  // 99.84% matching
-@@ -1773,17 +1785,24 @@ label:
+@@ -1773,17 +1817,24 @@ label:
  void bhDrawNtxEffect2D(unsigned int* owp, int ct)
  {
      O_WRK* op;
@@ -757,6 +926,22 @@ index 17cfeb72..22fd1274 100644
      if (act == 0)
      {
          if (!(EXP0_I(0x40) & 0x8000000))
+diff --git a/src/ps2/veronica/prog/en29.c b/src/ps2/veronica/prog/en29.c
+index eb397a8d..a8a1fc25 100644
+--- a/src/ps2/veronica/prog/en29.c
++++ b/src/ps2/veronica/prog/en29.c
+@@ -187,7 +187,11 @@ static void bhEne29_Init(BH_PWORK* ewP)
+     
+     if (fwP != NULL) 
+     {
++#ifdef TARGET_PC
++        npSetMemory((unsigned char*)&fwP->status, sizeof(en29_freework) - offsetof(en29_freework, status), 0);   /* LP64: the struct grew; 32-bit: 252, the PS2 tail size */
++#else
+         npSetMemory((unsigned char*)&fwP->status, 252, 0);
++#endif
+     }
+     else
+     {
 diff --git a/src/ps2/veronica/prog/eneset.c b/src/ps2/veronica/prog/eneset.c
 index 1449f0dc..f7deb7a8 100644
 --- a/src/ps2/veronica/prog/eneset.c
@@ -972,7 +1157,7 @@ index 1449f0dc..f7deb7a8 100644
      }
  }
 diff --git a/src/ps2/veronica/prog/event.c b/src/ps2/veronica/prog/event.c
-index ad87e6c3..ba23ab57 100644
+index ad87e6c3..3a270360 100644
 --- a/src/ps2/veronica/prog/event.c
 +++ b/src/ps2/veronica/prog/event.c
 @@ -390,6 +390,8 @@ void bhControlEvent()
@@ -1083,10 +1268,17 @@ index ad87e6c3..ba23ab57 100644
      bhScePtr += 2;
  
      for (cnt = (sys->ply_id * 16) + 2; cnt < ((sys->ply_id * 16) + 12); cnt++) 
-@@ -13040,6 +13089,9 @@ int Event_init(BH_SCEWORK* a0, unsigned int evt_id)
+@@ -13039,7 +13088,16 @@ int Event_init(BH_SCEWORK* a0, unsigned int evt_id)
+     *(short*)&a0->mode0 = 0;
      
      a0->data = (unsigned char*)rom->evtp;
++#ifdef TARGET_PC
++    /* the per-event offset word of the disc EVT block (the same word the
++       original 32-bit expression reads; LP64: pc/glue/lp64_realize.c) */
++    a0->data = (unsigned char*)a0->data + pc_lp64_evt_offset(evt_id);
++#else
      a0->data = (unsigned char*)a0->data + ((int*)rom->evtp)[evt_id + ((sizeof(EVT_WORK) / 4) - 1)];
++#endif
 +#ifdef TARGET_PC
 +    pc_cast_shot_event((int)(a0 - bhEtask), a0->data);   /* a cast shot whose weapon the room sets nowhere: its arms bank (pc/glue/biorand_glue.c) */
 +#endif
@@ -1310,6 +1502,22 @@ index 034d1fc6..65cc39f9 100644
 +    itemdata[42].type = (unsigned short)((itemdata[42].type & ~0x200) | bit);
 +}
 +#endif
+diff --git a/src/ps2/veronica/prog/itemview.c b/src/ps2/veronica/prog/itemview.c
+index be844cbb..63ce1f5b 100644
+--- a/src/ps2/veronica/prog/itemview.c
++++ b/src/ps2/veronica/prog/itemview.c
+@@ -325,7 +325,10 @@ void Model_Read_Set(S_WORK* st)
+ 
+     if ((swork.statusflg & 0x400)) 
+     {
+-        bhMlbBinRealize(si->mw.mdl_p, &si->mdl);
++#ifdef TARGET_PC
++        if (!pc_lp64_mlb_session(si->mw.mdl_p, &si->mdl))   /* LP64: unpacked into the session arena (item views outlive rooms) */
++#endif
++            bhMlbBinRealize(si->mw.mdl_p, &si->mdl);
+         
+         bhSetMemPvpTexture(si->mdl.texP, si->mw.tex_p, 0);
+         
 diff --git a/src/ps2/veronica/prog/light.c b/src/ps2/veronica/prog/light.c
 index 837019fd..4316d7a6 100644
 --- a/src/ps2/veronica/prog/light.c
@@ -1379,6 +1587,99 @@ index 66f4beb9..91b61cf5 100644
      
      return 0; 
  } 
+diff --git a/src/ps2/veronica/prog/map.c b/src/ps2/veronica/prog/map.c
+index 14915436..85098425 100644
+--- a/src/ps2/veronica/prog/map.c
++++ b/src/ps2/veronica/prog/map.c
+@@ -141,16 +141,28 @@ void bhInitMap(enum_2 set_mod)
+         }
+     }
+     
++#ifdef TARGET_PC
++    texP = (NJS_TEXLIST*)bhGetFreeMemory(sizeof(NJS_TEXLIST), 4);   /* LP64: pointer fields grew; 32-bit: 8 */
++    
++    texP->textures  = (NJS_TEXNAME*)bhGetFreeMemory(sizeof(NJS_TEXNAME), 4);   /* 32-bit: 12 */
++#else
+     texP = (NJS_TEXLIST*)bhGetFreeMemory(8, 4);
+     
+     texP->textures  = (NJS_TEXNAME*)bhGetFreeMemory(12, 4);
++#endif
+     texP->nbTexture = 1;
+     
+     mwP->map_texP = texP;
+     
++#ifdef TARGET_PC
++    texP = (NJS_TEXLIST*)bhGetFreeMemory(sizeof(NJS_TEXLIST), 4);   /* LP64: pointer fields grew; 32-bit: 8 */
++    
++    texP->textures  = (NJS_TEXNAME*)bhGetFreeMemory(sizeof(NJS_TEXNAME), 4);   /* 32-bit: 12 */
++#else
+     texP = (NJS_TEXLIST*)bhGetFreeMemory(8, 4);
+     
+     texP->textures  = (NJS_TEXNAME*)bhGetFreeMemory(12, 4);
++#endif
+     texP->nbTexture = 1;
+     
+     mwP->stg_texP = texP;
+@@ -385,7 +397,10 @@ int bhControlMap()
+             
+             while ((*pacP & 0xFFFFFF) == 0x4C444D) 
+             {
+-                bhMlbBinRealize(pacP, mlwP);
++#ifdef TARGET_PC
++                if (!pc_lp64_mlb_room(pacP, mlwP))   /* LP64: unpacked into the room arena */
++#endif
++                    bhMlbBinRealize(pacP, mlwP);
+                 
+                 pacP = (int*)((int)pacP + next);
+                 
+@@ -482,7 +497,10 @@ int bhControlMap()
+                 
+                 next = *pacP++;
+                 
+-                bhMlbBinRealize(pacP, &mwP->map_mdl);
++#ifdef TARGET_PC
++                if (!pc_lp64_mlb_room(pacP, &mwP->map_mdl))   /* LP64: unpacked into the room arena */
++#endif
++                    bhMlbBinRealize(pacP, &mwP->map_mdl);
+                 
+                 MapPurgeTree(&mwP->map_mdl);
+                 
+@@ -1306,7 +1324,11 @@ static void MapFuncInit(int func_num)
+ {
+     func_wrk_typ* fwP; 
+ 
++#ifdef TARGET_PC
++    fwP = mwP->busy_funcP = (func_wrk_typ*)bhGetFreeMemory((func_num + 2) * sizeof(func_wrk_typ), 4);   /* LP64: pointer fields grew; 32-bit: 64 */
++#else
+     fwP = mwP->busy_funcP = (func_wrk_typ*)bhGetFreeMemory((func_num + 2) * 64, 4);
++#endif
+     
+     fwP->nextP = fwP->prevP = fwP;
+     
+@@ -2209,7 +2231,11 @@ static int FsubGaugeDraw(FG_WORK* fgP)
+ static void MapTagInit(int tag_num)
+ {
+     mwP->tag_num = 0;
++#ifdef TARGET_PC
++    mwP->tag_wrkP = (tag_wrk_typ*)bhGetFreeMemory(tag_num * sizeof(tag_wrk_typ), 4);   /* LP64: pointer fields grew; 32-bit: 32 */
++#else
+     mwP->tag_wrkP = (tag_wrk_typ*)bhGetFreeMemory(tag_num * 32, 4);
++#endif
+ }
+ 
+ // 100% matching!
+@@ -2816,7 +2842,11 @@ static void MapCncInit(int map_num, int flr_num)
+     
+     map_num *= flr_num;
+     
++#ifdef TARGET_PC
++    mwP->cnc_wrkP = (cnc_wrk_typ*)bhGetFreeMemory(map_num * sizeof(cnc_wrk_typ), 4);   /* LP64: pointer fields grew; 32-bit: 28 */
++#else
+     mwP->cnc_wrkP = (cnc_wrk_typ*)bhGetFreeMemory(map_num * 28, 4);
++#endif
+     
+     for (map_no = 0; map_no < map_num; map_no++)
+     {
 diff --git a/src/ps2/veronica/prog/message.c b/src/ps2/veronica/prog/message.c
 index caba0264..b54e52c6 100644
 --- a/src/ps2/veronica/prog/message.c
@@ -1550,6 +1851,24 @@ index 456964cf..12c7e0d5 100644
  
  // 100% matching!
  void npPlusInit() 
+diff --git a/src/ps2/veronica/prog/objitm.c b/src/ps2/veronica/prog/objitm.c
+index 365b5256..a91163e2 100644
+--- a/src/ps2/veronica/prog/objitm.c
++++ b/src/ps2/veronica/prog/objitm.c
+@@ -161,8 +161,13 @@ extern void VU0_WAVE_CALC() __attribute__((section(".vutext")));
+ // 100% matching! 
+ void bhInitObjItm()
+ {
++#ifdef TARGET_PC
++    npSetMemory((unsigned char*)sys->obwp, 32 * sizeof(O_WRK), 0);   /* LP64: 32 O_WRKs; 32-bit: 39936 */
++    npSetMemory((unsigned char*)sys->itwp, 32 * sizeof(O_WRK), 0);
++#else
+     npSetMemory((unsigned char*)sys->obwp, 39936, 0);
+     npSetMemory((unsigned char*)sys->itwp, 39936, 0);
++#endif
+ }
+ 
+ // 100% matching!
 diff --git a/src/ps2/veronica/prog/pad.c b/src/ps2/veronica/prog/pad.c
 index 43af36b6..532d1125 100644
 --- a/src/ps2/veronica/prog/pad.c
@@ -2037,20 +2356,181 @@ index a0c3e330..b532080b 100644
              rk->mode_00 = 2;
          }
 diff --git a/src/ps2/veronica/prog/room.c b/src/ps2/veronica/prog/room.c
-index 46c8f3be..6dacc692 100644
+index 46c8f3be..81f6074c 100644
 --- a/src/ps2/veronica/prog/room.c
 +++ b/src/ps2/veronica/prog/room.c
-@@ -83,6 +83,10 @@ void bhSetRoom()
-         *romp = (unsigned int)sys->rdtp + *romp;
+@@ -76,18 +76,32 @@ void bhSetRoom()
+         return;
      }
      
+-    njMemCopy(rom, &reladr[*(unsigned int*)(reladr + 16)], 1004);
+-    
+-    for (romp = (unsigned int*)rom; (unsigned int)romp < (unsigned int)&rom->dmp00; romp++) 
 +#ifdef TARGET_PC
-+    rom->mesp = pc_lang_room_mes(rom->mesp);   /* the language's messages (pc/glue/lang_glue.c) */
-+    
++    pc_lp64_room_reset();   /* the room arena and its dedup go (no-op on 32-bit hosts) */
++    if (pc_lp64_room_rom(rom, sys->rdtp))   /* LP64: field-exact unpack; CUT/LGT/EVC arrays; evtp */
+     {
+-        *romp = (unsigned int)sys->rdtp + *romp;
++        rom->mesp = pc_lang_room_mes(rom->mesp);   /* the language's messages (pc/glue/lang_glue.c) */
+     }
+-    
+-    cp = rom->cutp;
+-    
+-    for (i = 0; i < rom->cut_n; i++, cp++)
++    else
 +#endif
-     cp = rom->cutp;
+     {
+-        cp->cuttp = (CUT_WRK*)&sys->rdtp[*(unsigned int*)&cp->cuttp];
++        njMemCopy(rom, &reladr[*(unsigned int*)(reladr + 16)], 1004);
++        
++        for (romp = (unsigned int*)rom; (unsigned int)romp < (unsigned int)&rom->dmp00; romp++) 
++        {
++            *romp = (unsigned int)sys->rdtp + *romp;
++        }
++        
++#ifdef TARGET_PC
++        rom->mesp = pc_lang_room_mes(rom->mesp);   /* the language's messages (pc/glue/lang_glue.c) */
++        
++#endif
++        cp = rom->cutp;
++        
++        for (i = 0; i < rom->cut_n; i++, cp++) 
++        {
++            cp->cuttp = (CUT_WRK*)&sys->rdtp[*(unsigned int*)&cp->cuttp];
++        }
+     }
      
-     for (i = 0; i < rom->cut_n; i++, cp++)
+     rom->grand[31] = 0;
+@@ -100,7 +114,10 @@ void bhSetRoom()
+     
+     datp += 4;
+     
+-    bhMlbBinRealize(mdlhed, &rom->mdl); 
++#ifdef TARGET_PC
++    if (!pc_lp64_mlb_room(mdlhed, &rom->mdl))   /* LP64: unpacked into the room arena */
++#endif
++        bhMlbBinRealize(mdlhed, &rom->mdl); 
+     
+     npCnkFlatOff(rom->mdl.objP);
+     
+@@ -157,7 +174,10 @@ void bhSetRoom()
+ 
+     reladr += 28;
+     
+-    rom->evtp = (EVT_WORK*)&sys->rdtp[*(unsigned int*)reladr];
++#ifdef TARGET_PC
++    if (!pc_lp64_active())   /* LP64: pc_lp64_room_rom already realized evtp */
++#endif
++        rom->evtp = (EVT_WORK*)&sys->rdtp[*(unsigned int*)reladr];
+     
+     sys->txr_ct = 0;
+     sys->txr_n = 0;
+@@ -397,9 +417,17 @@ void bhFinishRoom()
+                 
+                 pwp->mnwP = (MN_WORK*)sys->memp;
+                 
++#ifdef TARGET_PC
++                sys->memp += sizeof(MN_WORK) * 512;   /* LP64: 512 MN_WORKs; 32-bit: 12288 */
++#else
+                 sys->memp += 12288;
++#endif
+                 
++#ifdef TARGET_PC
++                npSetMemory((unsigned char*)pwp->mnwP, sizeof(MN_WORK) * 512, 0);
++#else
+                 npSetMemory((unsigned char*)pwp->mnwP, 12288, 0);
++#endif
+                 
+                 pwp->mnwPb = pwp->mnwP;
+                 
+@@ -422,9 +450,15 @@ void bhFinishRoom()
+         
+         mtnhed++;
+         
++#ifdef TARGET_PC
++        npSetMemory((unsigned char*)sys->rmthp, sizeof(MN_WORK) * 512, 0);   /* LP64: 512 MN_WORKs; 32-bit: 12288 */
++        
++        sys->memp += sizeof(MN_WORK) * 512;
++#else
+         npSetMemory((unsigned char*)sys->rmthp, 12288, 0);
+         
+         sys->memp += 12288;
++#endif
+     }
+     
+     if (*mtnhed != 0) 
+@@ -633,7 +667,10 @@ void bhSetEneMdl(unsigned char* datp, ETTY_WORK* ep, int mdlno, int eno)
+             default:
+                 npSetMemory((unsigned char*)epp->mlwP, sizeof(ML_WORK), 0);
+                 
+-                bhMlbBinRealize(emdlp, epp->mlwP);
++#ifdef TARGET_PC
++                if (!pc_lp64_mlb_room(emdlp, epp->mlwP))   /* LP64: unpacked into the room arena */
++#endif
++                    bhMlbBinRealize(emdlp, epp->mlwP);
+                 
+                 if (epp->skp[epp->mdl_n] != NULL) 
+                 {
+@@ -716,7 +753,10 @@ void bhSetEneMtn(unsigned char* datp, BH_PWORK* ep, int id)
+         {
+             datp += 4;
+             
+-            bhMnbBinRealize(datp, mtnp);
++#ifdef TARGET_PC
++            if (!pc_lp64_mnb_room(datp, mtnp))   /* LP64: MDATA2 unpacked into the room arena */
++#endif
++                bhMnbBinRealize(datp, mtnp);
+             
+             datp = &datp[sz];
+         }
+@@ -754,7 +794,10 @@ void bhSetRoomMtn(unsigned char* datp)
+         {
+             datp += 4;
+             
+-            bhMnbBinRealize(datp, mtnp);
++#ifdef TARGET_PC
++            if (!pc_lp64_mnb_room(datp, mtnp))   /* LP64: MDATA2 unpacked into the room arena */
++#endif
++                bhMnbBinRealize(datp, mtnp);
+             
+             datp = &datp[sz];
+         }
+@@ -777,7 +820,10 @@ void bhSetObjMdl(unsigned char* datp, ETTY_WORK* ep, int mdlno, int eno) // thir
+         
+         if (((unsigned char*)datp[0] == (unsigned char*)'M') && ((unsigned char*)datp[1] == (unsigned char*)'D') && ((unsigned char*)datp[2] == (unsigned char*)'L')) 
+         {
+-            bhMlbBinRealize(datp, epp->mdl);
++#ifdef TARGET_PC
++            if (!pc_lp64_mlb_room(datp, epp->mdl))   /* LP64: unpacked into the room arena */
++#endif
++                bhMlbBinRealize(datp, epp->mdl);
+         }
+         else 
+         {
+@@ -787,7 +833,10 @@ void bhSetObjMdl(unsigned char* datp, ETTY_WORK* ep, int mdlno, int eno) // thir
+             
+             datp += sz + 8;
+             
+-            bhMlbBinRealize(datp, epp->mdl);
++#ifdef TARGET_PC
++            if (!pc_lp64_mlb_room(datp, epp->mdl))   /* LP64: unpacked into the room arena */
++#endif
++                bhMlbBinRealize(datp, epp->mdl);
+             
+             npSkinConvert(epp->mdl->objP, epp->skp[0]);
+         }
+@@ -805,7 +854,10 @@ void bhSetItmMdl(unsigned char* datp, ETTY_WORK* ep, int mdlno, int eno) // thir
+     {
+         npSetMemory((unsigned char*)epp->mdl, sizeof(O_WRK) / 50, 0);
+         
+-        bhMlbBinRealize(datp, epp->mdl);
++#ifdef TARGET_PC
++        if (!pc_lp64_mlb_room(datp, epp->mdl))   /* LP64: unpacked into the room arena */
++#endif
++            bhMlbBinRealize(datp, epp->mdl);
+         
+         epp->mlwP = epp->mdl;
+     }
 diff --git a/src/ps2/veronica/prog/sdfunc.c b/src/ps2/veronica/prog/sdfunc.c
 index 22cb48fc..9c3118a2 100644
 --- a/src/ps2/veronica/prog/sdfunc.c
@@ -2432,10 +2912,22 @@ index 53f4752a..ba66be54 100644
          max = 8;
      }
 diff --git a/src/ps2/veronica/prog/system.c b/src/ps2/veronica/prog/system.c
-index 6eea82ab..61bab149 100644
+index 6eea82ab..3b31586f 100644
 --- a/src/ps2/veronica/prog/system.c
 +++ b/src/ps2/veronica/prog/system.c
-@@ -411,7 +411,6 @@ void bhSysCallFirstmovie()
+@@ -132,7 +132,11 @@ void bhInitSystem()
+     
+     sys->ss_flg &= ~0x40440; 
+     
++#ifdef TARGET_PC
++    npSetMemory((unsigned char*)&sys->tk_flg, sizeof(SYS_WORK) - offsetof(SYS_WORK, tk_flg), 0);   /* LP64: the struct grew; 32-bit: 175260, the PS2 tail size */
++#else
+     npSetMemory((unsigned char*)&sys->tk_flg, 175260, 0); 
++#endif
+     
+     sys->memp = freemem; 
+     sys->endp = njpmemp;
+@@ -411,7 +415,6 @@ void bhSysCallFirstmovie()
          break;
  #ifdef TARGET_PC
      case 8:   /* co-op lobby: the chosen save, as LOAD GAME leaves it (TypewriterExit) */
@@ -2443,7 +2935,21 @@ index 6eea82ab..61bab149 100644
          sys->ss_flg |= 0x200;
          sys->tk_flg = 0x300010;
          break;
-@@ -692,7 +691,11 @@ void bhSysCallEvent()
+@@ -470,8 +473,13 @@ void bhFirstGameStart()
+     
+     sys->memp = keepmem;
+     
++#ifdef TARGET_PC
++    sys->obwp = (O_WRK*)bhGetFreeMemory(32 * sizeof(O_WRK), 32);   /* LP64: 32 O_WRKs; 32-bit: 39936 */
++    sys->itwp = (O_WRK*)bhGetFreeMemory(32 * sizeof(O_WRK), 32);
++#else
+     sys->obwp = (O_WRK*)bhGetFreeMemory(39936, 32);
+     sys->itwp = (O_WRK*)bhGetFreeMemory(39936, 32);
++#endif
+     
+     sys->mempb = sys->memp;
+     
+@@ -692,7 +700,11 @@ void bhSysCallEvent()
          return;
      }
      
@@ -2455,7 +2961,7 @@ index 6eea82ab..61bab149 100644
      {
          sys->ss_flg |= 0x80000000;
          
-@@ -721,7 +724,11 @@ void bhSysCallEvent()
+@@ -721,7 +733,11 @@ void bhSysCallEvent()
          
          pdGetPeripheral(0);
          
@@ -2467,7 +2973,7 @@ index 6eea82ab..61bab149 100644
          {
              sys->ss_flg &= ~0x80000000;
              
-@@ -1471,6 +1478,9 @@ void bhSysCallMonitor()
+@@ -1471,6 +1487,9 @@ void bhSysCallMonitor()
                  datp += dt; 
                  
                  sys->mes_sp = (unsigned int*)(datp + 4);
@@ -2477,7 +2983,7 @@ index 6eea82ab..61bab149 100644
                  
                  sys->mn_md1 = 3; 
              }
-@@ -1851,9 +1861,9 @@ void bhSysCallMonitor()
+@@ -1851,9 +1870,9 @@ void bhSysCallMonitor()
                          sys->ply_stflg[sys->ply_id] = plp->stflg;
  
  #ifdef TARGET_PC
@@ -2489,7 +2995,7 @@ index 6eea82ab..61bab149 100644
                          }
  #endif
                          for (i = 0; i < plp->mdl_n; i++)
-@@ -2509,9 +2519,21 @@ void bhSysCallScreenSaver()
+@@ -2509,9 +2528,21 @@ void bhSysCallScreenSaver()
          
          break;
      case 10:
@@ -2511,7 +3017,7 @@ index 6eea82ab..61bab149 100644
          
          bhDispMessage(280.0f, 188.0f, -0.9f, 2, 0, 0, 0);
          
-@@ -2712,10 +2734,18 @@ void EasyDispMessage(float PosY, unsigned int MessageNo)
+@@ -2712,10 +2743,18 @@ void EasyDispMessage(float PosY, unsigned int MessageNo)
                  SearchFlag = 0; 
                  break; 
              case 65281:

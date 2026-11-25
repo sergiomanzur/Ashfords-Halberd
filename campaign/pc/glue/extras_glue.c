@@ -8,6 +8,7 @@
 #include "../src/host/savestore.h"
 #include "../src/host/cheat.h"
 #include "../include/pc_parse.h"
+#include "lp64_realize.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -150,8 +151,8 @@ static int us_texts(void)
     for (i = 0; i < T_N_; i++) {
         if (tsrc[i].room != room) {
             room = tsrc[i].room;
-            if (!(rf = actor_room_file(room, &len, &scr, &cap)) || !pc_range_ok(pc_rd32(rf + 16), sizeof(ROM_WORK), (unsigned)len)) return 0;
-            at = (unsigned int)(uintptr_t)((const ROM_WORK*)(rf + pc_rd32(rf + 16)))->mesp;
+            if (!(rf = actor_room_file(room, &len, &scr, &cap)) || !pc_range_ok(pc_rd32(rf + 16), LP64_ROM_DISC_SIZE, (unsigned)len)) return 0;
+            at = (unsigned int)(uintptr_t)lp64_rom_field(rf + pc_rd32(rf + 16), LP64_RO_OFF_MESP);   /* the disc's 32-bit ROM_WORK.mesp */
             if (at >= (unsigned)len) return 0;
         }
         if (!(n = pc_mes_at(rf + at, (unsigned)len - at, tsrc[i].mes)) || n > 256) return 0;

@@ -19,6 +19,7 @@ PORTABLE_TESTS = [
     "vu",
     "vu_portable",
     "bindings",
+    "lp64_realize",
     "pad_weapon_switch",
     "pad_quicksave",
     "modern",
