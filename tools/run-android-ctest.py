@@ -58,6 +58,17 @@ SKIP_RETURN_CODE = 77
 
 DEFAULT_TIMEOUT = 120
 
+# Tests that dynamically load librecvx_game.so on device (pushed alongside the
+# test binary and removed before pulling test artifacts).
+GAME_SO_TESTS = {
+    "window_load",
+}
+
+# Full-build tests appended automatically when librecvx_game.so is present in build_dir.
+FULL_BUILD_TESTS = [
+    "window_load",
+]
+
 # Per-test arguments that ctest registers in campaign/pc/CMakeLists.txt.
 # The runner must invoke each test exactly as ctest would, with device-side
 # substitutions for host-only paths.
@@ -206,6 +217,14 @@ def run_test(adb, serial, build_dir, name, timeout):
     run_adb(adb, serial, ["shell", f"rm -rf {remote_dir} && mkdir -p {remote_dir}"], capture_output=True)
     push_binary(adb, serial, local_binary, remote_dir, binary_name)
 
+    pushed_extras = []
+    if name in GAME_SO_TESTS:
+        game_so = build_dir / "campaign" / "pc" / "librecvx_game.so"
+        if not game_so.exists():
+            return "FAIL", f"game library not found: {game_so}"
+        push_binary(adb, serial, game_so, remote_dir, "librecvx_game.so")
+        pushed_extras.append(f"{remote_dir}/librecvx_game.so")
+
     test_args = substitute_args(TEST_ARGS.get(name, []))
 
     start = time.monotonic()
@@ -222,20 +241,27 @@ def run_test(adb, serial, build_dir, name, timeout):
     stdout = result.stdout or ""
     exit_code = parse_exit_code(stdout)
 
-    # Drop the pushed binary so the pull captures only files the test wrote.
-    run_adb(adb, serial, ["shell", f"rm -f {remote_path}"], capture_output=True)
+    # Drop the pushed binary (and any pushed shared libraries) so the pull
+    # captures only files the test wrote.
+    rm_targets = " ".join(shlex.quote(p) for p in [remote_path] + pushed_extras)
+    run_adb(adb, serial, ["shell", f"rm -f {rm_targets}"], capture_output=True)
 
     # Pull whatever the test wrote before interpreting results.
     results_dir = build_dir / "device-results" / name
     pull_results(adb, serial, remote_dir, results_dir)
 
+    output_tail = "\n".join(line for line in stdout.splitlines() if "EXIT_CODE:" not in line).strip()
     if exit_code is None:
         detail = "could not parse device exit code"
+        if output_tail:
+            detail += f"\n{output_tail}"
         if result.stderr:
             detail += f"\n{result.stderr}"
         return "FAIL", detail
     if exit_code == 124:
         detail = f"timeout ({timeout}s)"
+        if output_tail:
+            detail += f"\n{output_tail}"
         if result.stderr:
             detail += f"\n{result.stderr}"
         return "FAIL", detail
@@ -244,6 +270,8 @@ def run_test(adb, serial, build_dir, name, timeout):
         return "SKIP", reason
     if exit_code != 0:
         detail = f"exit code {exit_code}"
+        if output_tail:
+            detail += f"\n{output_tail}"
         if result.stderr:
             detail += f"\n{result.stderr}"
         return "FAIL", detail
@@ -265,7 +293,14 @@ def main(argv=None):
     if not build_dir.is_absolute():
         build_dir = repo_root / build_dir
 
-    selected = args.tests if args.tests else list(PORTABLE_TESTS)
+    if args.tests:
+        selected = args.tests
+    else:
+        selected = list(PORTABLE_TESTS)
+        if (build_dir / "campaign" / "pc" / "librecvx_game.so").exists():
+            for name in FULL_BUILD_TESTS:
+                if name not in selected:
+                    selected.append(name)
 
     if args.list:
         for name in selected:

@@ -6,7 +6,7 @@
  * ("r" render, "g" game), for symbolisation with pc/tools/profile.py. (A process-wide
  * ITIMER_PROF signal lands on any thread, mostly ones asleep in a syscall.)
  */
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__ANDROID__)
 #define _GNU_SOURCE
 #include <pthread.h>
 #include <signal.h>

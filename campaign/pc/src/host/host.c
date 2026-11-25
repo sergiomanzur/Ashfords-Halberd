@@ -142,7 +142,11 @@ void host_fatal(const char* fmt, ...)
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
     fprintf(stderr, "fatal: %s\n", buf);
+#if defined(__ANDROID__)
+    if (g_window) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Ashford's Halberd", buf, g_window);
+#else
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Ashford's Halberd", buf, g_window);
+#endif
     exit(1);
 }
 

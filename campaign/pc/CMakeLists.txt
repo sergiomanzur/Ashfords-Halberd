@@ -48,6 +48,9 @@ add_library(imgui STATIC
     ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
 target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
 target_link_libraries(imgui PUBLIC SDL3::SDL3)
+if(CMAKE_SYSTEM_NAME STREQUAL "Android")
+    target_link_libraries(imgui PUBLIC GLESv3)
+endif()
 
 # ---------------------------------------------------------------- headers
 # The Katana SDK headers are included with inconsistent case (SG_MWPLY.H vs
@@ -155,6 +158,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Android")
         "LINKER:-T,${_android_window_ld}"
         "-Wl,-z,max-page-size=16384"
         "-Wl,-z,norelro"
+        "-Wl,-Bsymbolic"
         "-Wl,--unresolved-symbols=ignore-all"
         "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/librecvx_game.map"
     )
@@ -168,9 +172,6 @@ file(GLOB_RECURSE PLATFORM_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 if(CMAKE_SYSTEM_NAME STREQUAL "Android")
-    # The sampling profiler is x86/Linux-specific (ucontext.gregs[REG_RIP]).
-    # It is not linked in tests-only mode; exclude it from the arm64 object library.
-    list(FILTER PLATFORM_SOURCES EXCLUDE REGEX "src/host/profile\\.c$")
     # On Android, .ahsnap and snapshot_core live inside librecvx_game.so so
     # snapshot_manifest.py patches the game library directly.
     list(FILTER PLATFORM_SOURCES EXCLUDE REGEX "src/host/snapshot_(manifest|core)\\.c$")
@@ -588,4 +589,42 @@ foreach(target test_audio_snapshot test_audio_snapshot_decoder test_audio_snapsh
     target_link_libraries(${target} PRIVATE SDL3::SDL3 m)
     add_test(NAME ${target} COMMAND ${target})
 endforeach()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Android" AND NOT ASHFORD_PLATFORM_TESTS_ONLY)
+    # On-device test harness for the windowed loader and Android memory model.
+    # Links the platform layer (with host.c's main renamed) and exports all
+    # platform symbols (--export-dynamic) so bionic resolves librecvx_game.so's
+    # undefined references without putting librecvx_game.so in DT_NEEDED.
+    set(PLATFORM_NO_HOST_SOURCES ${PLATFORM_SOURCES})
+    list(FILTER PLATFORM_NO_HOST_SOURCES EXCLUDE REGEX "src/host/host\\.c$")
+    # Compile a separate host.c object with main renamed so test_window_load owns main().
+    add_library(recvx_host_nomain OBJECT src/host/host.c)
+    target_include_directories(recvx_host_nomain PRIVATE $<TARGET_PROPERTY:recvx_platform,INCLUDE_DIRECTORIES>)
+    target_compile_options(recvx_host_nomain PRIVATE $<TARGET_PROPERTY:recvx_platform,COMPILE_OPTIONS>)
+    target_compile_definitions(recvx_host_nomain PRIVATE main=ashford_host_main
+        "RECVX_VERSION=\"${RECVX_VERSION}\"" "ASHFORD_VERSION=\"${ASHFORD_VERSION}\"")
+    target_link_libraries(recvx_host_nomain PRIVATE SDL3::SDL3 imgui)
+    # Build the remaining platform objects once via recvx_platform_core.
+    add_library(recvx_platform_core OBJECT ${PLATFORM_NO_HOST_SOURCES})
+    target_include_directories(recvx_platform_core PRIVATE $<TARGET_PROPERTY:recvx_platform,INCLUDE_DIRECTORIES>)
+    target_compile_options(recvx_platform_core PRIVATE $<TARGET_PROPERTY:recvx_platform,COMPILE_OPTIONS>)
+    target_link_libraries(recvx_platform_core PRIVATE SDL3::SDL3 imgui)
+
+    add_executable(test_window_load
+        tests/test_window_load.c
+        tests/android_game_stubs.c
+        $<TARGET_OBJECTS:recvx_platform_core>
+        $<TARGET_OBJECTS:recvx_host_nomain>
+    )
+    target_include_directories(test_window_load PRIVATE src src/ps2 include/sdk)
+    target_compile_options(test_window_load PRIVATE -std=gnu11 -Wall)
+    target_link_options(test_window_load PRIVATE
+        "-Wl,--export-dynamic"
+        "-Wl,-u,SDL_GetTicks"
+        "-Wl,-u,SDL_GetTicksNS"
+    )
+    target_link_libraries(test_window_load PRIVATE SDL3::SDL3 imgui m dl)
+    add_dependencies(test_window_load recvx_game_so)
+    add_test(NAME window_load COMMAND test_window_load)
+endif()
 
