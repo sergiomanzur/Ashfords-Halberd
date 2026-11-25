@@ -102,12 +102,20 @@ void* sceDmaGetChan(int id) { static const uint32_t base[] = { 0x10008000, 0x100
 int sceDmaSend(void* chan, void* tag)
 {
     int ch = channel_of(chan);
+#if defined(__ANDROID__) && UINTPTR_MAX > 0xFFFFFFFFu
+    if ((uintptr_t)tag > UINT32_MAX)
+        host_fatal("sceDmaSend: 64-bit host pointer %p exceeds 32-bit EE DMA address space", tag);
+#endif
     run_chain(ch, (uint32_t)(uintptr_t)tag, ch == 1);
     return 0;
 }
 
 int sceDmaSendN(void* chan, void* addr, int qwc)
 {
+#if defined(__ANDROID__) && UINTPTR_MAX > 0xFFFFFFFFu
+    if ((uintptr_t)addr > UINT32_MAX)
+        host_fatal("sceDmaSendN: 64-bit host pointer %p exceeds 32-bit EE DMA address space", addr);
+#endif
     deliver(channel_of(chan), ps2_dma_ptr((uint32_t)(uintptr_t)addr), (uint32_t)qwc);
     return 0;
 }

@@ -96,12 +96,16 @@ void host_log(const char* fmt, ...);
 void ps2_poll_interrupts(void);
 void ps2_wait_vblank(void);
 uint64_t ps2_vblank_count(void);
+int  RemoveIntcHandler(int cause, int id);
 
 /* memory.c */
+#include "host/window_load.h"
 #define PS2_SPR_BASE 0x70000000u
 #define PS2_SPR_SIZE 0x4000u
 void  ps2_memory_init(void);
+void* ps2_dma_alloc(int slot, uint32_t len);
 void* ps2_dma_ptr(uint32_t addr);
+int   sceDmaSendN(void* chan, void* addr, int qwc);
 
 /* dma.c / vif.c / gs */
 void ps2_vif1_transfer(const uint32_t* data, uint32_t qwc);

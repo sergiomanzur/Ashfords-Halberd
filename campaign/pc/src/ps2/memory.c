@@ -27,11 +27,46 @@
 #include <sys/mman.h>
 #include <link.h>
 #include <unistd.h>
+#if defined(__ANDROID__)
+#include <dlfcn.h>
+#include <stdlib.h>
+#endif
 #endif
 
 Ps2FakeRegs ps2_regs;
 
 #ifndef _WIN32
+#if defined(__ANDROID__)
+typedef struct {
+    uintptr_t fbase;
+    int found;
+    uintptr_t end;
+} AndroidGameAudit;
+
+static int android_audit_cb(struct dl_phdr_info* info, size_t sz, void* data)
+{
+    AndroidGameAudit* a = (AndroidGameAudit*)data;
+    (void)sz;
+    if ((uintptr_t)info->dlpi_addr != a->fbase) return 0;
+    if (!info->dlpi_name || !strstr(info->dlpi_name, "librecvx_game.so")) return 0;
+    a->found = 1;
+    uintptr_t page = (uintptr_t)sysconf(_SC_PAGESIZE);
+    for (int i = 0; i < info->dlpi_phnum; i++) {
+        const ElfW(Phdr)* ph = &info->dlpi_phdr[i];
+        if (ph->p_type != PT_LOAD || (ph->p_flags & PF_X)) continue;
+        uintptr_t seg_start = (uintptr_t)info->dlpi_addr + (uintptr_t)ph->p_vaddr;
+        uintptr_t seg_end = seg_start + (uintptr_t)ph->p_memsz;
+        if (seg_end > a->end) a->end = seg_end;
+        /* Keep ELF header/dynsym page at vaddr 0 read-only; make any RO game data writable. */
+        if (ph->p_vaddr != 0 && !(ph->p_flags & PF_W)) {
+            uintptr_t lo = seg_start & ~(page - 1);
+            if (mprotect((void*)lo, seg_end - lo, PROT_READ | PROT_WRITE) != 0)
+                perror("mprotect(rodata)");
+        }
+    }
+    return 1;
+}
+#else
 /* The decomp writes into string literals (no MMU protection on the EE). Make the
    executable's read-only data writable. */
 static int unprotect_cb(struct dl_phdr_info* info, size_t sz, void* data)
@@ -49,6 +84,7 @@ static int unprotect_cb(struct dl_phdr_info* info, size_t sz, void* data)
     }
     return 1;
 }
+#endif
 #endif
 
 /* The scratchpad's address is taken: name what holds it (on Windows usually a DLL another program
@@ -92,12 +128,37 @@ void ps2_memory_init(void)
                 host_fatal("Cannot access game memory (%.8s).", (const char*)sh->Name);
         }
     }
+#elif defined(__ANDROID__)
+    void* spr = mmap((void*)(uintptr_t)PS2_SPR_BASE, PS2_SPR_SIZE, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    if (spr != (void*)(uintptr_t)PS2_SPR_BASE) spr_taken();
+    if (!ashford_game_handle()) ashford_window_init();
+    {
+        void* handle = ashford_game_handle();
+        void* probe = handle ? dlsym(handle, "Ps2_malloc_mem") : NULL;
+        Dl_info dli;
+        AndroidGameAudit audit;
+        if (!probe || ((uintptr_t)probe & ASHFORD_WINDOW_BASE) != ASHFORD_WINDOW_BASE ||
+            (uintptr_t)probe < ASHFORD_WINDOW_BASE || (uintptr_t)probe >= ASHFORD_WINDOW_LIMIT)
+            host_fatal("This Android build has an invalid game window layout (Ps2_malloc_mem=%p).", probe);
+        memset(&dli, 0, sizeof(dli));
+        if (!dladdr(probe, &dli) || (uintptr_t)dli.dli_fbase != ASHFORD_RESERVE_BASE)
+            host_fatal("This Android build has an invalid game load bias (%p).", dli.dli_fbase);
+        memset(&audit, 0, sizeof(audit));
+        audit.fbase = (uintptr_t)dli.dli_fbase;
+        dl_iterate_phdr(android_audit_cb, &audit);
+        if (!audit.found || audit.end <= ASHFORD_WINDOW_BASE)
+            host_fatal("This Android build could not audit librecvx_game.so segments.");
+        if (audit.end > ASHFORD_WINDOW_LIMIT)
+            host_fatal("This game build exceeds its memory limit (0x%08lX).", (unsigned long)audit.end);
+    }
 #else
     void* spr = mmap((void*)(uintptr_t)PS2_SPR_BASE, PS2_SPR_SIZE, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
     if (spr != (void*)(uintptr_t)PS2_SPR_BASE) spr_taken();
     dl_iterate_phdr(unprotect_cb, NULL);
 #endif
+#if !defined(__ANDROID__)
     {
         extern char ps2_window_probe;
         uintptr_t end = 0;
@@ -119,6 +180,7 @@ void ps2_memory_init(void)
         if (end > 0x40000000u)
             host_fatal("This game build exceeds its memory limit (0x%08X).", (unsigned)end);
     }
+#endif
 }
 char ps2_window_probe;
 
@@ -126,6 +188,7 @@ char ps2_window_probe;
    (never a physical PS2 address below 0x10000000), which ps2_dma_ptr passes through as host pointers. One per
    slot; a new one replaces the slot's last. */
 static struct { uint32_t base, len; } dma_host[4];
+#if !defined(__ANDROID__)
 static void dma_unmap(void* p, uint32_t len)
 {
 #ifdef _WIN32
@@ -135,10 +198,26 @@ static void dma_unmap(void* p, uint32_t len)
     munmap(p, len);
 #endif
 }
+#endif
 void* ps2_dma_alloc(int slot, uint32_t len)
 {
     void* p;
     if (slot < 0 || slot >= 4) return NULL;
+#if defined(__ANDROID__)
+    dma_host[slot].len = 0;
+    dma_host[slot].base = 0;
+    if (!len) { ashford_pool_free(slot); return NULL; }
+    p = ashford_pool_alloc(slot, len);
+    if (!p) return NULL;
+    if ((uintptr_t)p < ASHFORD_POOL_BASE || (uintptr_t)p + len > ASHFORD_POOL_LIMIT ||
+        (uintptr_t)(uint32_t)(uintptr_t)p != (uintptr_t)p) {
+        ashford_pool_free(slot);
+        host_fatal("ps2_dma_alloc: pool slot %d returned out-of-range pointer %p", slot, p);
+    }
+    dma_host[slot].base = (uint32_t)(uintptr_t)p;
+    dma_host[slot].len = len;
+    return p;
+#else
     if (dma_host[slot].base) {
         uint32_t n = dma_host[slot].len;
         dma_host[slot].len = 0;
@@ -157,6 +236,7 @@ void* ps2_dma_alloc(int slot, uint32_t len)
     dma_host[slot].base = (uint32_t)(uintptr_t)p;
     dma_host[slot].len = len;
     return p;
+#endif
 }
 
 /* DMA MADR/TADR/ADDR field -> host pointer */
@@ -166,5 +246,20 @@ void* ps2_dma_ptr(uint32_t addr)
     if (addr & 0x80000000u) return (void*)(uintptr_t)(PS2_SPR_BASE | (addr & (PS2_SPR_SIZE - 1)));
     if ((addr & 0xF0000000u) == 0x70000000u) return (void*)(uintptr_t)(PS2_SPR_BASE | (addr & (PS2_SPR_SIZE - 1)));
     if (addr < 0x10000000u) addr |= 0x30000000u; /* physical address (masked with 0x0FFFFFFF) */
+#if defined(__ANDROID__)
+    {
+        const char* audit = getenv("RECVX_DMA_MAP_AUDIT");
+        if (audit && audit[0] && strcmp(audit, "0") != 0) {
+            int in_window = (addr >= ASHFORD_WINDOW_BASE && addr < ASHFORD_WINDOW_LIMIT);
+            int in_code   = (addr >= ASHFORD_CODE_BASE   && addr < ASHFORD_CODE_LIMIT);
+            if (!in_window && !in_code) {
+                host_fatal("ps2_dma_ptr: address 0x%08X outside Android address map "
+                           "(window [0x%08X,0x%08X), code [0x%08X,0x%08X), active pool, scratchpad)",
+                           addr, ASHFORD_WINDOW_BASE, ASHFORD_WINDOW_LIMIT,
+                           ASHFORD_CODE_BASE, ASHFORD_CODE_LIMIT);
+            }
+        }
+    }
+#endif
     return (void*)(uintptr_t)addr;
 }

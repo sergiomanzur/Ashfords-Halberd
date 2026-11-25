@@ -211,7 +211,11 @@ int snapshot_platform_validate(const SnapshotBlob* in)
         if (p->interrupts[i].enabled < 0 || p->interrupts[i].enabled > 1) return 0;
         for (unsigned j = 0; j < MAX_HANDLERS; ++j) {
             uintptr_t fn = (uintptr_t)p->interrupts[i].fn[j];
+#if UINTPTR_MAX > 0xFFFFFFFFu
+            if (fn && (fn < ASHFORD_CODE_BASE || fn >= ASHFORD_CODE_LIMIT)) return 0;
+#else
             if (fn && (fn < 0x30000000u || fn >= 0x40000000u)) return 0;
+#endif
         }
     }
     for (unsigned i = 0; i < MAX_SEMA; ++i)

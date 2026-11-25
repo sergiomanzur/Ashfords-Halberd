@@ -1,12 +1,16 @@
 /* On-device verification of Android arm64 windowed loading and DMA pool. */
 #define _GNU_SOURCE
 #include "../src/host/window_load.h"
+#include "../src/host/room_snapshot.h"
+#include "../src/ps2_platform.h"
 #include <dlfcn.h>
 #include <link.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #define CHECK(cond) do { \
     if (!(cond)) { \
@@ -174,6 +178,118 @@ int main(void)
 
     for (int s = 0; s < ASHFORD_POOL_SLOTS; s++)
         ashford_pool_free(s);
+
+    /* 5. Task 7: ps2_memory_init() must succeed on Android via game-.so phdr audit
+     *    and map the 16 KiB scratchpad at PS2_SPR_BASE (0x70000000). */
+    ps2_memory_init();
+    volatile uint32_t* spr = (volatile uint32_t*)(uintptr_t)PS2_SPR_BASE;
+    spr[0] = 0xCAFEBABEu;
+    spr[(PS2_SPR_SIZE / 4u) - 1u] = 0x12345678u;
+    CHECK(spr[0] == 0xCAFEBABEu);
+    CHECK(spr[(PS2_SPR_SIZE / 4u) - 1u] == 0x12345678u);
+
+    /* 6. Task 7: ps2_dma_alloc -> dma_host[].base -> ps2_dma_ptr round-trip. */
+    void* dma_blk = ps2_dma_alloc(0, 65536u);
+    CHECK(dma_blk != NULL);
+    uintptr_t dma_addr = (uintptr_t)dma_blk;
+    CHECK(dma_addr >= ASHFORD_POOL_BASE && dma_addr + 65536u <= ASHFORD_POOL_LIMIT);
+    CHECK((uintptr_t)(uint32_t)dma_addr == dma_addr);
+    CHECK(ps2_dma_ptr((uint32_t)dma_addr) == dma_blk);
+    CHECK(ps2_dma_ptr((uint32_t)dma_addr + 4096u) == (void*)(dma_addr + 4096u));
+    CHECK(ps2_dma_ptr(0x30123456u) == (void*)(uintptr_t)0x30123456u);
+    CHECK(ps2_dma_ptr(0x00123456u) == (void*)(uintptr_t)0x30123456u);
+    CHECK(ps2_dma_ptr(0x70000120u) == (void*)(uintptr_t)0x70000120u);
+    CHECK(ps2_dma_ptr(0x80000120u) == (void*)(uintptr_t)0x70000120u);
+
+    /* 7. Task 7: VU stub DMA packets live inside librecvx_game.so window, not host high memory. */
+    const char* vu_syms[] = { "ps2_vu0sub0", "ps2_vu1sub0", "ps2_vu1sub1" };
+    for (int i = 0; i < 3; i++) {
+        void* p = dlsym(handle, vu_syms[i]);
+        CHECK(p != NULL);
+        uintptr_t a = (uintptr_t)p;
+        CHECK(a >= ASHFORD_WINDOW_BASE && a < ASHFORD_WINDOW_LIMIT);
+    }
+
+    /* 8. Task 7: kernel.c snapshot_platform_validate uses [0x40000000, 0x50000000)
+     *    for INTC handlers on 64-bit, rejecting data-window and high (>=4 GiB) addresses. */
+    {
+        SnapshotBlob blob = { 0 };
+        int (*valid_handler)(int) = (int (*)(int))(uintptr_t)a_main;
+        int id = AddIntcHandler(2, valid_handler, 0);
+        CHECK(id > 0);
+        CHECK(snapshot_platform_capture(&blob));
+        CHECK(snapshot_platform_validate(&blob));
+        free(blob.data);
+        blob.data = NULL; blob.size = 0;
+        RemoveIntcHandler(2, id);
+
+        /* High >=4 GiB host address must be rejected. */
+        int (*high_handler)(int) = (int (*)(int))(uintptr_t)&audit_game_phdr_cb;
+        CHECK((uintptr_t)high_handler >= (uintptr_t)ASHFORD_CODE_LIMIT);
+        id = AddIntcHandler(2, high_handler, 0);
+        CHECK(id > 0);
+        CHECK(snapshot_platform_capture(&blob));
+        CHECK(!snapshot_platform_validate(&blob));
+        free(blob.data);
+        blob.data = NULL; blob.size = 0;
+        RemoveIntcHandler(2, id);
+
+        /* Data-window address [0x30000000, 0x40000000) must also be rejected as code on 64-bit. */
+        int (*data_handler)(int) = (int (*)(int))(uintptr_t)0x30010000u;
+        id = AddIntcHandler(2, data_handler, 0);
+        CHECK(id > 0);
+        CHECK(snapshot_platform_capture(&blob));
+        CHECK(!snapshot_platform_validate(&blob));
+        free(blob.data);
+        blob.data = NULL; blob.size = 0;
+        RemoveIntcHandler(2, id);
+    }
+
+    /* 9. Task 7: RECVX_DMA_MAP_AUDIT debug trap halts on out-of-map addresses and >=4 GiB pointers. */
+    {
+        /* Valid addresses must pass even with audit enabled. */
+        pid_t pid = fork();
+        CHECK(pid >= 0);
+        if (pid == 0) {
+            setenv("RECVX_DMA_MAP_AUDIT", "1", 1);
+            if (ps2_dma_ptr(0x30123456u) != (void*)(uintptr_t)0x30123456u) _exit(2);
+            if (ps2_dma_ptr(0x00123456u) != (void*)(uintptr_t)0x30123456u) _exit(3);
+            if (ps2_dma_ptr(0x70000100u) != (void*)(uintptr_t)0x70000100u) _exit(4);
+            if (ps2_dma_ptr((uint32_t)dma_addr) != dma_blk) _exit(5);
+            _exit(0);
+        }
+        int status = 0;
+        CHECK(waitpid(pid, &status, 0) == pid);
+        CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+
+        /* Out-of-map 32-bit address (0x65000000) must trip host_fatal. */
+        pid = fork();
+        CHECK(pid >= 0);
+        if (pid == 0) {
+            setenv("RECVX_DMA_MAP_AUDIT", "1", 1);
+            (void)ps2_dma_ptr(0x65000000u);
+            _exit(0);
+        }
+        status = 0;
+        CHECK(waitpid(pid, &status, 0) == pid);
+        CHECK((WIFEXITED(status) && WEXITSTATUS(status) != 0) || WIFSIGNALED(status));
+
+        /* High >=4 GiB host heap pointer passed to sceDmaSendN must trip host_fatal. */
+        pid = fork();
+        CHECK(pid >= 0);
+        if (pid == 0) {
+            setenv("RECVX_DMA_MAP_AUDIT", "1", 1);
+            void* high_buf = malloc(64);
+            if (!high_buf || (uintptr_t)high_buf <= UINT32_MAX) _exit(99);
+            sceDmaSendN((void*)(uintptr_t)0x1000a000u, high_buf, 1);
+            _exit(0);
+        }
+        status = 0;
+        CHECK(waitpid(pid, &status, 0) == pid);
+        CHECK((WIFEXITED(status) && WEXITSTATUS(status) != 0 && WEXITSTATUS(status) != 99) || WIFSIGNALED(status));
+    }
+
+    ps2_dma_alloc(0, 0);
 
     printf("test_window_load: PASS\n");
     return 0;

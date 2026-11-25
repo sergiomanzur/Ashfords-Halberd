@@ -55,10 +55,14 @@ int recvx_rand(void)
 }
 
 /* VU microcode DMA packets (ps2_vu0sub0, ...): the interpreter carries its own tables,
-   so the uploads only need a valid, empty chain. */
+   so the uploads only need a valid, empty chain. On Android arm64, these live inside
+   librecvx_game.so (vu_stubs_android.c) so their addresses stay in [0x30000000, 0x40000000)
+   when Ps2Vu0ProgSend/Ps2Vu1ProgSend pass them to sceDmaSend(). */
+#if !defined(__ANDROID__)
 const uint32_t ps2_vu0sub0[4] __attribute__((aligned(16))) = { 0x70000000, 0, 0, 0 };
 const uint32_t ps2_vu1sub0[4] __attribute__((aligned(16))) = { 0x70000000, 0, 0, 0 };
 const uint32_t ps2_vu1sub1[4] __attribute__((aligned(16))) = { 0x70000000, 0, 0, 0 };
+#endif
 
 /* ---- libsd / synth (audio phase) ---- */
 int sceSdRemoteInit(void) { return 0; }

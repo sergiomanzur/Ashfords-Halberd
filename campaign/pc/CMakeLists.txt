@@ -141,9 +141,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Android")
     set_target_properties(recvx_game PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    # Compile snapshot manifest/core without pc_prelude.h so .ahsnap lives inside
-    # librecvx_game.so and snapshot_core.c reads its patched bytes directly.
-    add_library(recvx_game_snapshot OBJECT src/host/snapshot_manifest.c src/host/snapshot_core.c)
+    # Compile snapshot manifest/core and VU DMA stub packets without pc_prelude.h so
+    # .ahsnap and ps2_vu*sub* live inside librecvx_game.so's [0x30000000, 0x40000000) window.
+    add_library(recvx_game_snapshot OBJECT
+        src/host/snapshot_manifest.c
+        src/host/snapshot_core.c
+        src/ps2/vu_stubs_android.c
+    )
     set_target_properties(recvx_game_snapshot PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_compile_options(recvx_game_snapshot PRIVATE -std=gnu11 -Wall)
     target_include_directories(recvx_game_snapshot PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -172,9 +176,11 @@ file(GLOB_RECURSE PLATFORM_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 if(CMAKE_SYSTEM_NAME STREQUAL "Android")
-    # On Android, .ahsnap and snapshot_core live inside librecvx_game.so so
-    # snapshot_manifest.py patches the game library directly.
+    # On Android, .ahsnap, snapshot_core, and the VU DMA stub packets live inside
+    # librecvx_game.so so snapshot_manifest.py patches the game library directly and
+    # Ps2Vu*ProgSend passes windowed addresses to sceDmaSend().
     list(FILTER PLATFORM_SOURCES EXCLUDE REGEX "src/host/snapshot_(manifest|core)\\.c$")
+    list(FILTER PLATFORM_SOURCES EXCLUDE REGEX "src/ps2/vu_stubs_android\\.c$")
 endif()
 add_library(recvx_platform OBJECT ${PLATFORM_SOURCES})
 # xxHash (BSD-2-Clause, header only): XXH3, the hash PCSX2 names its texture replacements by (src/gs/hdpack.c)
