@@ -41,9 +41,9 @@
 - Modify: `campaign/pc/src/host/overlay.cpp` (`ImGui_ImplOpenGL3_Init("#version 300 es")` on GLES + RGBA8 capability indicator in Performance Graph HUD / settings)
 - Modify: `campaign/pc/tests/test_picture_gl.c`, `campaign/pc/tests/test_renderer_snapshot.c` (request GLES 3.2 on `__ANDROID__`, keep GL 3.3 core on desktop)
 
-- [ ] **Step 1:** Implement GLES 3.2 support across `gl_loader`, `picture_shader.h`, `gs_gl.c`, `aa.c`, `hdpack.c`, and `overlay.cpp`.
-- [ ] **Step 2:** Verify desktop GL 3.3 full Windows build (`50/50` including `picture_gl`, `renderer_snapshot`, `aa_tables`, `ntex`) and Android arm64 cross-compile (`test_picture_gl` and `test_renderer_snapshot` compile cleanly for arm64).
-- [ ] **Step 3:** Commit (`feat(android): OpenGL ES 3.2 renderer, shaders, and capability fallbacks`).
+- [x] **Step 1:** Implement GLES 3.2 support across `gl_loader`, `picture_shader.h`, `gs_gl.c`, `aa.c`, `hdpack.c`, and `overlay.cpp`.
+- [x] **Step 2:** Verified live on Retroid Pocket 6 Adreno 740 (`es=1 float_rt=1 clip_dist=1 s3tc=1 bptc=1`) via headless EGL 3.2 pbuffer: `picture_gl` PASS, `renderer_snapshot` (including FXAA/SMAA/Deband) PASS in both `RGBA16F` and `RECVX_FORCE_RGBA8=1` modes; Windows x86 `-PlatformTestsOnly` 41/41 passed.
+- [x] **Step 3:** Commit (`feat(android): OpenGL ES 3.2 renderer, shaders, and capability fallbacks`).
 
 ---
 

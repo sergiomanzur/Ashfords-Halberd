@@ -83,7 +83,7 @@ void overlay_init(void* window, void* gl_context)
     ImGui::GetIO().IniFilename = nullptr;   /* our settings live in recvx.ini */
     ashford::panel_style();
     ImGui_ImplSDL3_InitForOpenGL(win, (SDL_GLContext)gl_context);
-    ImGui_ImplOpenGL3_Init("#version 330 core");
+    ImGui_ImplOpenGL3_Init(g_gl_es ? "#version 300 es" : "#version 330 core");
     ready = true;
     const char* show = SDL_getenv("RECVX_SHOW_OVERLAY");
     visible = show && strcmp(show, "0");
@@ -613,6 +613,10 @@ static void dossier_page(int page)
     } else if (page == SP_COUNT) {
         static ProfFrame h[240];
         bool on = prof_enabled != 0;
+        if (gs_is_gles()) {
+            ImGui::TextDisabled("Renderer: OpenGL ES 3.2 (%s)",
+                gs_color_buffer_float() ? "RGBA16F float targets" : "RGBA8 fallback — EXT_color_buffer_float unavailable");
+        }
         if (ImGui::Checkbox("Measure (small overhead; always on with --profile)", &on)) prof_enabled = on;
         int n = prof_history(h, 240);
         if (n > 0) {
@@ -881,6 +885,10 @@ void overlay_render(void)
                 if (h[i].total > worst) worst = h[i].total;
             }
             ImGui::TextColored(ImVec4(0.84f, 0.71f, 0.41f, 1.0f), "%.1f fps", ImGui::GetIO().Framerate);
+            if (gs_is_gles() && !gs_color_buffer_float()) {
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.92f, 0.62f, 0.28f, 1.0f), "[RGBA8]");
+            }
             if (n > 0) {
                 ImGui::SameLine();
                 ImGui::TextDisabled("| %.1f ms (max %.1f)", avg, worst);

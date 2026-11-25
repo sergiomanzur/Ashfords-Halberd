@@ -339,14 +339,43 @@ static GLenum dds_fmt(uint32_t dxgi)
          : dxgi == 77 || dxgi == 78 ? GL_COMPRESSED_RGBA_S3TC_DXT5_EXT : GL_COMPRESSED_RGBA_BPTC_UNORM;
 }
 
+static int dds_hw_supported(uint32_t dxgi)
+{
+    if (dxgi == 71 || dxgi == 72 || dxgi == 74 || dxgi == 75 || dxgi == 77 || dxgi == 78) return g_gl_s3tc;
+    return g_gl_bptc;
+}
+
+static void decode_bc_level(uint32_t dxgi, uint32_t block_bytes, const uint8_t* src, uint32_t mw, uint32_t mh, uint8_t* dst)
+{
+    uint32_t bxn = (mw + 3) / 4, byn = (mh + 3) / 4;
+    for (uint32_t by = 0; by < byn; by++) {
+        for (uint32_t bx = 0; bx < bxn; bx++) {
+            uint8_t blk[16 * 4];
+            const uint8_t* bsrc = src + ((size_t)by * bxn + bx) * block_bytes;
+            switch (dxgi) {
+            case 71: case 72: bcdec_bc1(bsrc, blk, 16); break;
+            case 74: case 75: bcdec_bc2(bsrc, blk, 16); break;
+            case 77: case 78: bcdec_bc3(bsrc, blk, 16); break;
+            default: bcdec_bc7(bsrc, blk, 16); break;
+            }
+            for (uint32_t py = 0; py < 4 && by * 4 + py < mh; py++) {
+                uint32_t copy_w = mw - bx * 4 < 4 ? mw - bx * 4 : 4;
+                memcpy(dst + ((size_t)(by * 4 + py) * mw + bx * 4) * 4, blk + py * 16, copy_w * 4);
+            }
+        }
+    }
+}
+
 static GLuint upload_dds(const uint8_t* d, size_t n, uint32_t* out_bytes)
 {
     static PFN_CompressedTexImage2D cti;
     PcDds x;
     uint32_t off, total = 0, mips;
     GLuint t;
+    int use_hw_bc;
     if (!pc_dds_parse(d, n, n, &x)) return 0;
-    if (x.block && !cti && !(cti = (PFN_CompressedTexImage2D)SDL_GL_GetProcAddress("glCompressedTexImage2D"))) return 0;
+    use_hw_bc = x.block && dds_hw_supported(x.dxgi);
+    if (use_hw_bc && !cti && !(cti = (PFN_CompressedTexImage2D)SDL_GL_GetProcAddress("glCompressedTexImage2D"))) use_hw_bc = 0;
     glGenTextures(1, &t);
     glBindTexture(GL_TEXTURE_2D, t);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
@@ -354,9 +383,33 @@ static GLuint upload_dds(const uint8_t* d, size_t n, uint32_t* out_bytes)
         uint32_t mw = x.w >> mips ? x.w >> mips : 1, mh = x.h >> mips ? x.h >> mips : 1;
         uint64_t sz = pc_dds_level(&x, mips);
         if (!pc_range_ok(off, sz, n)) break;
-        if (x.block) cti(GL_TEXTURE_2D, (GLint)mips, dds_fmt(x.dxgi), (GLsizei)mw, (GLsizei)mh, 0, (GLsizei)sz, d + off);
-        else glTexImage2D(GL_TEXTURE_2D, (GLint)mips, GL_RGBA8, (GLsizei)mw, (GLsizei)mh, 0, x.bgra ? GL_BGRA : GL_RGBA, GL_UNSIGNED_BYTE, d + off);
-        off += (uint32_t)sz; total += (uint32_t)sz;
+        if (x.block && use_hw_bc) {
+            cti(GL_TEXTURE_2D, (GLint)mips, dds_fmt(x.dxgi), (GLsizei)mw, (GLsizei)mh, 0, (GLsizei)sz, d + off);
+            total += (uint32_t)sz;
+        } else if (x.block) {
+            size_t rgba_sz = (size_t)mw * mh * 4;
+            uint8_t* rgba = malloc(rgba_sz);
+            if (!rgba) break;
+            decode_bc_level(x.dxgi, x.block, d + off, mw, mh, rgba);
+            glTexImage2D(GL_TEXTURE_2D, (GLint)mips, GL_RGBA8, (GLsizei)mw, (GLsizei)mh, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+            free(rgba);
+            total += (uint32_t)rgba_sz;
+        } else if (x.bgra && g_gl_es) {
+            size_t rgba_sz = (size_t)mw * mh * 4;
+            uint8_t* rgba = malloc(rgba_sz);
+            if (!rgba) break;
+            const uint8_t* s = d + off;
+            for (size_t i = 0; i < rgba_sz; i += 4) {
+                rgba[i + 0] = s[i + 2]; rgba[i + 1] = s[i + 1]; rgba[i + 2] = s[i + 0]; rgba[i + 3] = s[i + 3];
+            }
+            glTexImage2D(GL_TEXTURE_2D, (GLint)mips, GL_RGBA8, (GLsizei)mw, (GLsizei)mh, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+            free(rgba);
+            total += (uint32_t)rgba_sz;
+        } else {
+            glTexImage2D(GL_TEXTURE_2D, (GLint)mips, GL_RGBA8, (GLsizei)mw, (GLsizei)mh, 0, x.bgra ? GL_BGRA : GL_RGBA, GL_UNSIGNED_BYTE, d + off);
+            total += (uint32_t)sz;
+        }
+        off += (uint32_t)sz;
     }
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, (GLint)mips - 1);
     *out_bytes = total;

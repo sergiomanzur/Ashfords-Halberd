@@ -103,3 +103,11 @@ void gs_frame_executed(int interpolate);
 uint64_t gs_present(const struct Frame* cur, float t);   /* returns the swap's blocking time (ns) */
 int gs_gpu_ready(uint64_t wait_ns);   /* at most the last executed frame or image still on the GPU (waits up to wait_ns) */
 void gs_replay_check(const struct Frame* cur);   /* RECVX_REPLAY_CHECK */
+#ifdef __cplusplus
+extern "C" {
+#endif
+int gs_color_buffer_float(void);   /* 1: RGBA16F render targets; 0: GLES RGBA8 fallback */
+int gs_is_gles(void);              /* 1: OpenGL ES 3.2 backend; 0: desktop OpenGL 3.3 */
+#ifdef __cplusplus
+}
+#endif

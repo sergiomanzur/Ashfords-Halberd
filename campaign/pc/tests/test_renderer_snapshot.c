@@ -1,11 +1,16 @@
 /* Isolated GPU fixture uses production implementation to inspect private RTs;
    this avoids adding test-only exports to the game. No assets or visible window. */
+#ifdef __ANDROID__
+#define SDL_MAIN_HANDLED
+#include <SDL3/SDL_main.h>
+#include "android_egl_test.h"
+#endif
 #include <stdarg.h>
 #include "../src/gs/gs_gl.c"
 #include "../src/ps2/vu0.h"
 SDL_Window *g_window;
 HostConfig g_config;
-void host_log(const char *fmt, ...) { (void)fmt; }
+void host_log(const char *fmt, ...) { va_list a; va_start(a, fmt); if (strncmp(fmt, "gl:", 3) == 0) vprintf(fmt, a); va_end(a); }
 void host_fatal(const char *fmt, ...) { va_list a;va_start(a,fmt);vfprintf(stderr,fmt,a);va_end(a);abort(); }
 void prof_push(int id) { (void)id; } void prof_pop(void) {}
 int hdpack_active(void) { return 0; }
@@ -25,14 +30,24 @@ static GLuint fixture_texture(int w,int h,int depth,float value)
 {
     GLuint t;float p[8*8*4];for(int i=0;i<w*h*(depth?1:4);++i)p[i]=value;
     glGenTextures(1,&t);glBindTexture(GL_TEXTURE_2D,t);
-    glTexImage2D(GL_TEXTURE_2D,0,depth?GL_DEPTH_COMPONENT32F:GL_RGBA16F,w,h,0,depth?GL_DEPTH_COMPONENT:GL_RGBA,GL_FLOAT,p);
+    if (!depth && g_gl_es && !g_gl_color_buffer_float) {
+        unsigned char u8[8*8*4];
+        unsigned char v=(unsigned char)(value<=0.f?0:value>=1.f?255:(int)(value*255.f+0.5f));
+        memset(u8,v,(size_t)w*h*4);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,w,h,0,GL_RGBA,GL_UNSIGNED_BYTE,u8);
+    } else {
+        glTexImage2D(GL_TEXTURE_2D,0,depth?GL_DEPTH_COMPONENT32F:GL_RGBA16F,w,h,0,depth?GL_DEPTH_COMPONENT:GL_RGBA,GL_FLOAT,p);
+    }
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);return t;
 }
 static void expect_texture(GLuint t,int depth,float value)
 {
-    float p[8*8*4]={0};CHECK(snapshot_gl_functions());glBindTexture(GL_TEXTURE_2D,t);
-    snapshot_tex_image(GL_TEXTURE_2D,0,depth?GL_DEPTH_COMPONENT:GL_RGBA,GL_FLOAT,p);
-    CHECK(glGetError()==0);CHECK(p[0]==value && p[1]==value);
+    float p[8*8*4]={0};
+    GLint w=0,h=0,fmt=0;
+    CHECK(snapshot_gl_functions());glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,t);
+    snapshot_tex_level(GL_TEXTURE_2D,0,0x1000,&w);snapshot_tex_level(GL_TEXTURE_2D,0,0x1001,&h);snapshot_tex_level(GL_TEXTURE_2D,0,0x1003,&fmt);
+    CHECK(snapshot_read_texture_float(t,w,h,depth?GL_DEPTH_COMPONENT32F:fmt,p));
+    CHECK(glGetError()==0);CHECK(fabsf(p[0]-value)<0.01f && fabsf(p[1]-value)<0.01f);
 }
 static void seed(void)
 {
@@ -94,7 +109,8 @@ static void roundtrip(void)
     CHECK(ntex_lookup(captured,gs.texa,&t,&w,&h)==2);CHECK(w==2 && h==2);expect_texture(t,0,.75f);
     uint64_t native=128|((uint64_t)1<<14)|((uint64_t)1<<26)|((uint64_t)1<<30);
     CHECK(ntex_lookup(native,gs.texa,&t,&w,&h)==1);CHECK(w==2 && h==2);
-    unsigned char rgba[16];glBindTexture(GL_TEXTURE_2D,t);snapshot_tex_image(GL_TEXTURE_2D,0,GL_RGBA,GL_UNSIGNED_BYTE,rgba);
+    unsigned char rgba[16];
+    CHECK(snapshot_read_texture_rgba8(t,w,h,rgba));
     CHECK(rgba[0]==255 && rgba[1]==0 && rgba[2]==0 && rgba[4]==0 && rgba[5]==255);
     ps2_vif1_transfer_words(more_row,2);
     uint32_t unpack[]={0x05000001,0x01000101,0x6c010020,0,0,0,0};ps2_vif1_transfer_words(unpack,7);
@@ -142,14 +158,45 @@ static void barriers(void)
     stream_reg(0x3b,gs.texa);stream_submit();Frame *f=stream_pop(0);CHECK(f);stream_release(f);
     CHECK(glGetError()==0);
 }
+static void postprocess_shaders(void)
+{
+    extern void aa_apply(int mode, unsigned int src, unsigned int dst_fbo, int w, int h, float scale);
+    GLuint src = fixture_texture(8, 8, 0, 0.5f);
+    GLuint dst = fixture_texture(8, 8, 0, 0.0f);
+    GLuint fbo = 0;
+    glGenFramebuffers(1, &fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, dst, 0);
+    CHECK(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+    glDisable(GL_SCISSOR_TEST); glDisable(GL_DEPTH_TEST); glDisable(GL_BLEND); clip_distances(0);
+    for (int mode = 1; mode <= 3; ++mode) {
+        aa_apply(mode, src, fbo, 8, 8, 1.0f);
+        CHECK(glGetError() == 0);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &fbo);
+    glDeleteTextures(1, &src);
+    glDeleteTextures(1, &dst);
+}
 int main(void)
 {
-    CHECK(SDL_Init(SDL_INIT_VIDEO));SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,3);SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION,3);
+#if defined(__ANDROID__)
+    AndroidEglTest egl = {0};
+    SDL_SetMainReady();
+    SDL_SetAppMetadata("ashford-test", "1.0", "com.ashfordshalberd.test");
+    CHECK(android_egl_init(&egl, 8, 8));
+    g_config.scale=1;g_config.contrast=100;g_config.gamma=10;g_config.saturation=100;
+    gs_renderer_init();stream_init();seed();roundtrip();barriers();postprocess_shaders();
+    android_egl_shutdown(&egl);
+#else
+    CHECK(SDL_Init(SDL_INIT_VIDEO));
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,3);SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION,3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,SDL_GL_CONTEXT_PROFILE_CORE);
     g_window=SDL_CreateWindow("Renderer snapshot test",8,8,SDL_WINDOW_OPENGL|SDL_WINDOW_HIDDEN);CHECK(g_window);
     SDL_GLContext context=SDL_GL_CreateContext(g_window);CHECK(context);
     g_config.scale=1;g_config.contrast=100;g_config.gamma=10;g_config.saturation=100;
-    gs_renderer_init();stream_init();seed();roundtrip();barriers();
+    gs_renderer_init();stream_init();seed();roundtrip();barriers();postprocess_shaders();
     SDL_GL_DestroyContext(context);SDL_DestroyWindow(g_window);SDL_Quit();
+#endif
     puts("renderer snapshot: real GPU/native-definition/parser roundtrip passed");return 0;
 }

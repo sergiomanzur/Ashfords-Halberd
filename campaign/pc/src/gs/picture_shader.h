@@ -1,15 +1,21 @@
 #ifndef RECVX_PICTURE_SHADER_H
 #define RECVX_PICTURE_SHADER_H
 
+#define PRESENT_VS_BODY \
+    "uniform vec4 u_rect;\n" \
+    "out vec2 v_uv;\n" \
+    "void main(){\n" \
+    "  vec2 c = vec2((gl_VertexID & 1) != 0 ? 1.0 : 0.0, (gl_VertexID & 2) != 0 ? 1.0 : 0.0);\n" \
+    "  v_uv = vec2(mix(u_rect.x, u_rect.z, c.x), mix(u_rect.y, u_rect.w, c.y));\n" \
+    "  gl_Position = vec4(c.x * 2.0 - 1.0, 1.0 - c.y * 2.0, 0.0, 1.0);\n" \
+    "}\n"
+
 static const char* present_vs =
     "#version 330 core\n"
-    "uniform vec4 u_rect;\n"
-    "out vec2 v_uv;\n"
-    "void main(){\n"
-    "  vec2 c = vec2((gl_VertexID & 1) != 0 ? 1.0 : 0.0, (gl_VertexID & 2) != 0 ? 1.0 : 0.0);\n"
-    "  v_uv = vec2(mix(u_rect.x, u_rect.z, c.x), mix(u_rect.y, u_rect.w, c.y));\n"
-    "  gl_Position = vec4(c.x * 2.0 - 1.0, 1.0 - c.y * 2.0, 0.0, 1.0);\n"
-    "}\n";
+    PRESENT_VS_BODY;
+static const char* present_vs_es =
+    "#version 320 es\nprecision highp float;\nprecision highp int;\n"
+    PRESENT_VS_BODY;
 /* Presentation shader shared by gs_gl.c (with DITH 0/1 and supersampled downscale u_ss)
    and standalone picture tests (present_fs, DITH 0). 3D-only FXAA/SMAA runs at gs_scene_aa;
    u_antialias stays available for the standalone presentation shader path. */
@@ -69,5 +75,7 @@ static const char* present_vs =
 static const char* present_fs_body ASHFORD_SHADER_UNUSED = PRESENT_FS_BODY;
 static const char* present_fs ASHFORD_SHADER_UNUSED = "#version 330 core\n#define DITH 0\n" PRESENT_FS_BODY;
 static const char* present_fs_dith ASHFORD_SHADER_UNUSED = "#version 330 core\n#define DITH 1\n" PRESENT_FS_BODY;
+static const char* present_fs_es ASHFORD_SHADER_UNUSED = "#version 320 es\nprecision highp float;\nprecision highp int;\n#define DITH 0\n" PRESENT_FS_BODY;
+static const char* present_fs_dith_es ASHFORD_SHADER_UNUSED = "#version 320 es\nprecision highp float;\nprecision highp int;\n#define DITH 1\n" PRESENT_FS_BODY;
 
 #endif

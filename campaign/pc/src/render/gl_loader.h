@@ -85,8 +85,14 @@ typedef ptrdiff_t GLsizeiptr; typedef ptrdiff_t GLintptr;
 #define GL_R8 0x8229
 #define GL_RED 0x1903
 #define GL_PACK_ALIGNMENT 0xD05
+#define GL_MAX_TEXTURE_SIZE 0x0D33
 #define GL_VERSION 0x1F02
 #define GL_RENDERER 0x1F01
+#define GL_EXTENSIONS 0x1F03
+#define GL_NUM_EXTENSIONS 0x821D
+#define GL_RGBA16F 0x881A
+#define GL_RGBA32F 0x8814
+#define GL_HALF_FLOAT 0x140B
 #define GL_FALSE 0x0
 #define GL_TRUE 0x1
 
@@ -150,6 +156,9 @@ extern PFN_glClearColor gl_ClearColor;
 typedef void (GLAPIENTRY *PFN_glClearDepth)(GLdouble d);
 extern PFN_glClearDepth gl_ClearDepth;
 #define glClearDepth gl_ClearDepth
+typedef void (GLAPIENTRY *PFN_glClearDepthf)(GLfloat d);
+extern PFN_glClearDepthf gl_ClearDepthf;
+#define glClearDepthf gl_ClearDepthf
 typedef void (GLAPIENTRY *PFN_glDepthFunc)(GLenum func);
 extern PFN_glDepthFunc gl_DepthFunc;
 #define glDepthFunc gl_DepthFunc
@@ -264,6 +273,12 @@ extern PFN_glGetError gl_GetError;
 typedef const GLubyte* (GLAPIENTRY *PFN_glGetString)(GLenum name);
 extern PFN_glGetString gl_GetString;
 #define glGetString gl_GetString
+typedef const GLubyte* (GLAPIENTRY *PFN_glGetStringi)(GLenum name, GLuint index);
+extern PFN_glGetStringi gl_GetStringi;
+#define glGetStringi gl_GetStringi
+typedef void (GLAPIENTRY *PFN_glGetIntegerv)(GLenum pname, GLint* data);
+extern PFN_glGetIntegerv gl_GetIntegerv;
+#define glGetIntegerv gl_GetIntegerv
 typedef void (GLAPIENTRY *PFN_glFinish)(void);
 extern PFN_glFinish gl_Finish;
 #define glFinish gl_Finish
@@ -281,4 +296,16 @@ extern PFN_glClientWaitSync gl_ClientWaitSync;
 typedef void (GLAPIENTRY *PFN_glDeleteSync)(GLsync sync);
 extern PFN_glDeleteSync gl_DeleteSync;
 #define glDeleteSync gl_DeleteSync
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern int g_gl_es;
+extern int g_gl_color_buffer_float;
+extern int g_gl_clip_distance;
+extern int g_gl_s3tc;
+extern int g_gl_bptc;
+int gl_has_extension(const char* name);
 int gl_load(void* (*getproc)(const char*));
+#ifdef __cplusplus
+}
+#endif

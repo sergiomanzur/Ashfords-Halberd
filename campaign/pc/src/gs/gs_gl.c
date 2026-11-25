@@ -160,8 +160,7 @@ static ProgUni pu[NPROG], *pcur = &pu[0];
 static GLuint present_progs[2];   /* without, with DITH */
 static GLint up_tex[2], up_rect[2], up_pic[2], up_ss[2], up_saturation[2], up_antialias[2];
 
-static const char* vs_src =
-    "#version 330 core\n"
+static const char* vs_src_body =
     "layout(location=0) in vec4 a_pos;\n"
     "layout(location=1) in vec3 a_stq;\n"
     "layout(location=2) in vec4 a_col;\n"
@@ -173,16 +172,26 @@ static const char* vs_src =
        band, and screen-linear colour/fog across a triangle reaching far off-screen near the
        camera is wrong (walls came out fully fogged in third-person view) */
     "out vec3 v_stq; out vec4 v_col; out float v_fog;\n"
+    "#if !USE_HW_CLIP\n"
+    "out vec2 v_clip;\n"
+    "#endif\n"
     "void main(){\n"
     "  float w = a_pos.w;\n"
     "  vec2 p = (vec2(a_pos.x + u_rt_margin * w, a_pos.y) / u_rt_size) * 2.0 - w;\n"
     "  gl_Position = vec4(p, a_pos.z * u_zscale * 2.0 - w, w);\n"
+    "#if USE_HW_CLIP\n"
     "  gl_ClipDistance[0] = a_clip.x; gl_ClipDistance[1] = a_clip.y;\n"
+    "#else\n"
+    "  v_clip = a_clip;\n"
+    "#endif\n"
     "  v_stq = a_stq; v_col = a_col; v_fog = a_fog;\n"
     "}\n";
 
 static const char* fs_src =   /* (after "#version" and the variant's #defines) */
     "in vec3 v_stq; in vec4 v_col; in float v_fog;\n"
+    "#if EMULATE_CLIP\n"
+    "in vec2 v_clip;\n"
+    "#endif\n"
     "uniform sampler2D u_tex;\n"
     "uniform int u_tme, u_tfx, u_tcc, u_fst, u_fge, u_ate, u_atst, u_premul, u_afail_pass;\n"
     "uniform float u_aref, u_tex_alpha_scale;\n"
@@ -200,6 +209,9 @@ static const char* fs_src =   /* (after "#version" and the variant's #defines) *
     "  return t;\n"
     "}\n"
     "void main(){\n"
+    "#if EMULATE_CLIP\n"
+    "  if (v_clip.x < 0.0 || v_clip.y < 0.0) discard;\n"
+    "#endif\n"
     "  vec4 c = v_col * 255.0;\n"     /* GS 0..255 integer domain */
     "#if SMOOTH == 2\n"
     "  vec3 tfr = vec3(0.0), tsl = vec3(0.0);\n"
@@ -310,15 +322,48 @@ static GLuint compile(const char* vs, const char* fs)
 
 unsigned int gs_gl_compile(const char* vs, const char* fs) { return compile(vs, fs); }   /* aa.c */
 
-static void* gl_getproc(const char* name) { return (void*)SDL_GL_GetProcAddress(name); }
+#if defined(__ANDROID__)
+#include <EGL/egl.h>
+#include <dlfcn.h>
+#endif
+
+static void* gl_getproc(const char* name)
+{
+    void* p = (void*)SDL_GL_GetProcAddress(name);
+#if defined(__ANDROID__)
+    if (!p) p = (void*)eglGetProcAddress(name);
+    if (!p) p = dlsym(RTLD_DEFAULT, name);
+#endif
+    return p;
+}
+
+static const char* glsl_preamble(void)
+{
+    return g_gl_es ? "#version 320 es\nprecision highp float;\nprecision highp int;\n"
+                   : "#version 330 core\n";
+}
+
+int gs_color_buffer_float(void) { return g_gl_color_buffer_float; }
+int gs_is_gles(void) { return g_gl_es; }
+static GLint rt_color_fmt(void) { return g_gl_color_buffer_float ? GL_RGBA16F : GL_RGBA8; }
+static GLenum rt_color_type(void) { return g_gl_color_buffer_float ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE; }
 
 static void prog_build(int v)
 {
-    static char fs[8192];
+    static char vs[4096], fs[8192];
     if ((v & V_REGION) && !(v & V_TEX)) return;
-    SDL_snprintf(fs, sizeof(fs), "#version 330 core\n#define ATEST %d\n#define TEX %d\n#define REGION %d\n#define FOG %d\n#define SMOOTH %d\n%s",
-                 !!(v & V_ATEST), !!(v & V_TEX), !!(v & V_REGION), !!(v & V_FOG), v & V_RTMIX ? 2 : !!(v & V_SMOOTH), fs_src);
-    progs[v] = compile(vs_src, fs);
+    if (g_gl_es) {
+        SDL_snprintf(vs, sizeof(vs),
+            "#version 320 es\n%sprecision highp float;\nprecision highp int;\n#define USE_HW_CLIP %d\n%s",
+            g_gl_clip_distance ? "#extension GL_EXT_clip_cull_distance : require\n" : "",
+            g_gl_clip_distance ? 1 : 0, vs_src_body);
+    } else {
+        SDL_snprintf(vs, sizeof(vs), "#version 330 core\n#define USE_HW_CLIP 1\n%s", vs_src_body);
+    }
+    SDL_snprintf(fs, sizeof(fs), "%s#define EMULATE_CLIP %d\n#define ATEST %d\n#define TEX %d\n#define REGION %d\n#define FOG %d\n#define SMOOTH %d\n%s",
+                 glsl_preamble(), !g_gl_clip_distance, !!(v & V_ATEST), !!(v & V_TEX), !!(v & V_REGION), !!(v & V_FOG),
+                 v & V_RTMIX ? 2 : !!(v & V_SMOOTH), fs_src);
+    progs[v] = compile(vs, fs);
 #define U(n) pu[v].n = glGetUniformLocation(progs[v], "u_" #n)
     U(rt_size); U(rt_margin); U(tme); U(tfx); U(tcc); U(fst); U(texsize); U(fge); U(fogcol); U(ate); U(atst); U(aref);
     U(tex); U(tex_alpha_scale); U(texofs); U(premul); U(zscale); U(clamp_mode); U(clamp_vals); U(afail_pass); U(rt16);
@@ -327,16 +372,18 @@ static void prog_build(int v)
 
 void gs_renderer_init(void)
 {
-    if (!gl_load(gl_getproc)) host_fatal("OpenGL 3.3 is required. Update your graphics driver.");
-    host_log("gl: %s / %s\n", glGetString(GL_RENDERER), glGetString(GL_VERSION));
+    if (!gl_load(gl_getproc)) host_fatal("OpenGL 3.3 or OpenGL ES 3.2 is required. Update your graphics driver.");
+    host_log("gl: %s / %s (es=%d float_rt=%d clip_dist=%d s3tc=%d bptc=%d)\n",
+             glGetString(GL_RENDERER), glGetString(GL_VERSION),
+             g_gl_es, g_gl_color_buffer_float, g_gl_clip_distance, g_gl_s3tc, g_gl_bptc);
     if (!gs_mem_selftest()) host_fatal("Graphics setup failed. Restart the game.");
     gs_reset();
 
     for (int v = 0; v < (g_config.dithering ? NPROG : V_SMOOTH); v++) if (!(v & V_SMOOTH) || !(v & V_RTMIX)) prog_build(v);   /* (Dithering's too when on: no pause in play) */
     for (int d = 0; d < 2; d++) {
         static char fs[4096];
-        SDL_snprintf(fs, sizeof(fs), "#version 330 core\n#define DITH %d\n%s", d, present_fs_body);
-        present_progs[d] = compile(present_vs, fs);
+        SDL_snprintf(fs, sizeof(fs), "%s#define DITH %d\n%s", glsl_preamble(), d, present_fs_body);
+        present_progs[d] = compile(g_gl_es ? present_vs_es : present_vs, fs);
         up_tex[d] = glGetUniformLocation(present_progs[d], "u_tex");
         up_rect[d] = glGetUniformLocation(present_progs[d], "u_rect");
         up_pic[d] = glGetUniformLocation(present_progs[d], "u_pic");
@@ -372,6 +419,7 @@ void gs_renderer_init(void)
 static int clip_on;
 static void clip_distances(int on)
 {
+    if (!g_gl_clip_distance) return;
     if (clip_on == on) return;
     if (on) { glEnable(GL_CLIP_DISTANCE0); glEnable(GL_CLIP_DISTANCE1); }
     else { glDisable(GL_CLIP_DISTANCE0); glDisable(GL_CLIP_DISTANCE1); }
@@ -424,9 +472,6 @@ static void depth_for(uint32_t zbp, GLuint fbo, int pw, int ph)
     dz[e].zbp = zbp; dz[e].pw = pw; dz[e].ph = ph; dz[e].last = dz_clock; dz[e].zrow = 0; dz_cur = e;
 }
 
-#define GL_RGBA16F 0x881A
-#define GL_HALF_FLOAT 0x140B
-
 static RenderTarget* rt_find(uint32_t fbp, uint32_t fbw)
 {
     for (int i = 0; i < MAX_RT; i++) if (rts[i].used && rts[i].fbp == fbp && rts[i].fbw == fbw) return &rts[i];
@@ -471,7 +516,19 @@ static void rt_load_from_mem(RenderTarget* rt)
     }
     glGenTextures(1, &tmp);
     glBindTexture(GL_TEXTURE_2D, tmp);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_FLOAT, fx);
+    if (g_gl_color_buffer_float) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_FLOAT, fx);
+    } else {
+        uint8_t* u8 = malloc((size_t)w * h * 4);
+        if (u8) {
+            for (size_t i = 0; i < (size_t)w * h * 4; i++) {
+                float v = fx[i];
+                u8[i] = (uint8_t)(v <= 0.0f ? 0 : v >= 1.0f ? 255 : (int)(v * 255.0f + 0.5f));
+            }
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, u8);
+            free(u8);
+        }
+    }
     {
         GLuint fb;
         glGenFramebuffers(1, &fb);
@@ -510,7 +567,7 @@ static RenderTarget* rt_get(uint32_t fbp, uint32_t fbw, uint32_t psm)
     rt->last_use = frame_no;
     glGenTextures(1, &rt->tex);
     glBindTexture(GL_TEXTURE_2D, rt->tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, rt->pw, rt->ph, 0, GL_RGBA, GL_HALF_FLOAT, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, rt_color_fmt(), rt->pw, rt->ph, 0, GL_RGBA, rt_color_type(), NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -560,7 +617,7 @@ void gs_set_scale(float scale)
         if (!rt->used) continue;
         glGenTextures(1, &tex);
         glBindTexture(GL_TEXTURE_2D, tex);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, pw, ph, 0, GL_RGBA, GL_HALF_FLOAT, NULL);
+        glTexImage2D(GL_TEXTURE_2D, 0, rt_color_fmt(), pw, ph, 0, GL_RGBA, rt_color_type(), NULL);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -962,11 +1019,17 @@ static void gt_init(void)
 {
     static int done;
     if (!done++) {
+        int allow_es_timer = !g_gl_es || gl_has_extension("GL_EXT_disjoint_timer_query");
         gt.log = SDL_getenv("RECVX_GPU_TIME") ? SDL_atoi(SDL_getenv("RECVX_GPU_TIME")) : 0;
-        gt.counter = (PFN_QueryCounter)SDL_GL_GetProcAddress("glQueryCounter");
-        gt.get64 = (PFN_GetQueryObjectui64v)SDL_GL_GetProcAddress("glGetQueryObjectui64v");
-        gt.geti = (PFN_GetQueryObjectiv)SDL_GL_GetProcAddress("glGetQueryObjectiv");
-        gt.gen = (PFN_GenQueries)SDL_GL_GetProcAddress("glGenQueries");
+        if (allow_es_timer) {
+            gt.counter = (PFN_QueryCounter)SDL_GL_GetProcAddress("glQueryCounter");
+            if (!gt.counter) gt.counter = (PFN_QueryCounter)SDL_GL_GetProcAddress("glQueryCounterEXT");
+            gt.get64 = (PFN_GetQueryObjectui64v)SDL_GL_GetProcAddress("glGetQueryObjectui64v");
+            if (!gt.get64) gt.get64 = (PFN_GetQueryObjectui64v)SDL_GL_GetProcAddress("glGetQueryObjectui64vEXT");
+            gt.geti = (PFN_GetQueryObjectiv)SDL_GL_GetProcAddress("glGetQueryObjectiv");
+            if (!gt.geti) gt.geti = (PFN_GetQueryObjectiv)SDL_GL_GetProcAddress("glGetQueryObjectivEXT");
+            gt.gen = (PFN_GenQueries)SDL_GL_GetProcAddress("glGenQueries");
+        }
         gt.ok = gt.counter && gt.get64 && gt.geti && gt.gen;
         if (gt.ok) for (int i = 0; i < GT_RING; i++) gt.gen(GT_N, gt.q[i]);
     }
@@ -1241,6 +1304,7 @@ static void zrow_verify(int depth)
     if (!zrow_check()) return;
     glBindFramebuffer(GL_READ_FRAMEBUFFER, cur_rt->fbo);
     for (int d = 0; d <= depth; d++) {
+        if (g_gl_es && (d || !g_gl_color_buffer_float)) continue;
         int z = d ? dz[dz_cur].zrow : cur_rt->zrow, y0 = (int)ceilf(z * g_scale), n = cur_rt->ph - y0, c = d ? 1 : 4;
         size_t cnt = (size_t)cur_rt->pw * (n > 0 ? n : 0) * c, i = 0;
         float* px;
@@ -2034,6 +2098,24 @@ static int dump_on(void)
     }
     return dump_dir != NULL;
 }
+static void read_rt_rgba8(GLuint fbo, int w, int h, uint8_t* dst)
+{
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    if (!g_gl_es || !g_gl_color_buffer_float) {
+        glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, dst);
+        return;
+    }
+    float* tmp = malloc((size_t)w * h * 4 * sizeof(float));
+    if (!tmp) { memset(dst, 0, (size_t)w * h * 4); return; }
+    glReadPixels(0, 0, w, h, GL_RGBA, GL_FLOAT, tmp);
+    for (size_t i = 0; i < (size_t)w * h * 4; i++) {
+        float v = tmp[i];
+        dst[i] = (uint8_t)(v <= 0.0f ? 0 : v >= 1.0f ? 255 : (int)(v * 255.0f + 0.5f));
+    }
+    free(tmp);
+}
+
 static void dump_frame(int interp)
 {
     if (!dump_on() || frame_no < (uint64_t)from) return;
@@ -2050,8 +2132,7 @@ static void dump_frame(int interp)
         for (int r = 0; r < MAX_RT; r++) if (rts[r].used) {
             SDL_Surface* rs = SDL_CreateSurface(rts[r].pw, rts[r].ph, SDL_PIXELFORMAT_ABGR8888);
             char rp[1024];
-            glBindFramebuffer(GL_READ_FRAMEBUFFER, rts[r].fbo);
-            glReadPixels(0, 0, rts[r].pw, rts[r].ph, GL_RGBA, GL_UNSIGNED_BYTE, rs->pixels);
+            read_rt_rgba8(rts[r].fbo, rts[r].pw, rts[r].ph, (uint8_t*)rs->pixels);
             SDL_snprintf(rp, sizeof(rp), "%s/rt%u_%05llu.bmp", dump_dir, rts[r].fbp, (unsigned long long)frame_no);
             SDL_SaveBMP(rs, rp);
             SDL_DestroySurface(rs);
@@ -2080,7 +2161,7 @@ static void ensure_target(GLuint* tex, GLuint* fbo, int* cw, int* ch, int w, int
     if (*tex && *cw == w && *ch == h) return;
     if (!*tex) { glGenTextures(1, tex); glGenFramebuffers(1, fbo); }
     glBindTexture(GL_TEXTURE_2D, *tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_HALF_FLOAT, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, rt_color_fmt(), w, h, 0, GL_RGBA, rt_color_type(), NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -2145,7 +2226,15 @@ void gs_rt_to_mem(uint32_t bp, uint32_t bw, uint32_t psm, uint32_t x, uint32_t y
     if (!px) { host_log("gs: no memory to read back %dx%d pixels (StoreImage)\n", sw, sh); return; }
     glBindFramebuffer(GL_READ_FRAMEBUFFER, rt->fbo);
     glPixelStorei(GL_PACK_ALIGNMENT, 4);
-    glReadPixels(sx, sy, sw, sh, GL_RGBA, GL_FLOAT, px);
+    if (g_gl_color_buffer_float) {
+        glReadPixels(sx, sy, sw, sh, GL_RGBA, GL_FLOAT, px);
+    } else {
+        uint8_t* u8 = malloc((size_t)sw * sh * 4);
+        if (!u8) { free(px); glBindFramebuffer(GL_READ_FRAMEBUFFER, 0); return; }
+        glReadPixels(sx, sy, sw, sh, GL_RGBA, GL_UNSIGNED_BYTE, u8);
+        for (size_t i = 0; i < (size_t)sw * sh * 4; i++) px[i] = u8[i] / 255.0f;
+        free(u8);
+    }
     glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     for (uint32_t j = 0; j < h; j++)
         for (uint32_t i = 0; i < w; i++) {
@@ -2293,25 +2382,27 @@ void gs_scene_aa(uint32_t fbp, uint32_t fbw)
 
 /* ---------------- movies (pc/src/movie) ---------------- */
 
-static const char* movie_vs =
-    "#version 330 core\n"
-    "void main(){\n"
-    "  vec2 c = vec2((gl_VertexID & 1) != 0 ? 1.0 : 0.0, (gl_VertexID & 2) != 0 ? 1.0 : 0.0);\n"
-    "  gl_Position = vec4(c * 2.0 - 1.0, 0.0, 1.0);\n"
-    "}\n";
+#define MOVIE_VS_BODY \
+    "void main(){\n" \
+    "  vec2 c = vec2((gl_VertexID & 1) != 0 ? 1.0 : 0.0, (gl_VertexID & 2) != 0 ? 1.0 : 0.0);\n" \
+    "  gl_Position = vec4(c * 2.0 - 1.0, 0.0, 1.0);\n" \
+    "}\n"
+static const char* movie_vs = "#version 330 core\n" MOVIE_VS_BODY;
+static const char* movie_vs_es = "#version 320 es\nprecision highp float;\nprecision highp int;\n" MOVIE_VS_BODY;
 /* YCbCr (ITU-R BT.601, video range) -> RGB, one fragment per image pixel (row 0 = the top
    row, as uploaded). 4:2:0 chroma as MPEG-2 places it: on the even luma columns, between
    two luma rows; interpolated. Alpha 0x80, as the IPU's output. */
-static const char* movie_fs =
-    "#version 330 core\n"
-    "uniform sampler2D u_y, u_cb, u_cr; out vec4 o;\n"
-    "void main(){\n"
-    "  vec2 p = gl_FragCoord.xy;\n"
-    "  vec2 c = vec2(p.x * 0.5 + 0.25, p.y * 0.5) / vec2(textureSize(u_cb, 0));\n"
-    "  float y = (texelFetch(u_y, ivec2(p), 0).r - 16.0 / 255.0) * (255.0 / 219.0);\n"
-    "  float cb = (texture(u_cb, c).r - 128.0 / 255.0) * (255.0 / 224.0), cr = (texture(u_cr, c).r - 128.0 / 255.0) * (255.0 / 224.0);\n"
-    "  o = vec4(clamp(vec3(y + 1.402 * cr, y - 0.344136 * cb - 0.714136 * cr, y + 1.772 * cb), 0.0, 1.0), 128.0 / 255.0);\n"
-    "}\n";
+#define MOVIE_FS_BODY \
+    "uniform sampler2D u_y, u_cb, u_cr; out vec4 o;\n" \
+    "void main(){\n" \
+    "  vec2 p = gl_FragCoord.xy;\n" \
+    "  vec2 c = vec2(p.x * 0.5 + 0.25, p.y * 0.5) / vec2(textureSize(u_cb, 0));\n" \
+    "  float y = (texelFetch(u_y, ivec2(p), 0).r - 16.0 / 255.0) * (255.0 / 219.0);\n" \
+    "  float cb = (texture(u_cb, c).r - 128.0 / 255.0) * (255.0 / 224.0), cr = (texture(u_cr, c).r - 128.0 / 255.0) * (255.0 / 224.0);\n" \
+    "  o = vec4(clamp(vec3(y + 1.402 * cr, y - 0.344136 * cb - 0.714136 * cr, y + 1.772 * cb), 0.0, 1.0), 128.0 / 255.0);\n" \
+    "}\n"
+static const char* movie_fs = "#version 330 core\n" MOVIE_FS_BODY;
+static const char* movie_fs_es = "#version 320 es\nprecision highp float;\nprecision highp int;\n" MOVIE_FS_BODY;
 
 /* Textures at TBP tbp are movie frame index from now until the next executed frame: the
    frame's planes are uploaded once and converted into mv_rgb (512 x 512, the TEX0 size the
@@ -2327,7 +2418,7 @@ void gs_movie_bind(uint32_t tbp, int index)
     gs_flush();   /* draws before this sample what was bound before */
     mv_tbp = tbp;
     if (!prog_yuv) {
-        prog_yuv = compile(movie_vs, movie_fs);
+        prog_yuv = compile(g_gl_es ? movie_vs_es : movie_vs, g_gl_es ? movie_fs_es : movie_fs);
         glUseProgram(prog_yuv);
         glUniform1i(glGetUniformLocation(prog_yuv, "u_y"), 1);
         glUniform1i(glGetUniformLocation(prog_yuv, "u_cb"), 2);
@@ -2531,14 +2622,11 @@ void gs_replay_check(const struct Frame* cur)
     int w = img[fin].pw, h = final_vh ? img[fin].ph * 480 / final_vh : 0;   /* the displayed 480 lines */
     if (!snapshot_valid || !final_vw) return;
     a = malloc((size_t)w * h * 4); b = calloc((size_t)w * h, 4);
-    glPixelStorei(GL_PACK_ALIGNMENT, 4);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, img[fin].fbo);
-    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, a);
+    read_rt_rgba8(img[fin].fbo, w, h, a);
     stream_replay(cur, 1.0f);
     rt = rt_find(gs.disp_fbp, gs.disp_fbw ? gs.disp_fbw : 10);
     if (rt) {
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, rt->fbo);
-        glReadPixels(0, 0, rt->pw < w ? rt->pw : w, rt->ph < h ? rt->ph : h, GL_RGBA, GL_UNSIGNED_BYTE, b);   /* ponytail: assumes same size (scale fixed within a frame) */
+        read_rt_rgba8(rt->fbo, rt->pw < w ? rt->pw : w, rt->ph < h ? rt->ph : h, b);   /* ponytail: assumes same size (scale fixed within a frame) */
     }
     glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     rt_restore();
@@ -2592,12 +2680,145 @@ typedef void (GLAPIENTRY *SnapshotGetInteger)(GLenum, GLint*);
 static SnapshotGetTexLevel snapshot_tex_level;
 static SnapshotGetTexImage snapshot_tex_image;
 static SnapshotGetInteger snapshot_integer;
+static GLuint snapshot_depth_prog_f32;
+static GLuint snapshot_depth_prog_u8;
 static int snapshot_gl_functions(void)
 {
-    if (!snapshot_tex_level) snapshot_tex_level=(SnapshotGetTexLevel)SDL_GL_GetProcAddress("glGetTexLevelParameteriv");
-    if (!snapshot_tex_image) snapshot_tex_image=(SnapshotGetTexImage)SDL_GL_GetProcAddress("glGetTexImage");
-    if (!snapshot_integer) snapshot_integer=(SnapshotGetInteger)SDL_GL_GetProcAddress("glGetIntegerv");
-    return snapshot_tex_level && snapshot_tex_image && snapshot_integer;
+    if (!snapshot_tex_level) snapshot_tex_level=(SnapshotGetTexLevel)gl_getproc("glGetTexLevelParameteriv");
+    if (!g_gl_es && !snapshot_tex_image) snapshot_tex_image=(SnapshotGetTexImage)gl_getproc("glGetTexImage");
+    if (!snapshot_integer) snapshot_integer=(SnapshotGetInteger)gl_getproc("glGetIntegerv");
+    return snapshot_tex_level && snapshot_integer && (g_gl_es || snapshot_tex_image);
+}
+static int snapshot_read_texture_float(GLuint texture, GLint width, GLint height, GLint format, float *pixels)
+{
+    if (!g_gl_es) {
+        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, texture);
+        glPixelStorei(GL_PACK_ALIGNMENT, 4);
+        snapshot_tex_image(GL_TEXTURE_2D, 0, format == GL_DEPTH_COMPONENT32F ? GL_DEPTH_COMPONENT : GL_RGBA, GL_FLOAT, pixels);
+        return glGetError() == 0;
+    }
+    GLuint fbo = 0;
+    glGenFramebuffers(1, &fbo);
+    if (format == GL_RGBA16F && g_gl_color_buffer_float) {
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            glBindFramebuffer(GL_FRAMEBUFFER, 0); glDeleteFramebuffers(1, &fbo); fb_forget(); return 0;
+        }
+        glPixelStorei(GL_PACK_ALIGNMENT, 4);
+        glReadPixels(0, 0, width, height, GL_RGBA, GL_FLOAT, pixels);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0); glDeleteFramebuffers(1, &fbo); fb_forget();
+        return glGetError() == 0;
+    }
+    if (format == GL_RGBA8) {
+        size_t n = (size_t)width * height * 4;
+        uint8_t *tmp = malloc(n);
+        if (!tmp) { glDeleteFramebuffers(1, &fbo); return 0; }
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            free(tmp); glBindFramebuffer(GL_FRAMEBUFFER, 0); glDeleteFramebuffers(1, &fbo); fb_forget(); return 0;
+        }
+        glPixelStorei(GL_PACK_ALIGNMENT, 4);
+        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, tmp);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0); glDeleteFramebuffers(1, &fbo); fb_forget();
+        for (size_t i = 0; i < n; i++) pixels[i] = tmp[i] / 255.0f;
+        free(tmp);
+        return glGetError() == 0;
+    }
+    if (format == GL_DEPTH_COMPONENT32F) {
+        GLuint scratch = 0;
+        glGenTextures(1, &scratch);
+        glBindTexture(GL_TEXTURE_2D, scratch);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        if (g_gl_color_buffer_float) {
+            if (!snapshot_depth_prog_f32) {
+                static const char* dfs =
+                    "#version 320 es\nprecision highp float;\nprecision highp int;\n"
+                    "uniform sampler2D u_src; out vec4 o;\n"
+                    "void main(){ o = vec4(texelFetch(u_src, ivec2(gl_FragCoord.xy), 0).r, 0.0, 0.0, 1.0); }\n";
+                snapshot_depth_prog_f32 = compile(movie_vs_es, dfs);
+                glUseProgram(snapshot_depth_prog_f32);
+                glUniform1i(glGetUniformLocation(snapshot_depth_prog_f32, "u_src"), 0);
+            }
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
+        } else {
+            if (!snapshot_depth_prog_u8) {
+                static const char* dfs_u8 =
+                    "#version 320 es\nprecision highp float;\nprecision highp int;\n"
+                    "uniform sampler2D u_src; out vec4 o;\n"
+                    "void main(){\n"
+                    "  uint u = floatBitsToUint(texelFetch(u_src, ivec2(gl_FragCoord.xy), 0).r);\n"
+                    "  o = vec4(float(u & 255u), float((u >> 8u) & 255u), float((u >> 16u) & 255u), float((u >> 24u) & 255u)) / 255.0;\n"
+                    "}\n";
+                snapshot_depth_prog_u8 = compile(movie_vs_es, dfs_u8);
+                glUseProgram(snapshot_depth_prog_u8);
+                glUniform1i(glGetUniformLocation(snapshot_depth_prog_u8, "u_src"), 0);
+            }
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        }
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, scratch, 0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            glBindFramebuffer(GL_FRAMEBUFFER, 0); glDeleteFramebuffers(1, &fbo); glDeleteTextures(1, &scratch); fb_forget(); return 0;
+        }
+        glDisable(GL_SCISSOR_TEST); glDisable(GL_DEPTH_TEST); glDisable(GL_BLEND); clip_distances(0);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glViewport(0, 0, width, height);
+        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, texture);
+        glUseProgram(g_gl_color_buffer_float ? snapshot_depth_prog_f32 : snapshot_depth_prog_u8);
+        glBindVertexArray(present_vao);
+        glDrawArrays(0x0005 /* GL_TRIANGLE_STRIP */, 0, 4);
+        glBindVertexArray(vao);
+        glPixelStorei(GL_PACK_ALIGNMENT, 4);
+        int ok = 1;
+        if (g_gl_color_buffer_float) {
+            float *rgba = malloc((size_t)width * height * 4 * sizeof(float));
+            if (!rgba) ok = 0;
+            else {
+                glReadPixels(0, 0, width, height, GL_RGBA, GL_FLOAT, rgba);
+                for (size_t i = 0; i < (size_t)width * height; i++) pixels[i] = rgba[i * 4];
+                free(rgba);
+            }
+        } else {
+            uint8_t *rgba = malloc((size_t)width * height * 4);
+            if (!rgba) ok = 0;
+            else {
+                glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+                for (size_t i = 0; i < (size_t)width * height; i++) {
+                    uint32_t u = (uint32_t)rgba[i * 4] | ((uint32_t)rgba[i * 4 + 1] << 8) |
+                                 ((uint32_t)rgba[i * 4 + 2] << 16) | ((uint32_t)rgba[i * 4 + 3] << 24);
+                    memcpy(&pixels[i], &u, sizeof(float));
+                }
+                free(rgba);
+            }
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0); glDeleteFramebuffers(1, &fbo); glDeleteTextures(1, &scratch); fb_forget();
+        return ok && glGetError() == 0;
+    }
+    glDeleteFramebuffers(1, &fbo);
+    return 0;
+}
+static int snapshot_read_texture_rgba8(GLuint texture, GLint width, GLint height, unsigned char *rgba)
+{
+    if (!g_gl_es) {
+        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, texture);
+        glPixelStorei(GL_PACK_ALIGNMENT, 4);
+        snapshot_tex_image(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+        return glGetError() == 0;
+    }
+    GLuint fbo = 0;
+    glGenFramebuffers(1, &fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0); glDeleteFramebuffers(1, &fbo); fb_forget(); return 0;
+    }
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0); glDeleteFramebuffers(1, &fbo); fb_forget();
+    return glGetError() == 0;
 }
 static int snapshot_image_valid(const RenderImage *im)
 {
@@ -2623,9 +2844,7 @@ int gs_snapshot_write_texture(RenderWriter *w, unsigned int texture)
     if (!width || !snapshot_image_valid(&im) || glGetError()!=0) { w->bad=1; return 0; }
     void *pixels=malloc(im.bytes);
     if (!pixels) { w->bad=1; return 0; }
-    glPixelStorei(GL_PACK_ALIGNMENT,4);
-    snapshot_tex_image(GL_TEXTURE_2D,0,format==GL_DEPTH_COMPONENT32F ? GL_DEPTH_COMPONENT : GL_RGBA,GL_FLOAT,pixels);
-    if (glGetError()!=0) w->bad=1;
+    if (!snapshot_read_texture_float(texture, width, height, format, (float*)pixels)) w->bad=1;
     rs_write(w,&im,sizeof(im)); rs_write(w,pixels,im.bytes); free(pixels);
     return !w->bad;
 }
@@ -2648,8 +2867,21 @@ int gs_snapshot_read_texture(RenderReader *r, RenderStagedImage *out, int stage)
     if (im.width>(uint32_t)maximum || im.height>(uint32_t)maximum) { r->bad=1; return 0; }
     glActiveTexture(GL_TEXTURE0); glGenTextures(1,&out->tex); glBindTexture(GL_TEXTURE_2D,out->tex);
     glPixelStorei(GL_UNPACK_ALIGNMENT,4); glPixelStorei(GL_UNPACK_ROW_LENGTH,0);
-    glTexImage2D(GL_TEXTURE_2D,0,(GLint)im.format,(GLsizei)im.width,(GLsizei)im.height,0,
-        im.format==GL_DEPTH_COMPONENT32F ? GL_DEPTH_COMPONENT : GL_RGBA,GL_FLOAT,pixels);
+    if (g_gl_es && (im.format == GL_RGBA8 || (!g_gl_color_buffer_float && im.format == GL_RGBA16F))) {
+        size_t n = (size_t)im.width * im.height * 4;
+        uint8_t *u8 = malloc(n);
+        if (!u8) { gs_snapshot_drop_texture(out); r->bad=1; return 0; }
+        const float *fp = (const float*)pixels;
+        for (size_t i = 0; i < n; i++) {
+            float v = fp[i];
+            u8[i] = (uint8_t)(v <= 0.0f ? 0 : v >= 1.0f ? 255 : (int)(v * 255.0f + 0.5f));
+        }
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,(GLsizei)im.width,(GLsizei)im.height,0,GL_RGBA,GL_UNSIGNED_BYTE,u8);
+        free(u8);
+    } else {
+        glTexImage2D(GL_TEXTURE_2D,0,(GLint)im.format,(GLsizei)im.width,(GLsizei)im.height,0,
+            im.format==GL_DEPTH_COMPONENT32F ? GL_DEPTH_COMPONENT : GL_RGBA,GL_FLOAT,pixels);
+    }
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,im.format==GL_DEPTH_COMPONENT32F ? GL_NEAREST : GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,im.format==GL_DEPTH_COMPONENT32F ? GL_NEAREST : GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
@@ -2675,9 +2907,13 @@ typedef struct {
     void *native;
 } RendererStage;
 #define RENDERER_MAGIC 0x32524e44u /* DNR2 */
+static int snapshot_color_format_ok(uint32_t fmt)
+{
+    return fmt == (uint32_t)rt_color_fmt() || fmt == GL_RGBA16F;
+}
 static int snapshot_color_fbo(RenderReader *r, RenderTarget *rt, RenderStagedImage *im)
 {
-    if (im->image.format!=GL_RGBA16F || im->image.width!=(uint32_t)rt->pw || im->image.height!=(uint32_t)rt->ph) { r->bad=1; return 0; }
+    if (!snapshot_color_format_ok(im->image.format) || im->image.width!=(uint32_t)rt->pw || im->image.height!=(uint32_t)rt->ph) { r->bad=1; return 0; }
     rt->tex=im->tex; im->tex=0;
     glGenFramebuffers(1,&rt->fbo); glBindFramebuffer(GL_FRAMEBUFFER,rt->fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,rt->tex,0);
@@ -2748,7 +2984,7 @@ static int renderer_read(const SnapshotBlob *in, RendererStage *s, int stage)
         if (s) s->targets[i]=rt;
         if (rt.used) {
             RenderStagedImage im={0}; gs_snapshot_read_texture(&r,&im,stage);
-            if (im.image.format!=GL_RGBA16F || im.image.width!=(uint32_t)rt.pw || im.image.height!=(uint32_t)rt.ph) r.bad=1;
+            if (!snapshot_color_format_ok(im.image.format) || im.image.width!=(uint32_t)rt.pw || im.image.height!=(uint32_t)rt.ph) r.bad=1;
             if (stage && !r.bad) snapshot_color_fbo(&r,&s->targets[i],&im);
             gs_snapshot_drop_texture(&im);
         }
@@ -2761,7 +2997,7 @@ static int renderer_read(const SnapshotBlob *in, RendererStage *s, int stage)
     }
     RenderStagedImage final_image={0};
     if (!r.bad) gs_snapshot_read_texture(&r,&final_image,stage);
-    if ((h.final_vw>0)!=(final_image.image.width>0) || (final_image.image.width && final_image.image.format!=GL_RGBA16F)) r.bad=1;
+    if ((h.final_vw>0)!=(final_image.image.width>0) || (final_image.image.width && !snapshot_color_format_ok(final_image.image.format))) r.bad=1;
     if (stage) {
         s->final_image=final_image;
         if (!r.bad && final_image.tex) {

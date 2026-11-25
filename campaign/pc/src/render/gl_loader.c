@@ -1,4 +1,6 @@
 #include "gl_loader.h"
+#include <stdlib.h>
+#include <string.h>
 
 PFN_glGenTextures gl_GenTextures;
 PFN_glDeleteTextures gl_DeleteTextures;
@@ -20,6 +22,7 @@ PFN_glDisable gl_Disable;
 PFN_glClear gl_Clear;
 PFN_glClearColor gl_ClearColor;
 PFN_glClearDepth gl_ClearDepth;
+PFN_glClearDepthf gl_ClearDepthf;
 PFN_glDepthFunc gl_DepthFunc;
 PFN_glDepthMask gl_DepthMask;
 PFN_glColorMask gl_ColorMask;
@@ -58,10 +61,35 @@ PFN_glReadPixels gl_ReadPixels;
 PFN_glPixelStorei gl_PixelStorei;
 PFN_glGetError gl_GetError;
 PFN_glGetString gl_GetString;
+PFN_glGetStringi gl_GetStringi;
+PFN_glGetIntegerv gl_GetIntegerv;
 PFN_glFinish gl_Finish;
 PFN_glFenceSync gl_FenceSync;
 PFN_glClientWaitSync gl_ClientWaitSync;
 PFN_glDeleteSync gl_DeleteSync;
+
+int g_gl_es;
+int g_gl_color_buffer_float = 1;
+int g_gl_clip_distance = 1;
+int g_gl_s3tc = 1;
+int g_gl_bptc = 1;
+
+static void GLAPIENTRY gl_clear_depth_es_shim(GLdouble d)
+{
+    if (gl_ClearDepthf) gl_ClearDepthf((GLfloat)d);
+}
+
+int gl_has_extension(const char* name)
+{
+    GLint n = 0;
+    if (!name || !gl_GetIntegerv || !gl_GetStringi) return 0;
+    gl_GetIntegerv(GL_NUM_EXTENSIONS, &n);
+    for (GLint i = 0; i < n; i++) {
+        const char* ext = (const char*)gl_GetStringi(GL_EXTENSIONS, (GLuint)i);
+        if (ext && strcmp(ext, name) == 0) return 1;
+    }
+    return 0;
+}
 
 int gl_load(void* (*getproc)(const char*))
 {
@@ -85,7 +113,10 @@ int gl_load(void* (*getproc)(const char*))
     if (!(gl_Disable = (PFN_glDisable)getproc("glDisable"))) ok = 0;
     if (!(gl_Clear = (PFN_glClear)getproc("glClear"))) ok = 0;
     if (!(gl_ClearColor = (PFN_glClearColor)getproc("glClearColor"))) ok = 0;
-    if (!(gl_ClearDepth = (PFN_glClearDepth)getproc("glClearDepth"))) ok = 0;
+    gl_ClearDepth = (PFN_glClearDepth)getproc("glClearDepth");
+    gl_ClearDepthf = (PFN_glClearDepthf)getproc("glClearDepthf");
+    if (!gl_ClearDepth && gl_ClearDepthf) gl_ClearDepth = gl_clear_depth_es_shim;
+    if (!gl_ClearDepth) ok = 0;
     if (!(gl_DepthFunc = (PFN_glDepthFunc)getproc("glDepthFunc"))) ok = 0;
     if (!(gl_DepthMask = (PFN_glDepthMask)getproc("glDepthMask"))) ok = 0;
     if (!(gl_ColorMask = (PFN_glColorMask)getproc("glColorMask"))) ok = 0;
@@ -124,9 +155,28 @@ int gl_load(void* (*getproc)(const char*))
     if (!(gl_PixelStorei = (PFN_glPixelStorei)getproc("glPixelStorei"))) ok = 0;
     if (!(gl_GetError = (PFN_glGetError)getproc("glGetError"))) ok = 0;
     if (!(gl_GetString = (PFN_glGetString)getproc("glGetString"))) ok = 0;
+    if (!(gl_GetStringi = (PFN_glGetStringi)getproc("glGetStringi"))) ok = 0;
+    if (!(gl_GetIntegerv = (PFN_glGetIntegerv)getproc("glGetIntegerv"))) ok = 0;
     if (!(gl_Finish = (PFN_glFinish)getproc("glFinish"))) ok = 0;
     if (!(gl_FenceSync = (PFN_glFenceSync)getproc("glFenceSync"))) ok = 0;
     if (!(gl_ClientWaitSync = (PFN_glClientWaitSync)getproc("glClientWaitSync"))) ok = 0;
     if (!(gl_DeleteSync = (PFN_glDeleteSync)getproc("glDeleteSync"))) ok = 0;
+    if (ok) {
+        const char* ver = (const char*)gl_GetString(GL_VERSION);
+        const char* force8 = getenv("RECVX_FORCE_RGBA8");
+        g_gl_es = (ver && strncmp(ver, "OpenGL ES", 9) == 0) ? 1 : 0;
+        if (g_gl_es) {
+            g_gl_color_buffer_float = gl_has_extension("GL_EXT_color_buffer_float");
+            g_gl_clip_distance = gl_has_extension("GL_EXT_clip_cull_distance");
+            g_gl_s3tc = gl_has_extension("GL_EXT_texture_compression_s3tc");
+            g_gl_bptc = gl_has_extension("GL_EXT_texture_compression_bptc");
+        } else {
+            g_gl_color_buffer_float = 1;
+            g_gl_clip_distance = 1;
+            g_gl_s3tc = 1;
+            g_gl_bptc = 1;
+        }
+        if (force8 && atoi(force8) != 0) g_gl_color_buffer_float = 0;
+    }
     return ok;
 }

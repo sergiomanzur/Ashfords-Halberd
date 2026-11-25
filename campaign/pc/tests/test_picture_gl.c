@@ -1,4 +1,9 @@
 /* Real production presentation shaders, exercised on an isolated hidden GL context. */
+#ifdef __ANDROID__
+#define SDL_MAIN_HANDLED
+#include <SDL3/SDL_main.h>
+#include "android_egl_test.h"
+#endif
 #include <SDL3/SDL.h>
 #include "render/gl_loader.h"
 #include "gs/picture_shader.h"
@@ -159,7 +164,7 @@ static void crop(void)
 static void dithering(GLuint vs)
 {
     float data[N * N * 4];
-    GLuint dith_prog = glCreateProgram(), dfs = shader(GL_FRAGMENT_SHADER, present_fs_dith);
+    GLuint dith_prog = glCreateProgram(), dfs = shader(GL_FRAGMENT_SHADER, g_gl_es ? present_fs_dith_es : present_fs_dith);
     GLint linked = 0;
     glAttachShader(dith_prog, vs); glAttachShader(dith_prog, dfs); glLinkProgram(dith_prog);
     glGetProgramiv(dith_prog, GL_LINK_STATUS, &linked);
@@ -193,6 +198,14 @@ static void dithering(GLuint vs)
 
 int main(void)
 {
+#if defined(__ANDROID__)
+    AndroidEglTest egl = {0};
+    if (!android_egl_init(&egl, N, N) || !gl_load(android_egl_getproc)) {
+        fprintf(stderr, "GLES 3.2 pbuffer required\n");
+        android_egl_shutdown(&egl);
+        return 1;
+    }
+#else
     SDL_Window *window;
     SDL_GLContext context;
     if (!SDL_Init(SDL_INIT_VIDEO)) { fprintf(stderr,"SDL: %s\n",SDL_GetError()); return 1; }
@@ -204,8 +217,9 @@ int main(void)
     if (!context || !gl_load((void *(*)(const char *))SDL_GL_GetProcAddress)) {
         fprintf(stderr,"OpenGL 3.3 required: %s\n",SDL_GetError()); SDL_Quit(); return 1;
     }
+#endif
     program=glCreateProgram();
-    GLuint vs=shader(GL_VERTEX_SHADER,present_vs), fs=shader(GL_FRAGMENT_SHADER,present_fs);
+    GLuint vs=shader(GL_VERTEX_SHADER,g_gl_es ? present_vs_es : present_vs), fs=shader(GL_FRAGMENT_SHADER,g_gl_es ? present_fs_es : present_fs);
     glAttachShader(program,vs); glAttachShader(program,fs); glLinkProgram(program);
     GLint linked=0; glGetProgramiv(program,GL_LINK_STATUS,&linked); CHECK(linked,"production shader links");
     CHECK(glGetUniformLocation(program,"u_saturation")>=0,"production saturation uniform exists");
@@ -228,7 +242,11 @@ int main(void)
     }
     CHECK(glGetError()==0,"no final GL errors");
     glDeleteShader(vs); glDeleteShader(fs); /* Remaining context objects die below. */
+#if defined(__ANDROID__)
+    android_egl_shutdown(&egl);
+#else
     SDL_GL_DestroyContext(context); SDL_DestroyWindow(window); SDL_Quit();
+#endif
     if (!failures) puts("picture GL: all checks passed");
     return failures ? 1 : 0;
 }

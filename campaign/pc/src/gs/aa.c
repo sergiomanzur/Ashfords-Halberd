@@ -47,19 +47,26 @@
 
 unsigned int gs_gl_compile(const char* vs, const char* fs);   /* gs_gl.c */
 
-static const char* aa_vs =
-    "#version 330 core\n"
-    "void main(){\n"
-    "  vec2 c = vec2((gl_VertexID & 1) != 0 ? 1.0 : 0.0, (gl_VertexID & 2) != 0 ? 1.0 : 0.0);\n"
-    "  gl_Position = vec4(c * 2.0 - 1.0, 0.0, 1.0);\n"
-    "}\n";
+#define AA_VS_BODY \
+    "void main(){\n" \
+    "  vec2 c = vec2((gl_VertexID & 1) != 0 ? 1.0 : 0.0, (gl_VertexID & 2) != 0 ? 1.0 : 0.0);\n" \
+    "  gl_Position = vec4(c * 2.0 - 1.0, 0.0, 1.0);\n" \
+    "}\n"
+
+static const char* aa_vs_gl = "#version 330 core\n" AA_VS_BODY;
+static const char* aa_vs_es = "#version 320 es\nprecision highp float;\nprecision highp int;\n" AA_VS_BODY;
 
 /* u_metrics: 1 / width, 1 / height, width, height. Texture row 0 is the picture's top (the GS's
    y), as SMAA's texture coordinates expect. */
-#define AA_HEAD "#version 330 core\nuniform vec4 u_metrics;\nout vec4 o;\n"
+#define AA_HEAD_COMMON "uniform vec4 u_metrics;\nout vec4 o;\n"
+static const char* aa_head(void)
+{
+    return g_gl_es ? "#version 320 es\nprecision highp float;\nprecision highp int;\n" AA_HEAD_COMMON
+                   : "#version 330 core\n" AA_HEAD_COMMON;
+}
+static const char* aa_vs(void) { return g_gl_es ? aa_vs_es : aa_vs_gl; }
 
 static const char* fxaa_fs =
-    AA_HEAD
     "uniform sampler2D u_src;\n"
     "float lum(vec2 uv){ return dot(clamp(textureLod(u_src, uv, 0.0).rgb, 0.0, 1.0), vec3(0.299, 0.587, 0.114)); }\n"
     "float lumi(ivec2 p, ivec2 d){ return dot(clamp(texelFetch(u_src, clamp(p + d, ivec2(0), ivec2(u_metrics.zw) - 1), 0).rgb, 0.0, 1.0), vec3(0.299, 0.587, 0.114)); }\n"
@@ -408,7 +415,6 @@ static const char* smaa_blend_fs =
    flat area or a small step) their average replaces it, else (an edge, texture detail) the pixel
    stays. Alpha is copied. The fraction it makes is shown by the dither at present. */
 static const char* deband_fs =
-    AA_HEAD
     "uniform sampler2D u_src, u_small; uniform float u_range;\n"
     "void main(){\n"
     "  ivec2 p = ivec2(gl_FragCoord.xy);\n"
@@ -424,7 +430,6 @@ static const char* deband_fs =
     "}\n";
 
 static const char* copy_fs =   /* the deband's game-resolution copy: one bilinear tap per pixel */
-    AA_HEAD
     "uniform sampler2D u_src;\n"
     "void main(){ o = textureLod(u_src, gl_FragCoord.xy * u_metrics.xy, 0.0); }\n";
 
@@ -434,24 +439,24 @@ static int tw, th;
 static GLuint t_small, f_small;
 static int sw, sh;
 
-static GLuint smaa_prog(const char* fs)
+static GLuint aa_prog(const char* lib, const char* fs)
 {
     static char buf[20480];   /* (smaa_lib is ~12 KB) */
     size_t n = 0;
-    const char* part[3] = { AA_HEAD, smaa_lib, fs };
+    const char* part[3] = { aa_head(), lib ? lib : "", fs };
     for (int k = 0; k < 3; k++)
         for (const char* s = part[k]; *s && n < sizeof(buf) - 1; s++) buf[n++] = *s;
     buf[n] = 0;
-    return gs_gl_compile(aa_vs, buf);
+    return gs_gl_compile(aa_vs(), buf);
 }
 
-static GLuint tex(GLint fmt, int w, int h, GLenum f, const void* px, GLint filt)
+static GLuint tex(GLint fmt, int w, int h, GLenum f, GLenum type, const void* px, GLint filt)
 {
     GLuint t;
     glGenTextures(1, &t);
     glBindTexture(GL_TEXTURE_2D, t);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(GL_TEXTURE_2D, 0, fmt, w, h, 0, f, GL_UNSIGNED_BYTE, px);
+    glTexImage2D(GL_TEXTURE_2D, 0, fmt, w, h, 0, f, type, px);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filt);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filt);
@@ -460,13 +465,21 @@ static GLuint tex(GLint fmt, int w, int h, GLenum f, const void* px, GLint filt)
     return t;
 }
 
-static void target(GLuint* t, GLuint* f, GLint fmt, GLenum fm, int w, int h)
+static void target(GLuint* t, GLuint* f, GLint fmt, GLenum fm, GLenum type, int w, int h)
 {
     if (*t) glDeleteTextures(1, t);
-    *t = tex(fmt, w, h, fm, NULL, GL_LINEAR);
+    *t = tex(fmt, w, h, fm, type, NULL, GL_LINEAR);
     if (!*f) glGenFramebuffers(1, f);
     glBindFramebuffer(GL_FRAMEBUFFER, *f);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, *t, 0);
+}
+
+void aa_reset_gl(void)
+{
+    vao = p_fxaa = p_edges = p_weights = p_blend = p_deband = p_copy = t_area = t_search = 0;
+    t_edges = f_edges = t_weights = f_weights = 0;
+    t_small = f_small = 0;
+    tw = th = sw = sh = 0;
 }
 
 static void uni(GLuint p, const char* n, int unit) { glUniform1i(glGetUniformLocation(p, n), unit); }
@@ -486,16 +499,16 @@ void aa_apply(int mode, unsigned int src, unsigned int dst_fbo, int w, int h, fl
     if (!vao) {
         static unsigned char area[AA_AREA_W * AA_AREA_H * 2], search[AA_SEARCH_W * AA_SEARCH_H];
         glGenVertexArrays(1, &vao);
-        p_fxaa = gs_gl_compile(aa_vs, fxaa_fs);
-        p_edges = smaa_prog(smaa_edges_fs);
-        p_weights = smaa_prog(smaa_weights_fs);
-        p_blend = smaa_prog(smaa_blend_fs);
-        p_deband = gs_gl_compile(aa_vs, deband_fs);
-        p_copy = gs_gl_compile(aa_vs, copy_fs);
+        p_fxaa = aa_prog(NULL, fxaa_fs);
+        p_edges = aa_prog(smaa_lib, smaa_edges_fs);
+        p_weights = aa_prog(smaa_lib, smaa_weights_fs);
+        p_blend = aa_prog(smaa_lib, smaa_blend_fs);
+        p_deband = aa_prog(NULL, deband_fs);
+        p_copy = aa_prog(NULL, copy_fs);
         aa_area_table(area);
         aa_search_table(search);
-        t_area = tex(GL_RG8, AA_AREA_W, AA_AREA_H, GL_RG, area, GL_LINEAR);
-        t_search = tex(GL_R8, AA_SEARCH_W, AA_SEARCH_H, GL_RED, search, GL_NEAREST);
+        t_area = tex(GL_RG8, AA_AREA_W, AA_AREA_H, GL_RG, GL_UNSIGNED_BYTE, area, GL_LINEAR);
+        t_search = tex(GL_R8, AA_SEARCH_W, AA_SEARCH_H, GL_RED, GL_UNSIGNED_BYTE, search, GL_NEAREST);
         glUseProgram(p_fxaa); uni(p_fxaa, "u_src", 0);
         glUseProgram(p_edges); uni(p_edges, "u_src", 0);
         glUseProgram(p_weights); uni(p_weights, "u_edges", 1); uni(p_weights, "u_area", 2); uni(p_weights, "u_search", 3);
@@ -507,15 +520,20 @@ void aa_apply(int mode, unsigned int src, unsigned int dst_fbo, int w, int h, fl
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glViewport(0, 0, w, h);
     if (mode == 2 && (tw != w || th != h)) {
-        target(&t_edges, &f_edges, GL_RG8, GL_RG, w, h);
-        target(&t_weights, &f_weights, GL_RGBA8, GL_RGBA, w, h);
+        target(&t_edges, &f_edges, GL_RG8, GL_RG, GL_UNSIGNED_BYTE, w, h);
+        target(&t_weights, &f_weights, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h);
         tw = w; th = h;
     }
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, src);
     if (mode == 3) {
         int w1 = (int)(w / scale + 0.5f), h1 = (int)(h / scale + 0.5f);
-        if (sw != w1 || sh != h1) { target(&t_small, &f_small, 0x881A /* GL_RGBA16F */, GL_RGBA, w1, h1); sw = w1; sh = h1; }
+        if (sw != w1 || sh != h1) {
+            GLint fmt = g_gl_color_buffer_float ? GL_RGBA16F : GL_RGBA8;
+            GLenum ty = g_gl_color_buffer_float ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE;
+            target(&t_small, &f_small, fmt, GL_RGBA, ty, w1, h1);
+            sw = w1; sh = h1;
+        }
         glBindFramebuffer(GL_FRAMEBUFFER, f_small);
         glViewport(0, 0, w1, h1);
         pass(p_copy, w1, h1);
