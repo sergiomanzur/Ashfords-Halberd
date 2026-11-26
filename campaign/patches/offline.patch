@@ -2007,7 +2007,7 @@ index 66f4beb9..91b61cf5 100644
      return 0; 
  } 
 diff --git a/src/ps2/veronica/prog/map.c b/src/ps2/veronica/prog/map.c
-index 14915436..85098425 100644
+index 14915436..e4ad81e4 100644
 --- a/src/ps2/veronica/prog/map.c
 +++ b/src/ps2/veronica/prog/map.c
 @@ -141,16 +141,28 @@ void bhInitMap(enum_2 set_mod)
@@ -2075,7 +2075,65 @@ index 14915436..85098425 100644
      
      fwP->nextP = fwP->prevP = fwP;
      
-@@ -2209,7 +2231,11 @@ static int FsubGaugeDraw(FG_WORK* fgP)
+@@ -1456,6 +1478,22 @@ static void MapEntrySprite(mp_set set_no, int mode)
+     
+     if (fwP != NULL) 
+     {
++#if defined(TARGET_PC) && defined(__LP64__)
++        /* LP64: FS_WORK overlays func_wrk_typ, but act_mdeP grew from 0x4 to 0x8
++           and spr_dsp moved to 0x8. Writing the old param0/param1/param2 slots
++           leaves act_mdeP pointing at act_bit|spr_no and FsprSpriteDraw faults
++           dereferencing it. Write through the FS_WORK layout; funcP/prevP/nextP
++           at 0x38/0x40/0x48 stay put. */
++        {
++            FS_WORK* fp = (FS_WORK*)fwP;
++            fp->spr_dsp.act_mdeP = &mwP->map_mode;
++            fp->spr_dsp.act_bit  = ssP->act_bit;
++            fp->spr_dsp.spr_no   = ssP->spr_no;
++            fp->spr_dsp.spr_col  = ssP->spr_col;
++            fp->spr_dsp.spr_pos  = ssP->spr_pos;
++            fp->spr_cnt.spr_mde  = mode;
++        }
++#else
+         fwP->param0 = (int)&mwP->map_mode;
+         fwP->param1 = ssP->act_bit;
+         fwP->param2 = ssP->spr_no;
+@@ -1463,6 +1501,7 @@ static void MapEntrySprite(mp_set set_no, int mode)
+         fwP->FreeWrk[0]                = ssP->spr_col;
+         *(NJS_POINT3*)&fwP->FreeWrk[1] = *(NJS_POINT3*)&ssP->spr_pos;
+         fwP->FreeWrk[4]                = mode;
++#endif
+     }
+ }
+ 
+@@ -1740,11 +1779,26 @@ static FT_WORK* MapEntryTask(int(*tskP)(FTS_WORK*), mp_mod chg_mde, int param0)
+     
+     if (fwP != NULL) 
+     {
++#if defined(TARGET_PC) && defined(__LP64__)
++        /* LP64: FT_WORK overlays func_wrk_typ, but the pointer fields grew. map_mdeP
++           moved from 0x4 to 0x8, chg_mde to 0x10 and tskP to 0x18; the old writes
++           below land in param1/param2/FreeWrk[0] and leave tskP at zero, so
++           FsubTaskMain calls through NULL (the Triangle/Map crash). Write through
++           the FT_WORK layout itself; funcP/prevP/nextP at 0x38/0x40/0x48 stay put. */
++        {
++            FT_WORK* fp = (FT_WORK*)fwP;
++            fp->map_mdeP = &mwP->map_mode;
++            fp->chg_mde = chg_mde;
++            fp->tskP = tskP;
++            fp->tsk_sub.param0 = param0;
++        }
++#else
+         fwP->param0 = (int)&mwP->map_mode;
+         fwP->param1 = chg_mde; 
+         fwP->param2 = (int)tskP;
+         
+         fwP->FreeWrk[0] = param0;
++#endif
+ 
+         ftP = (FT_WORK*)fwP;
+         
+@@ -2209,7 +2263,11 @@ static int FsubGaugeDraw(FG_WORK* fgP)
  static void MapTagInit(int tag_num)
  {
      mwP->tag_num = 0;
@@ -2087,7 +2145,7 @@ index 14915436..85098425 100644
  }
  
  // 100% matching!
-@@ -2816,7 +2842,11 @@ static void MapCncInit(int map_num, int flr_num)
+@@ -2816,7 +2874,11 @@ static void MapCncInit(int map_num, int flr_num)
      
      map_num *= flr_num;
      
@@ -3642,10 +3700,31 @@ index 3b6f2116..ce66fd52 100644
          if (p->globalIndex != -1)
          {
 diff --git a/src/ps2/veronica/prog/ps2_NinjaCnk.c b/src/ps2/veronica/prog/ps2_NinjaCnk.c
-index b00c1274..97d83770 100644
+index b00c1274..1fc92d83 100644
 --- a/src/ps2/veronica/prog/ps2_NinjaCnk.c
 +++ b/src/ps2/veronica/prog/ps2_NinjaCnk.c
-@@ -865,6 +865,12 @@ static int njCnkDrawModelLocalMod_(NJS_CNK_MODEL* pModel);
+@@ -733,6 +733,20 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
+     unsigned int modelclipflag; 
+     float temp, temp2; // not from the debugging symbols
+ 
++#if defined(TARGET_PC) && defined(__LP64__)
++    /* LP64 equip/close death: the item/weapon model reached from bhDrawObject
++       (objitm.c bhDrawObjItm -> bhPutModel -> EasyMultiDrawTreeCnk) can carry a
++       stale, non-window vlist after the inventory menu swaps the held item.
++       The 32-bit in-place tree always had a window address here; the chunk
++       reader below would fault on its first ushort load (see the 2026-11-25
++       16:10 RP6 crash in njCnkDrawModelLocal_). Skip such a model whole, the
++       same way njCnkDrawModelLocalMod skips a NULL/sentinel model. */
++    {
++        uintptr_t vl = (uintptr_t)pModel->vlist;
++        if (vl != 0 && (vl < UINT32_C(0x30000000) || vl >= UINT32_C(0x50000000))) return 0;
++    }
++#endif
++
+     modelclipflag = 0;
+     
+     if (ulNaCnkFlagModelClip != 0) 
+@@ -865,6 +879,12 @@ static int njCnkDrawModelLocalMod_(NJS_CNK_MODEL* pModel);
  int njCnkDrawModelLocalMod(NJS_CNK_MODEL* pModel)
  {
      int r;
@@ -3658,7 +3737,7 @@ index b00c1274..97d83770 100644
      pc_mesh_begin(pModel);
      r = njCnkDrawModelLocalMod_(pModel);
      pc_mesh_end();
-@@ -1471,6 +1477,23 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
+@@ -1471,6 +1491,23 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
      .set reorder
      " : : "r"(v) : "$v1", "memory" 
      );
@@ -3682,7 +3761,7 @@ index b00c1274..97d83770 100644
  #else
      { /* asm2c */
          ee_reg R3 = {{0}};
-@@ -1489,6 +1512,7 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
+@@ -1489,6 +1526,7 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
          vu_load_vf(13, EE_PTR((R3.w[0] + (uint32_t)(144))));
          vu_load_vf(14, EE_PTR((R3.w[0] + (uint32_t)(160))));
      }
@@ -3776,7 +3855,7 @@ index 11f7aae1..5381c91f 100644
  
      return ret;
 diff --git a/src/ps2/veronica/prog/ps2_dummy.c b/src/ps2/veronica/prog/ps2_dummy.c
-index c7463508..a308096b 100644
+index c7463508..e940ac0a 100644
 --- a/src/ps2/veronica/prog/ps2_dummy.c
 +++ b/src/ps2/veronica/prog/ps2_dummy.c
 @@ -28,7 +28,11 @@ unsigned int Ps2_vcount;
@@ -3816,6 +3895,169 @@ index c7463508..a308096b 100644
  #else
  unsigned char Ps2_PBUFF[1835008] __attribute__((aligned(64)));
  void* Ps2_PP;
+@@ -695,6 +701,21 @@ void Ps2AddPrim3D(unsigned long prim, void* dp, unsigned int num)
+         ee_reg op4 = {{0}};
+         ee_reg op5 = {{0}};
+         ee_reg op6 = {{0}};
++#ifdef __LP64__
++        /* asm2c on LP64: all six ee_reg pointer slots below can hold host stack
++           addresses (zbuff_ab_vec and dp are locals, p is WORKBASE), which do not
++           survive the emulated 32-bit EE register view. Keep full pointers beside
++           the registers and use them for every vf load/store. */
++        const char* q0 = (const char*)clip_vec;
++        const char* q1 = (const char*)near_far_vec;
++        const char* q2 = (const char*)zclip_ab_vec;
++        const char* q3 = (const char*)zbuff_ab_vec;
++        const char* q4 = (const char*)dp;
++        char* q5 = (char*)p;
++#define EE_V(p, off) ((void*)((const char*)(p) + (off)))
++#else
++#define EE_V(p, off) EE_PTR((p))
++#endif
+         op0.sd[0] = (int32_t)(uintptr_t)(clip_vec);
+         op1.sd[0] = (int32_t)(uintptr_t)(near_far_vec);
+         op2.sd[0] = (int32_t)(uintptr_t)(zclip_ab_vec);
+@@ -702,10 +723,24 @@ void Ps2AddPrim3D(unsigned long prim, void* dp, unsigned int num)
+         op4.sd[0] = (int32_t)(uintptr_t)(dp);
+         op5.sd[0] = (int32_t)(uintptr_t)(p);
+         op6.sd[0] = (int32_t)(uintptr_t)(num);
++#ifdef __LP64__
++        /* asm2c on LP64: zbuff_ab_vec is this function's own host stack buffer; its
++           address does not survive the emulated 32-bit EE register view (op3.w[0]).
++           Keep it whole for the vf10 load. The other vectors and dp/p are game-window
++           addresses, so their truncated EE_PTR paths stay byte-identical. */
++        vu_load_vf(10, EE_V(q3, 0));
++#else
+         vu_load_vf(10, EE_PTR((op3.w[0] + (uint32_t)(0))));
++#endif
++#ifdef __LP64__
++        vu_load_vf(13, EE_V(q0, 0));
++        vu_load_vf(12, EE_V(q1, 0));
++        vu_load_vf(11, EE_V(q2, 0));
++#else
+         vu_load_vf(13, EE_PTR((op0.w[0] + (uint32_t)(0))));
+         vu_load_vf(12, EE_PTR((op1.w[0] + (uint32_t)(0))));
+         vu_load_vf(11, EE_PTR((op2.w[0] + (uint32_t)(0))));
++#endif
+         vu_upper(U_ITOF0, 1, 10, 10, 0, BC_NONE);
+         vu_upper(U_SUB, 15, 9, 9, 9, BC_NONE);
+         R1.sd[0] = (int32_t)((uint32_t)(((0x3FFFF >> 16))) << 16);
+@@ -717,9 +752,15 @@ void Ps2AddPrim3D(unsigned long prim, void* dp, unsigned int num)
+         R2.sd[0] = (int32_t)(op6.w[0] + ee_zero.w[0]);
+         vu_div(0, 3, 10, 3);
+     l_002CBEBC:;
++#ifdef __LP64__
++        vu_load_vf(4, EE_V(q4, 0));
++        vu_load_vf(5, EE_V(q4, 16));
++        vu_load_vf(6, EE_V(q4, 32));
++#else
+         vu_load_vf(4, EE_PTR((op4.w[0] + (uint32_t)(0))));
+         vu_load_vf(5, EE_PTR((op4.w[0] + (uint32_t)(16))));
+         vu_load_vf(6, EE_PTR((op4.w[0] + (uint32_t)(32))));
++#endif
+         vu_mtir(3, 4, 3);
+         vu_upper(U_ADDA, 2, 0, 6, 11, BC_NONE);
+         vu_upper(U_MADD, 2, 7, 6, 11, BC_X);
+@@ -741,19 +782,34 @@ void Ps2AddPrim3D(unsigned long prim, void* dp, unsigned int num)
+         g_vu0.vi[5] = (uint16_t)(g_vu0.vi[5] | g_vu0.vi[3]);
+         g_vu0.vi[4] = (uint16_t)(g_vu0.vi[4] & g_vu0.vi[5]);
+         vu_mfir(1, 6, 5);
++#ifdef __LP64__
++        vu_store_vf(EE_V(q5, 0), 4);
++        vu_store_vf(EE_V(q5, 16), 5);
++        vu_store_vf(EE_V(q5, 32), 6);
++#else
+         vu_store_vf(EE_PTR((op5.w[0] + (uint32_t)(0))), 4);
+         vu_store_vf(EE_PTR((op5.w[0] + (uint32_t)(16))), 5);
+         vu_store_vf(EE_PTR((op5.w[0] + (uint32_t)(32))), 6);
++#endif
+         R2.sd[0] = (int32_t)(R2.w[0] + (uint32_t)(-1));
+-        op5.sd[0] = (int32_t)(op5.w[0] + (uint32_t)(48));
+         ee_cond = (R2.sd[0] != 0);
++#ifdef __LP64__
++        q5 += 48;
++        q4 += 48;
++#else
++        op5.sd[0] = (int32_t)(op5.w[0] + (uint32_t)(48));
+         op4.sd[0] = (int32_t)(op4.w[0] + (uint32_t)(48));
++#endif
+         if (ee_cond) goto l_002CBEBC;
+         R3.sd[0] = (int32_t)(vu_cfc2(4));
+         ee_cond = (R2.sd[0] != 0);
+         if (ee_cond) goto l_002CBF9C;
+         vu_upper(U_MUL, 1, 4, 9, 0, BC_Q);
++#ifdef __LP64__
++        vu_store_vf(EE_V(q5, 0), 4);
++#else
+         vu_store_vf(EE_PTR((op5.w[0] + (uint32_t)(0))), 4);
++#endif
+     }
+ #endif
+ 
+@@ -952,7 +1008,15 @@ void Ps2AddPrim3DEx(unsigned long prim, void* dp, unsigned int num)
+         op4.sd[0] = (int32_t)(uintptr_t)(dp);
+         op5.sd[0] = (int32_t)(uintptr_t)(p);
+         op6.sd[0] = (int32_t)(uintptr_t)(num);
++#ifdef __LP64__
++        /* asm2c on LP64: zbuff_ab_vec is this function's own host stack buffer; its
++           address does not survive the emulated 32-bit EE register view (op3.w[0]).
++           Keep it whole for the vf10 load. The other vectors and dp/p are game-window
++           addresses, so their truncated EE_PTR paths stay byte-identical. */
++        vu_load_vf(10, (const void*)(uintptr_t)zbuff_ab_vec);
++#else
+         vu_load_vf(10, EE_PTR((op3.w[0] + (uint32_t)(0))));
++#endif
+         vu_load_vf(13, EE_PTR((op0.w[0] + (uint32_t)(0))));
+         vu_load_vf(12, EE_PTR((op1.w[0] + (uint32_t)(0))));
+         vu_load_vf(11, EE_PTR((op2.w[0] + (uint32_t)(0))));
+@@ -1313,7 +1377,15 @@ void Ps2AddPrim3DEx1P(unsigned long prim, void* dp, unsigned int num)
+         op4.sd[0] = (int32_t)(uintptr_t)(dp);
+         op5.sd[0] = (int32_t)(uintptr_t)(p);
+         op6.sd[0] = (int32_t)(uintptr_t)(num);
++#ifdef __LP64__
++        /* asm2c on LP64: zbuff_ab_vec is this function's own host stack buffer; its
++           address does not survive the emulated 32-bit EE register view (op3.w[0]).
++           Keep it whole for the vf10 load. The other vectors and dp/p are game-window
++           addresses, so their truncated EE_PTR paths stay byte-identical. */
++        vu_load_vf(10, (const void*)(uintptr_t)zbuff_ab_vec);
++#else
+         vu_load_vf(10, EE_PTR((op3.w[0] + (uint32_t)(0))));
++#endif
+         vu_load_vf(13, EE_PTR((op0.w[0] + (uint32_t)(0))));
+         vu_load_vf(12, EE_PTR((op1.w[0] + (uint32_t)(0))));
+         vu_load_vf(11, EE_PTR((op2.w[0] + (uint32_t)(0))));
+@@ -1531,7 +1603,15 @@ void Ps2AddPrim3DMod(unsigned long prim, void* dp, unsigned int num)
+         op4.sd[0] = (int32_t)(uintptr_t)(dp);
+         op5.sd[0] = (int32_t)(uintptr_t)(p);
+         op6.sd[0] = (int32_t)(uintptr_t)(num);
++#ifdef __LP64__
++        /* asm2c on LP64: zbuff_ab_vec is this function's own host stack buffer; its
++           address does not survive the emulated 32-bit EE register view (op3.w[0]).
++           Keep it whole for the vf10 load. The other vectors and dp/p are game-window
++           addresses, so their truncated EE_PTR paths stay byte-identical. */
++        vu_load_vf(10, (const void*)(uintptr_t)zbuff_ab_vec);
++#else
+         vu_load_vf(10, EE_PTR((op3.w[0] + (uint32_t)(0))));
++#endif
+         vu_load_vf(13, EE_PTR((op0.w[0] + (uint32_t)(0))));
+         vu_load_vf(12, EE_PTR((op1.w[0] + (uint32_t)(0))));
+         vu_load_vf(11, EE_PTR((op2.w[0] + (uint32_t)(0))));
+@@ -3010,7 +3090,15 @@ void Ps2AddPrim3DExI(unsigned long prim, void* dp, unsigned int num)
+         op7.sd[0] = (int32_t)(uintptr_t)(clip_flag);
+         op8.sd[0] = (int32_t)(uintptr_t)(st_clip_flag);
+         op9.sd[0] = (int32_t)(uintptr_t)(clut_flag);
++#ifdef __LP64__
++        /* asm2c on LP64: zbuff_ab_vec is this function's own host stack buffer; its
++           address does not survive the emulated 32-bit EE register view (op3.w[0]).
++           Keep it whole for the vf10 load. The other vectors and dp/p are game-window
++           addresses, so their truncated EE_PTR paths stay byte-identical. */
++        vu_load_vf(10, (const void*)(uintptr_t)zbuff_ab_vec);
++#else
+         vu_load_vf(10, EE_PTR((op3.w[0] + (uint32_t)(0))));
++#endif
+         vu_load_vf(13, EE_PTR((op0.w[0] + (uint32_t)(0))));
+         vu_load_vf(12, EE_PTR((op1.w[0] + (uint32_t)(0))));
+         vu_load_vf(11, EE_PTR((op2.w[0] + (uint32_t)(0))));
 diff --git a/src/ps2/veronica/prog/ps2_loadtim2.c b/src/ps2/veronica/prog/ps2_loadtim2.c
 index abca1d42..5758a56d 100644
 --- a/src/ps2/veronica/prog/ps2_loadtim2.c
