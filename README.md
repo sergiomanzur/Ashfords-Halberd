@@ -95,7 +95,7 @@ git submodule update --init upstream/recvx-campaign-decomp
 
 Set `RECVX_ISO` to your disc path to include movie tests. Default output is `build/campaign-windows`; this workstation reuses `build/campaign-platform`. Packages exclude retail data, saves, compiler and SDK headers. Build tools fetch pinned dependencies; the game contains no online gameplay.
 
-An **Android arm64-v8a** foundation build is also available via Android NDK r26+ (`./tools/build-campaign-android.ps1`), compiling the campaign game core as windowed `librecvx_game.so` (`[0x30000000, 0x50000000)` via `android_dlopen_ext`), patching its ELF64 snapshot manifest, and running the on-device headless suite over `adb`. See [Android arm64 foundation backend](docs/android-backend.md) for the address map, build options, and device verification status (on-screen GLES app boot follows in Plan 2).
+An **Android arm64-v8a** build (`AshfordsHalberd-Campaign-Android-arm64.apk`, Android 8.0+) is published with each release and verified on a Retroid Pocket 6. Build it with Android NDK r26+ (`./tools/build-campaign-android.ps1 -InstallApk`): the game core is compiled as windowed `librecvx_game.so` (`[0x30000000, 0x50000000)` via `android_dlopen_ext`), its ELF64 snapshot manifest is patched, the Gradle APK shell is assembled, and the headless and instrumentation suites run on the device over `adb`. Import your own USA PS2 ISO from the launcher. See [Android arm64 backend](docs/android-backend.md) for the address map and build options.
 
 The earlier x64 research prototype remains accessible through `tools/build.ps1` for room/inventory experiments. The campaign executable is the current playable path.
 

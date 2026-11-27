@@ -14,3 +14,4 @@ __pycache__/
 /.codex-remote-attachments/
 /scratch/
 /report.tsv
+/dist/

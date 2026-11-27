@@ -1,6 +1,20 @@
 # Ashford's Halberd changes
 
-## Unreleased — Android arm64 Foundation (2026-11-24)
+## 0.9.4b Beta (2026-11-27) — Android arm64 port
+
+First Android release (`arm64-v8a`, Android 8.0+), verified on a Retroid Pocket 6 and shipped beside the Windows x86 build. Same game and the same features on both: the native Enhanced Options menu, the `F1` Field Dossier settings, saving and loading, Battle Game, the Original / Third person / First person cameras, FMV and audio. You import your own unmodified USA PS2 ISO (`SLUS-20184`) from the launcher; no game data is included. The Android APK is debug-signed, so installing a later build made on a different machine needs an uninstall first.
+
+### Android port: playable build
+
+- **GLES 3.2 renderer, Gradle APK shell and SAF ISO import**, GL context-loss recovery, and automatic quicksave when the app is paused.
+- **64-bit (LP64) fixes for the 32-bit PS2 data model:** on-disc binary structs are realized into 64-bit layouts (`lp64_realize`) in per-room and per-session arenas. The Appearance, Cutscene Cast, extra item boxes/herbs and enemy-variant model swaps use the same path and skip a model safely, with a log line, when an arena is nearly full instead of crashing. Pointer-width fixes in the decomp (carried by `campaign/patches/offline.patch`) cover item pickup, the inventory and lighter, the stairs dedup table, room structures, and background objects drawing over characters.
+- **Title screen EXIT:** the confirmation dialog loads its font from the low DMA host pool and draws `Quit the game?` with YES and NO.
+- **Scripted settings test knob:** `RECVX_SETTINGS` accepts `|` as well as `;` between instructions (the Android launcher splits its environment extra on `;`).
+- **Verification:** 42 on-device tests passed (6 skipped, Java-lifecycle gated), 7/7 instrumentation tests and 42/42 Windows tests. Every settings page was applied on the device and two 4-minute random-input play sessions ran without a crash.
+
+Not covered yet: the memory-card (PS2 slot) save mode, the BioRand pack on Android, and a full campaign playthrough on Android.
+
+### Android arm64 foundation (2026-11-24)
 
 Added the native `arm64-v8a` Android backend foundation alongside the existing Windows x86 campaign (zero Windows regressions):
 
