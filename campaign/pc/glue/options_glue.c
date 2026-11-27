@@ -97,7 +97,22 @@ void pc_tex_keep_original(int texno);   /* texture_glue.c: our entries are cut f
 static const struct { short u, v, w; } title_exit_letters[4] = {
     { 46, 384, 18 }, { 65, 384, 21 }, { 268, 128, 12 }, { 86, 384, 19 }
 };
-static struct { int open, sel, going, esc_prev, font_state; unsigned char *font_alloc, *font_buf; } title_quit;
+static struct { int open, sel, going, esc_prev, font_state; unsigned char *font_alloc, *font_buf; size_t font_bytes; } title_quit;
+
+/* bhSetFontTexture does its pointer arithmetic in int and the texture entries keep 32-bit addresses, so
+   its data has to be below 2 GiB; a 64-bit host's malloc gives no such promise (it crashed there). */
+#ifdef __LP64__
+/* the DMA host pool (memory.c ps2_dma_alloc; all of it below 2 GiB, reserved at load): slot 2 is the file
+   viewer's picture, which is never up on the title (a mmap with address hints failed here: the low address
+   space is reserved for the game window and pool). */
+void* ps2_dma_alloc(int slot, uint32_t len);
+#define TITLE_FONT_SLOT 2
+static void* low_alloc(size_t n) { return ps2_dma_alloc(TITLE_FONT_SLOT, (uint32_t)n); }
+static void low_free(void* p, size_t n) { (void)n; if (p) ps2_dma_alloc(TITLE_FONT_SLOT, 0); }
+#else
+static void* low_alloc(size_t n) { return malloc(n); }
+static void low_free(void* p, size_t n) { (void)n; free(p); }
+#endif
 
 static void title_font_load(void)
 {
@@ -109,7 +124,8 @@ static void title_font_load(void)
     sct = ADXF_GetFsizeSct(h);
     bytes = sct * 2048;
     if (bytes <= 0 || bytes > (3 << 20)) { ADXF_Close(h); return; }
-    title_quit.font_alloc = malloc((size_t)bytes + 64);
+    title_quit.font_bytes = (size_t)bytes + 64;
+    title_quit.font_alloc = low_alloc(title_quit.font_bytes);
     if (!title_quit.font_alloc) { ADXF_Close(h); return; }
     title_quit.font_buf = (unsigned char*)(((uintptr_t)title_quit.font_alloc + 63) & ~(uintptr_t)63);
     ADXF_ReadNw32(h, sct, title_quit.font_buf);
@@ -119,7 +135,7 @@ static void title_font_load(void)
         bhSetFontTexture(title_quit.font_buf);
         title_quit.font_state = 2;
     } else {
-        free(title_quit.font_alloc);
+        low_free(title_quit.font_alloc, title_quit.font_bytes);
         title_quit.font_alloc = NULL;
         title_quit.font_buf = NULL;
     }
@@ -137,7 +153,7 @@ static void title_font_release(void)
         bhGarbageTexture(NULL, 0);
         sys->ss_flg &= ~0x40;
     }
-    free(title_quit.font_alloc);
+    low_free(title_quit.font_alloc, title_quit.font_bytes);
     title_quit.font_alloc = NULL;
     title_quit.font_buf = NULL;
     title_quit.font_state = 0;

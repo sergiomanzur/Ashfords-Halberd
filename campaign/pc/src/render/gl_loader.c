@@ -53,6 +53,9 @@ PFN_glGenBuffers gl_GenBuffers;
 PFN_glBindBuffer gl_BindBuffer;
 PFN_glBufferData gl_BufferData;
 PFN_glBufferSubData gl_BufferSubData;
+PFN_glBufferStorage gl_BufferStorage;
+PFN_glMapBufferRange gl_MapBufferRange;
+PFN_glUnmapBuffer gl_UnmapBuffer;
 PFN_glEnableVertexAttribArray gl_EnableVertexAttribArray;
 PFN_glVertexAttribPointer gl_VertexAttribPointer;
 PFN_glVertexAttribIPointer gl_VertexAttribIPointer;
@@ -147,6 +150,11 @@ int gl_load(void* (*getproc)(const char*))
     if (!(gl_BindBuffer = (PFN_glBindBuffer)getproc("glBindBuffer"))) ok = 0;
     if (!(gl_BufferData = (PFN_glBufferData)getproc("glBufferData"))) ok = 0;
     if (!(gl_BufferSubData = (PFN_glBufferSubData)getproc("glBufferSubData"))) ok = 0;
+    gl_MapBufferRange = (PFN_glMapBufferRange)getproc("glMapBufferRange");   /* optional */
+    gl_UnmapBuffer = (PFN_glUnmapBuffer)getproc("glUnmapBuffer");
+    if (!gl_MapBufferRange || !gl_UnmapBuffer) gl_MapBufferRange = NULL;
+    gl_BufferStorage = (PFN_glBufferStorage)getproc("glBufferStorageEXT");   /* optional */
+    if (!gl_BufferStorage) gl_BufferStorage = (PFN_glBufferStorage)getproc("glBufferStorage");
     if (!(gl_EnableVertexAttribArray = (PFN_glEnableVertexAttribArray)getproc("glEnableVertexAttribArray"))) ok = 0;
     if (!(gl_VertexAttribPointer = (PFN_glVertexAttribPointer)getproc("glVertexAttribPointer"))) ok = 0;
     if (!(gl_VertexAttribIPointer = (PFN_glVertexAttribIPointer)getproc("glVertexAttribIPointer"))) ok = 0;

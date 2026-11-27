@@ -481,6 +481,7 @@ static void scripted(unsigned int* inv)
     if (tp == (const char*)-1) {
         tp = getenv("RECVX_TELEPORT"); eq = getenv("RECVX_EQUIP"); wp = getenv("RECVX_WARP"); ef = getenv("RECVX_EFFECT");
         if (getenv("RECVX_INF_AMMO")) g_cheat.inf_ammo = 1;
+        if (getenv("RECVX_INF_HEALTH")) g_cheat.inf_health = 1;   /* room sweeps: enemies must not end the run */
         ul = getenv("RECVX_UNLOCK");
         if (ul && !strchr(ul, ':')) { g_cheat.unlock = atoi(ul) != 0; ul = NULL; }
         nc = getenv("RECVX_NOCLIP");

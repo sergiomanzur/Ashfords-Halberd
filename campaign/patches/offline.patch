@@ -13,6 +13,43 @@ index 0de2594e..1aaacf80 100644
  #endif
  } ADV_WORK;
  
+diff --git a/include/ps2/veronica/prog/effsub3.h b/include/ps2/veronica/prog/effsub3.h
+index 74deeb63..ddea9840 100644
+--- a/include/ps2/veronica/prog/effsub3.h
++++ b/include/ps2/veronica/prog/effsub3.h
+@@ -3,6 +3,23 @@
+ 
+ #include "types.h"
+ 
++/* The effect slots are O_WRK; OR_WORK is the same slot seen with its free areas. On LP64 O_WRK is larger (its pointers
++   grow), and func/idx must stay where O_WRK has them or the effect list calls a func the effect never set. */
++#include <stddef.h>
++#ifdef __LP64__
++#define OR_FREE4 (offsetof(O_WRK, func) - 0x90)
++#else
++#define OR_FREE4 1092
++#endif
++
++/* bhSetRapEff copies a parameter block of lng_siz 32-bit words into the effect: sizeof on LP64, where the blocks
++   hold pointers and are larger than the original literal count */
++#ifdef __LP64__
++#define RAPW(lit, obj) ((int)(sizeof(obj) / 4))
++#else
++#define RAPW(lit, obj) (lit)
++#endif
++
+ typedef struct OR_WORK 
+ {
+     // total size: 0x4E0
+@@ -29,7 +46,7 @@ typedef struct OR_WORK
+     char free3[24];      // offset 0x70, size 0x18
+     unsigned int stflg;  // offset 0x88, size 0x4
+     unsigned int Dummy;  // offset 0x8C, size 0x4
+-    char free4[1092];    // offset 0x90, size 0x444
++    char free4[OR_FREE4]; // offset 0x90, size 0x444 (32-bit); on LP64 as far as O_WRK reaches (see below)
+     void (*func)(void*); // offset 0x4D4, size 0x4
+     int idx;             // offset 0x4D8, size 0x4
+     int Dummy2;          // offset 0x4DC, size 0x4
 diff --git a/include/ps2/veronica/prog/item.h b/include/ps2/veronica/prog/item.h
 index 57ef94a1..4159bc7b 100644
 --- a/include/ps2/veronica/prog/item.h
@@ -29,6 +66,38 @@ index 57ef94a1..4159bc7b 100644
  extern const short combidata[410];
  
  #endif
+diff --git a/include/ps2/veronica/prog/macros.h b/include/ps2/veronica/prog/macros.h
+index fb0a9aa5..6f51bce6 100644
+--- a/include/ps2/veronica/prog/macros.h
++++ b/include/ps2/veronica/prog/macros.h
+@@ -39,6 +39,17 @@
+ #define SET_VEC4_AT(_src, _off, _data) (*((u_long128*)(((unsigned char*)(_src)) + _off)) = *(u_long128*)_data)
+ #define SET_DATA_AT(_src, _off, _type, _data) (*((_type*)(((unsigned char*)(_src)) + _off)) = _data)
+ 
++/* Pointers kept in the enemies' work areas (exp0 + offset) occupy 4-byte slots at 4-byte strides, as on the
++   PS2. On an LP64 host a pointer-typed access would use 8 bytes and overlap the neighbouring slots, so the PC
++   build keeps these slots 32 bits wide: every game object lives in the [0x30000000, 0x70000000) window. */
++#ifdef TARGET_PC
++#define BH_PGET(a) ((void*)(uintptr_t)*(const unsigned int*)(a))
++#define BH_PSET(a, v) (*(unsigned int*)(a) = (unsigned int)(uintptr_t)(v))
++#else
++#define BH_PGET(a) (*(void**)(a))
++#define BH_PSET(a, v) (*(void**)(a) = (v))
++#endif
++
+ #define EXP0_C(o) (*(char  *)((char *)epw->exp0 + (o)))
+ #define EXP0_UC(o) (*(unsigned char  *)((char *)epw->exp0 + (o)))
+ #define EXP0_S(o) (*(short *)((char *)epw->exp0 + (o)))
+@@ -81,7 +92,8 @@
+ #define EXP0_P3_Z(i) (*(float *)((char *)epw->exp0 + ((i) * 12) + 0x30))
+ #define EXP0_ANG(i)  (*(int   *)((char *)epw->exp0 + ((i) * 4)  + 0x40))
+ 
+-#define EXP0_ATR(n) (*(ATR_WORK**)(epw->exp0 + (n) * 4 + 0x4))
++#define EXP0_ATR(n) ((ATR_WORK*)BH_PGET(epw->exp0 + (n) * 4 + 0x4))
++#define EXP0_ATR_SET(n, v) BH_PSET(epw->exp0 + (n) * 4 + 0x4, (v))
+ #define EXP0_P3(n)  ((NJS_POINT3*)(epw->exp0 + (n) * 12 + 0x84))
+ #define EXP0_P(i) (*(NJS_POINT3 *)((char *)epw->exp0 + 4 + ((i) * 12)))
+ 
 diff --git a/include/ps2/veronica/prog/main.h b/include/ps2/veronica/prog/main.h
 index 12bd491a..4045ebdf 100644
 --- a/include/ps2/veronica/prog/main.h
@@ -45,6 +114,125 @@ index 12bd491a..4045ebdf 100644
  
  void njUserInit(void);
  Sint32 njUserMain(void);
+diff --git a/include/ps2/veronica/prog/types.h b/include/ps2/veronica/prog/types.h
+index 783c628d..392b1ecf 100644
+--- a/include/ps2/veronica/prog/types.h
++++ b/include/ps2/veronica/prog/types.h
+@@ -1040,7 +1040,7 @@ typedef struct VU1_STRIP_BUF
+     float fSy;   // offset 0x34, size 0x4
+     float fIz;   // offset 0x38, size 0x4
+     float fNz;   // offset 0x3C, size 0x4
+-} VU1_STRIP_BUF;
++} __attribute__((aligned(64))) VU1_STRIP_BUF;   /* quadword loads (ee_lq) mask the address to 16 bytes: arrays must be aligned on every target */
+ 
+ typedef struct VU1_PRIM_BUF
+ {
+@@ -1057,7 +1057,7 @@ typedef struct VU1_PRIM_BUF
+     float fY;            // offset 0x24, size 0x4
+     float fZ;            // offset 0x28, size 0x4
+     float fF;            // offset 0x2C, size 0x4
+-} VU1_PRIM_BUF;
++} __attribute__((aligned(16))) VU1_PRIM_BUF;
+ 
+ typedef struct CAM_WORK 
+ {
+@@ -1843,7 +1843,7 @@ typedef struct VU1_COLOR
+     float fG; // offset 0x4, size 0x4
+     float fB; // offset 0x8, size 0x4
+     float fA; // offset 0xC, size 0x4
+-} VU1_COLOR;
++} __attribute__((aligned(16))) VU1_COLOR;
+ 
+ typedef struct CNK_LIGHTING
+ {
+diff --git a/src/ps2/veronica/prog/Motion.c b/src/ps2/veronica/prog/Motion.c
+index 0749e8ad..be0cab34 100644
+--- a/src/ps2/veronica/prog/Motion.c
++++ b/src/ps2/veronica/prog/Motion.c
+@@ -191,6 +191,13 @@ static void SetMtnNormal(BH_PWORK* ewP, char* datP, int mode)
+     }
+    
+     obj_no = ewP->mnwP[ewP->mtn_no].obj_num;
++#if defined(TARGET_PC) && defined(__LP64__)
++    /* LP64: a script can give an object a motion with more nodes than its model (RM_0000's cell object
++       95: a 3-node motion on a 2-node model). The 32-bit original wrote the extra node into whatever
++       followed the node array; here that is the next arena allocation (its texture list), so only
++       the model's own nodes are driven. */
++    if (obj_no > (int)ewP->mlwP->obj_num) obj_no = (int)ewP->mlwP->obj_num;
++#endif
+     md2P   = ewP->mnwP[ewP->mtn_no].md2P; 
+     
+     if ((mode & 0x2))
+@@ -271,6 +278,13 @@ static void SetMtnNormalHokan(BH_PWORK* ewP, char* datP, int mode, float rate)
+     }
+     
+     obj_no = ewP->mnwP[ewP->mtn_no].obj_num;
++#if defined(TARGET_PC) && defined(__LP64__)
++    /* LP64: a script can give an object a motion with more nodes than its model (RM_0000's cell object
++       95: a 3-node motion on a 2-node model). The 32-bit original wrote the extra node into whatever
++       followed the node array; here that is the next arena allocation (its texture list), so only
++       the model's own nodes are driven. */
++    if (obj_no > (int)ewP->mlwP->obj_num) obj_no = (int)ewP->mlwP->obj_num;
++#endif
+     md2P   = ewP->mnwP[ewP->mtn_no].md2P;
+     
+     if ((mode & 0x2))
+@@ -426,6 +440,13 @@ static void SetMtnFast(BH_PWORK* ewP, char* datP, int mode)
+     posP[2] = keyP[2];
+     
+     obj_no = ewP->mnwP[ewP->mtn_no].obj_num;
++#if defined(TARGET_PC) && defined(__LP64__)
++    /* LP64: a script can give an object a motion with more nodes than its model (RM_0000's cell object
++       95: a 3-node motion on a 2-node model). The 32-bit original wrote the extra node into whatever
++       followed the node array; here that is the next arena allocation (its texture list), so only
++       the model's own nodes are driven. */
++    if (obj_no > (int)ewP->mlwP->obj_num) obj_no = (int)ewP->mlwP->obj_num;
++#endif
+     md2P   = ewP->mnwP[ewP->mtn_no].md2P;
+     
+     if ((mode & 0x2)) 
+@@ -514,6 +535,13 @@ static void SetMtnFastHokan(BH_PWORK* ewP, char* datP, int mode, float rate)
+     NJS_MDATA2_MOD* md2P; 
+ 
+     obj_no = ewP->mnwP[ewP->mtn_no].obj_num;
++#if defined(TARGET_PC) && defined(__LP64__)
++    /* LP64: a script can give an object a motion with more nodes than its model (RM_0000's cell object
++       95: a 3-node motion on a 2-node model). The 32-bit original wrote the extra node into whatever
++       followed the node array; here that is the next arena allocation (its texture list), so only
++       the model's own nodes are driven. */
++    if (obj_no > (int)ewP->mlwP->obj_num) obj_no = (int)ewP->mlwP->obj_num;
++#endif
+     md2P   = ewP->mnwP[ewP->mtn_no].md2P;
+         
+     if ((mode & 0x2)) 
+@@ -684,6 +712,13 @@ static void SetMtnSlow(BH_PWORK* ewP, char* datP, int mode)
+     }
+     
+     obj_no = mnwP->obj_num;
++#if defined(TARGET_PC) && defined(__LP64__)
++    /* LP64: a script can give an object a motion with more nodes than its model (RM_0000's cell object
++       95: a 3-node motion on a 2-node model). The 32-bit original wrote the extra node into whatever
++       followed the node array; here that is the next arena allocation (its texture list), so only
++       the model's own nodes are driven. */
++    if (obj_no > (int)ewP->mlwP->obj_num) obj_no = (int)ewP->mlwP->obj_num;
++#endif
+     md2P   = mnwP->md2P;
+     
+     if ((mode & 0x2))
+@@ -787,6 +822,13 @@ static void SetMtnSlowHokan(BH_PWORK* ewP, char* datP, int mode, float rate)
+     }
+     
+     obj_no = mnwP->obj_num;
++#if defined(TARGET_PC) && defined(__LP64__)
++    /* LP64: a script can give an object a motion with more nodes than its model (RM_0000's cell object
++       95: a 3-node motion on a 2-node model). The 32-bit original wrote the extra node into whatever
++       followed the node array; here that is the next arena allocation (its texture list), so only
++       the model's own nodes are driven. */
++    if (obj_no > (int)ewP->mlwP->obj_num) obj_no = (int)ewP->mlwP->obj_num;
++#endif
+     md2P   = mnwP->md2P;
+     
+     if ((mode & 0x2)) 
 diff --git a/src/ps2/veronica/prog/adv.c b/src/ps2/veronica/prog/adv.c
 index 8836adda..da99f88c 100644
 --- a/src/ps2/veronica/prog/adv.c
@@ -497,7 +685,7 @@ index 2ba1053e..fd9ea126 100644
                  plmtnp = &dp[mtsz];
              } 
 diff --git a/src/ps2/veronica/prog/effect.c b/src/ps2/veronica/prog/effect.c
-index 9f2507ff..f0b29736 100644
+index 9f2507ff..5c63c130 100644
 --- a/src/ps2/veronica/prog/effect.c
 +++ b/src/ps2/veronica/prog/effect.c
 @@ -74,7 +74,10 @@ void bhInitEffect()
@@ -506,7 +694,7 @@ index 9f2507ff..f0b29736 100644
          {
 -            bhMlbBinRealize(dp, (ML_WORK*)&sys->efm[i]);
 +#ifdef TARGET_PC
-+            if (!pc_lp64_mlb_room(dp, (ML_WORK*)&sys->efm[i]))   /* LP64: unpacked into the room arena */
++            if (!pc_lp64_mlb_session(dp, (ML_WORK*)&sys->efm[i]))   /* LP64: session arena (the effect pack outlives rooms) */
 +#endif
 +                bhMlbBinRealize(dp, (ML_WORK*)&sys->efm[i]);
              
@@ -727,7 +915,15 @@ index 9f2507ff..f0b29736 100644
  }
  
  // 99.84% matching
-@@ -1773,17 +1837,24 @@ label:
+@@ -1112,7 +1176,6 @@ void bhDrawMdfEffect(unsigned int* owp, int ct)
+             Ps2ShadowMain0();
+             
+             lCnkModClipFace = 0;
+-            
+             njCnkModDrawModel(mlp->objP[op->mdlver].model);
+             
+             Ps2ShadowMain1();
+@@ -1773,17 +1836,24 @@ label:
  void bhDrawNtxEffect2D(unsigned int* owp, int ct)
  {
      O_WRK* op;
@@ -795,10 +991,141 @@ index 4b138f65..0edf983e 100644
          
          op->func = (void*)bhDraw136;
          
+diff --git a/src/ps2/veronica/prog/effsub3.c b/src/ps2/veronica/prog/effsub3.c
+index 98e4aed4..db2eb31f 100644
+--- a/src/ps2/veronica/prog/effsub3.c
++++ b/src/ps2/veronica/prog/effsub3.c
+@@ -2425,7 +2425,7 @@ void bhSetEffGunSpark(NJS_POINT3* posP, NJS_POINT3* dirP, unsigned int src_col,
+ 		{ 12,                1.0f, 0.9800000190734863f, 3.0f, 12, 20.0f, 0.800000011920929f, 4, -0.03266666829586029f }
+ 	};
+     
+-    orP = bhSetRapEff(308, (void*)&Eff308Prm[typ_no], 9);
++    orP = bhSetRapEff(308, (void*)&Eff308Prm[typ_no], RAPW(9, Eff308Prm[0]));
+     
+     if (orP != NULL) 
+     {
+@@ -2453,7 +2453,7 @@ void bhSetEffSpark(NJS_POINT3* posP, NJS_POINT3* dirP, unsigned int src_col, uns
+ 		{ 16, 0.75f, 0.9800000190734863f, 4.0f, 16, 180.0f, 1.899999976158142f, 16, -0.09800000488758087f }
+ 	};
+     
+-    orP = bhSetRapEff(308, (void*)&Eff308Prm[typ_no], 9);
++    orP = bhSetRapEff(308, (void*)&Eff308Prm[typ_no], RAPW(9, Eff308Prm[0]));
+     
+     if (orP != NULL) 
+     {
+@@ -2790,7 +2790,7 @@ OR_WORK* rySetEffBlood(NJS_MATRIX* mtxP, NJS_POINT3* posP, NJS_POINT3* dirP, int
+ 
+ 	typ_no &= 0x3FFFFFFF;
+     
+-    orP = bhSetRapEff(309, (void*)&Eff309Prm[typ_no], 12);
++    orP = bhSetRapEff(309, (void*)&Eff309Prm[typ_no], RAPW(12, Eff309Prm[0]));
+     
+     if (orP != NULL)
+     {
+@@ -3289,7 +3289,7 @@ OR_WORK* rySetEffBlood2(NJS_MATRIX* mtxP, NJS_POINT3* posP, NJS_POINT3* dirP, in
+ 
+ 	typ_no &= 0x3FFFFFFF;
+     
+-    orP = bhSetRapEff(311, (void*)&Eff30bPrm[typ_no], 12);
++    orP = bhSetRapEff(311, (void*)&Eff30bPrm[typ_no], RAPW(12, Eff30bPrm[0]));
+     
+     if (orP != NULL)
+     {
 diff --git a/src/ps2/veronica/prog/en01.c b/src/ps2/veronica/prog/en01.c
-index 88634f68..c05f43b3 100644
+index 88634f68..879c9c32 100644
 --- a/src/ps2/veronica/prog/en01.c
 +++ b/src/ps2/veronica/prog/en01.c
+@@ -2605,13 +2605,13 @@ void bhEne01_Init(BH_PWORK* epw)
+ 		EXP0_I(0x24) = -1;
+ 		if (!(epw->flg & 0x80)){
+ 			epw->exp1 = (unsigned char*)bhEne01_SetLinkEnemy(epw, 1, 1);
+-			*(void**)(epw->exp0 + 0x10) = bhEne01_SetLinkEnemy(epw, 0, 0x1f);
++			BH_PSET(epw->exp0 + 0x10, bhEne01_SetLinkEnemy(epw, 0, 0x1f));
+ 			bhEne_SetCallFunc(bhEne01Head, 0x1f);
+-			*(void**)(epw->exp0 + 0x0) = bhEne01_SetLinkEnemy(epw, 0, 0x20);
+-			*(void**)(epw->exp0 + 0x4) = bhEne01_SetLinkEnemy(epw, 0, 0x20);
++			BH_PSET(epw->exp0 + 0x0, bhEne01_SetLinkEnemy(epw, 0, 0x20));
++			BH_PSET(epw->exp0 + 0x4, bhEne01_SetLinkEnemy(epw, 0, 0x20));
+ 			bhEne_SetCallFunc(bhEne01Arm, 0x20);
+-			*(void**)(epw->exp0 + 0x8) = bhEne01_SetLinkEnemy(epw, 0, 0x21);
+-			*(void**)(epw->exp0 + 0xc) = bhEne01_SetLinkEnemy(epw, 0, 0x21);
++			BH_PSET(epw->exp0 + 0x8, bhEne01_SetLinkEnemy(epw, 0, 0x21));
++			BH_PSET(epw->exp0 + 0xc, bhEne01_SetLinkEnemy(epw, 0, 0x21));
+ 			bhEne_SetCallFunc(bhEne01Leg, 0x21);
+ 			if (epw->mdlver == 5 || epw->mdlver == 6 || epw->mdlver == 22 || (unsigned int)(epw->mdlver - 35) < 4){
+ 				epp = bhEne01_SetLinkEnemy(epw, 11, 0x22);
+@@ -2625,7 +2625,7 @@ void bhEne01_Init(BH_PWORK* epw)
+ 				} else {
+ 					epp->mdl[0] = epw->mdl[2];
+ 				}
+-				*(void**)(epw->exp0 + 0x14) = epp;
++				BH_PSET(epw->exp0 + 0x14, epp);
+ 				bhEne_SetCallFunc(bhEne01Cap, 0x22);
+ 			}
+ 			if (epw->mdlver == 21 || epw->mdlver == 22) {
+@@ -2637,7 +2637,7 @@ void bhEne01_Init(BH_PWORK* epw)
+                 epp->skp[0] = epw->skp[2];
+                 epp->mdl[0] = epw->mdl[2];
+                 epp->mnwP = epw->mnwP;
+-                *(void**)(epw->exp0 + 0x18) = epp;
++                BH_PSET(epw->exp0 + 0x18, epp);
+                 bhEne_SetCallFunc(bhEne01Worm, 0x23);
+                 epp->exp1 = (unsigned char*)epw;
+             }
+@@ -2650,7 +2650,7 @@ void bhEne01_Init(BH_PWORK* epw)
+ 
+                 epp->mdl[0] = epw->mdl[2];
+ 
+-                *(void**)(epw->exp0 + 0x1c) = epp;
++                BH_PSET(epw->exp0 + 0x1c, epp);
+                 bhEne_SetCallFunc(bhEne01Bom, 0x24);
+                 
+                 
+@@ -2661,7 +2661,7 @@ void bhEne01_Init(BH_PWORK* epw)
+                 epp2->mlwP = epp2->mdl;
+                 epp2->mdl[0] = epw->mdl[3];
+                 
+-                *(void**)(epw->exp0 + 0x20) = epp2;
++                BH_PSET(epw->exp0 + 0x20, epp2);
+                 bhEne_SetCallFunc(bhEne01Scope, 0x25);
+             }
+         
+@@ -2679,7 +2679,7 @@ void bhEne01_Init(BH_PWORK* epw)
+         
+         // addr = epw->exp0;
+         for (i = 0; i < 7; i++) {
+-            sv_child[i] = ((BH_PWORK**)epw->exp0)[i]; 
++            sv_child[i] = ((BH_PWORK*)BH_PGET((char*)epw->exp0 + 4 * (i))); 
+         }
+         
+         addr = epw->exp0;
+@@ -2691,7 +2691,7 @@ void bhEne01_Init(BH_PWORK* epw)
+         }
+     
+         for (i = 0; i < 7; i++) {
+-            ((BH_PWORK**)epw->exp0)[i] = sv_child[i];
++            BH_PSET((char*)epw->exp0 + 4 * (i), sv_child[i]);
+         }
+         *(int*)(epw->exp0 + 0x24) = sv_sdw_no;
+     }
+@@ -2728,7 +2728,7 @@ void bhEne01_Init(BH_PWORK* epw)
+         epw->mtn_tp = (unsigned char*)en01_flipTree2;
+         
+         
+-        epp = (BH_PWORK*)*(int*)((char*)epw + 0x2EC);
++        epp = (BH_PWORK*)epw->lkwkp;   /* offset 0x2EC on the PS2 */
+         epw->type = epp->type;
+         epw->hp = epp->hp;
+         epw->px = epp->px;
+@@ -2774,7 +2774,7 @@ void bhEne01_Init(BH_PWORK* epw)
+             epw->mdflg &= ~0x400;
+             EXP0_I(0x3C) = 0xFFB2B2B2;
+             npSetAllMatColor(epw->mlwP->objP, epw->mlwP->obj_num, EXP0_I(0x3C));
+-            epp = (BH_PWORK*)*(int*)((char*)epw->exp0 + 0x14);
++            epp = (BH_PWORK*)BH_PGET((char*)epw->exp0 + 0x14);
+             if (epp != NULL){
+                 epp->mdflg &= ~0x400;
+                 npSetAllMatColor(epp->mlwP->objP, epp->mlwP->obj_num, EXP0_I(0x3C));
 @@ -3199,6 +3199,30 @@ void bhEne01_CalcEnemy(BH_PWORK* epw)
      }
  }
@@ -941,6 +1268,88 @@ index 88634f68..c05f43b3 100644
      }
  
      if ((wp_tbl->flg & 0x40) && !(plp->flg & 4) && (epw->mode0 != 2) && !(EXP0_I(0x40) & 0x440000))
+@@ -3841,7 +3913,7 @@ void bhEne01_DamageAdd(BH_PWORK* epw)
+             epp->mdflg |= 0x400;
+             EPP_EXP0_I(0x3C) = 0xFF000000;
+             npSetAllMatColor(epp->mlwP->objP, epp->mlwP->obj_num, EPP_EXP0_I(0x3C));
+-            epp2 = (BH_PWORK*)*(int*)((char*)epw->exp0 + 0x14);
++            epp2 = (BH_PWORK*)BH_PGET((char*)epw->exp0 + 0x14);
+             if ((epp2 != NULL) && (epp2->flg & 0x80))
+             {
+                 epp2->mdflg |= 0x400;
+@@ -4233,7 +4305,7 @@ void bhEne01_CollCheckWall(BH_PWORK* epw)
+     ps.x = plp->px;
+     ps.y = 0.5f + plp->py;
+     ps.z = plp->pz;
+-    *(ATR_WORK**)(epw->exp0 + 0x70) = bhCollisionCheckLine((NJS_VECTOR*)&epw->px, &ps);
++    BH_PSET(epw->exp0 + 0x70, bhCollisionCheckLine((NJS_VECTOR*)&epw->px, &ps));
+ 
+     t = EXP0_I(0x40) & 0xF;
+     
+@@ -5391,7 +5463,7 @@ void bhEne01_MV03(BH_PWORK* epw)
+                 }
+                 
+                 plp->flg |= 4;
+-                epp = *(BH_PWORK**)(epw->exp0 + 0x18);
++                epp = ((BH_PWORK*)BH_PGET(epw->exp0 + 0x18));
+                 epp->flg |= 0x100000;
+                 epp->px = epw->px;
+                 epp->py = epw->py;
+@@ -11743,7 +11815,7 @@ int bhEne01_WormCheck(BH_PWORK* epw)
+     BH_PWORK* ep;
+     int i;
+ 
+-    epp = *(BH_PWORK**)(epw->exp0 + 0x18);
++    epp = ((BH_PWORK*)BH_PGET(epw->exp0 + 0x18));
+     ep = ene;
+     
+     if ((sys->ply_id != 1 )||
+@@ -11850,14 +11922,14 @@ int bhEne01_KaidanCheck(BH_PWORK* epw)
+         {
+             if (plp->flr_no > epw->flr_no)
+             {
+-                *(ATR_WORK **)(epw->exp0 + 0x74) = hp;
++                BH_PSET(epw->exp0 + 0x74, hp);
+                 bhSetUseKaidanFlag(epw, hp, idx);
+                 return 1;
+             }
+         } 
+         else if (plp->flr_no < epw->flr_no)
+         {
+-            *(ATR_WORK **)(epw->exp0 + 0x74) = hp;
++            BH_PSET(epw->exp0 + 0x74, hp);
+             bhSetUseKaidanFlag(epw, hp, idx);
+             return 1;
+         }
+@@ -11914,7 +11986,7 @@ void bhEne01_FlyingCap(BH_PWORK* epw, int tbl_no)
+ 	BH_PWORK* sepw;
+ 	NJS_CNK_OBJECT* obj;
+ 
+-	sepw = *(BH_PWORK**)(epw->exp0 + 0x14);
++	sepw = ((BH_PWORK*)BH_PGET(epw->exp0 + 0x14));
+ 	if (sepw != NULL)
+     {
+ 		obj = epw->mlwP->objP;
+diff --git a/src/ps2/veronica/prog/en01b.c b/src/ps2/veronica/prog/en01b.c
+index bc4cbcc1..24c8bada 100644
+--- a/src/ps2/veronica/prog/en01b.c
++++ b/src/ps2/veronica/prog/en01b.c
+@@ -319,12 +319,12 @@ void bhEne01_NG03B(BH_PWORK* epw)
+             {
+                 bhEne01_CutHead(epp, 0);
+                 
+-                sepw = *(BH_PWORK**)&epp->exp0[16];
++                sepw = ((BH_PWORK*)BH_PGET(&epp->exp0[16]));
+             
+                 if (sepw != NULL)
+                 {
+-                    *(unsigned int**)&sepw->exp0[0] = &epp->mlwP->objP[11].evalflags;
+-                    *(unsigned int**)&sepw->exp0[4] = &epp->mlwP->owP[11].flg;
++                    BH_PSET(&sepw->exp0[0], &epp->mlwP->objP[11].evalflags);
++                    BH_PSET(&sepw->exp0[4], &epp->mlwP->owP[11].flg);
+             
+                     sepw->ay = (epw->ay + 32768) & 0xFFFF;
+                     
 diff --git a/src/ps2/veronica/prog/en01sub.c b/src/ps2/veronica/prog/en01sub.c
 index 9d1490c6..6f0ea85b 100644
 --- a/src/ps2/veronica/prog/en01sub.c
@@ -957,8 +1366,1580 @@ index 9d1490c6..6f0ea85b 100644
      BH_PWORK* ep;       
      int i;              
      int n, no;             
+diff --git a/src/ps2/veronica/prog/en02.c b/src/ps2/veronica/prog/en02.c
+index 7d287194..76e71c59 100644
+--- a/src/ps2/veronica/prog/en02.c
++++ b/src/ps2/veronica/prog/en02.c
+@@ -774,48 +774,48 @@ void bhEne02_Init(BH_PWORK* epw)
+ 	{
+ 		epw->exp0 = bhEne_CallocWork(144, 8);
+ 
+-		*(BH_PWORK**)(epw->exp0 + 40) = bhSetEnemy(&child, rom->ene_n);
++		BH_PSET(epw->exp0 + 40, bhSetEnemy(&child, rom->ene_n));
+ 
+-		(*(BH_PWORK**)(epw->exp0 + 40))->type = 0;
++		(((BH_PWORK*)BH_PGET(epw->exp0 + 40)))->type = 0;
+ 
+-		(*(BH_PWORK**)(epw->exp0 + 40))->lkwkp = (unsigned char*)epw;
+-		(*(BH_PWORK**)(epw->exp0 + 40))->mlwP  = &epw->mdl[5];
++		(((BH_PWORK*)BH_PGET(epw->exp0 + 40)))->lkwkp = (unsigned char*)epw;
++		(((BH_PWORK*)BH_PGET(epw->exp0 + 40)))->mlwP  = &epw->mdl[5];
+ 
+-		(*(BH_PWORK**)(epw->exp0 + 40))->obj_a = epw->mdl[5].objP;
+-		(*(BH_PWORK**)(epw->exp0 + 40))->obj_b = epw->mdl[6].objP;
++		(((BH_PWORK*)BH_PGET(epw->exp0 + 40)))->obj_a = epw->mdl[5].objP;
++		(((BH_PWORK*)BH_PGET(epw->exp0 + 40)))->obj_b = epw->mdl[6].objP;
+ 
+-		*(BH_PWORK**)(epw->exp0 + 44) = bhSetEnemy(&child, rom->ene_n);
++		BH_PSET(epw->exp0 + 44, bhSetEnemy(&child, rom->ene_n));
+ 
+-		(*(BH_PWORK**)(epw->exp0 + 44))->type = 1;
++		(((BH_PWORK*)BH_PGET(epw->exp0 + 44)))->type = 1;
+ 
+-		(*(BH_PWORK**)(epw->exp0 + 44))->lkwkp = (unsigned char*)epw;
+-		(*(BH_PWORK**)(epw->exp0 + 44))->mlwP  = &epw->mdl[4];
++		(((BH_PWORK*)BH_PGET(epw->exp0 + 44)))->lkwkp = (unsigned char*)epw;
++		(((BH_PWORK*)BH_PGET(epw->exp0 + 44)))->mlwP  = &epw->mdl[4];
+ 
+ 		for (i = 0; i < 16; i++)
+ 		{
+-			*(BH_PWORK**)((epw->exp0 + 48) + (i * 4)) = bhSetEnemy(&child, rom->ene_n);
++			BH_PSET((epw->exp0 + 48) + (i * 4), bhSetEnemy(&child, rom->ene_n));
+ 
+-			(*(BH_PWORK**)((epw->exp0 + 48) + (i * 4)))->type = 2;
++			(((BH_PWORK*)BH_PGET((epw->exp0 + 48) + (i * 4))))->type = 2;
+ 
+-			(*(BH_PWORK**)((epw->exp0 + 48) + (i * 4)))->lkwkp = (unsigned char*)epw;
+-			(*(BH_PWORK**)((epw->exp0 + 48) + (i * 4)))->mlwP  = &epw->mdl[1];
++			(((BH_PWORK*)BH_PGET((epw->exp0 + 48) + (i * 4))))->lkwkp = (unsigned char*)epw;
++			(((BH_PWORK*)BH_PGET((epw->exp0 + 48) + (i * 4))))->mlwP  = &epw->mdl[1];
+ 		}
+ 
+ 		bhEne_SetCallFunc(bhEne02sub, 31);
+ 
+-		*(ATR_WORK**)(epw->exp0 + 124) = &sys->mwalp[sys->mwal_n];
++		BH_PSET(epw->exp0 + 124, &sys->mwalp[sys->mwal_n]);
+ 		
+ 		sys->mwal_n++;
+ 
+-		(*(ATR_WORK**)(epw->exp0 + 124))->flg = 0;
++		(((ATR_WORK*)BH_PGET(epw->exp0 + 124)))->flg = 0;
+ 
+-		(*(ATR_WORK**)(epw->exp0 + 124))->type = 3;
++		(((ATR_WORK*)BH_PGET(epw->exp0 + 124)))->type = 3;
+ 
+-		(*(ATR_WORK**)(epw->exp0 + 124))->w = 10.0f;
+-		(*(ATR_WORK**)(epw->exp0 + 124))->h = 0;
+-		(*(ATR_WORK**)(epw->exp0 + 124))->d = 0;
++		(((ATR_WORK*)BH_PGET(epw->exp0 + 124)))->w = 10.0f;
++		(((ATR_WORK*)BH_PGET(epw->exp0 + 124)))->h = 0;
++		(((ATR_WORK*)BH_PGET(epw->exp0 + 124)))->d = 0;
+ 
+-		(*(ATR_WORK**)(epw->exp0 + 124))->attr = 0;
++		(((ATR_WORK*)BH_PGET(epw->exp0 + 124)))->attr = 0;
+ 	}
+ 
+ 	EXP0_I(112) = 1;
+@@ -1089,8 +1089,8 @@ void bhEne02_MV02(BH_PWORK* epw)
+     case 1:
+         if (epw->frm_no == 196608) 
+         {
+-            (*(BH_PWORK**)&epw->exp0[40])->mode2 = 1;
+-            (*(BH_PWORK**)&epw->exp0[40])->mode3 = 0;
++            (((BH_PWORK*)BH_PGET(&epw->exp0[40])))->mode2 = 1;
++            (((BH_PWORK*)BH_PGET(&epw->exp0[40])))->mode3 = 0;
+         }
+         
+         if (epw->frm_no == 0) 
+@@ -1182,8 +1182,8 @@ void bhEne02_MV02(BH_PWORK* epw)
+         
+         if ((epw->frm_no / 65536) == 15) 
+         {
+-            (*(BH_PWORK**)&epw->exp0[40])->mode2 = 2;
+-            (*(BH_PWORK**)&epw->exp0[40])->mode3 = 0;
++            (((BH_PWORK*)BH_PGET(&epw->exp0[40])))->mode2 = 2;
++            (((BH_PWORK*)BH_PGET(&epw->exp0[40])))->mode3 = 0;
+         }
+         
+         if (((epw->frm_no / 65536) < 44) && (!(plp->flg & 0x4))) 
+@@ -1366,8 +1366,8 @@ void bhEne02_MV03(BH_PWORK* epw)
+     case 0:
+         sys->rm_flg |= 0x1;
+         
+-        (*(BH_PWORK**)&epw->exp0[44])->mode2 = 4;
+-        (*(BH_PWORK**)&epw->exp0[44])->mode3 = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[44])))->mode2 = 4;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[44])))->mode3 = 0;
+         
+         epw->ct0 = 35;
+         
+@@ -1400,8 +1400,8 @@ void bhEne02_MV03(BH_PWORK* epw)
+     case 3:
+         if (epw->frm_no == 983040)
+         {
+-            (*(BH_PWORK**)&epw->exp0[40])->mode2 = 1;
+-            (*(BH_PWORK**)&epw->exp0[40])->mode3 = 0;
++            (((BH_PWORK*)BH_PGET(&epw->exp0[40])))->mode2 = 1;
++            (((BH_PWORK*)BH_PGET(&epw->exp0[40])))->mode3 = 0;
+         }
+ 
+         if (epw->frm_no == 0)
+@@ -1618,8 +1618,8 @@ void bhEne02_MV04(BH_PWORK* epw)
+     case 1:
+         if ((epw->frm_no / 65536) == 20) 
+         {
+-            (*(BH_PWORK**)&epw->exp0[40])->mode2 = 2;
+-            (*(BH_PWORK**)&epw->exp0[40])->mode3 = 0;
++            (((BH_PWORK*)BH_PGET(&epw->exp0[40])))->mode2 = 2;
++            (((BH_PWORK*)BH_PGET(&epw->exp0[40])))->mode3 = 0;
+             
+             epw->flg &= ~0x40;
+         }
+@@ -2016,11 +2016,11 @@ void bhEne02_DD00(BH_PWORK* epw)
+         {
+             owk = &epw->mlwP->owP[10];
+             
+-            (*(ATR_WORK**)&epw->exp0[124])->flg = 1;
++            (((ATR_WORK*)BH_PGET(&epw->exp0[124])))->flg = 1;
+             
+-            (*(ATR_WORK**)&epw->exp0[124])->px = owk->mtx[12];
+-            (*(ATR_WORK**)&epw->exp0[124])->py = epw->py;
+-            (*(ATR_WORK**)&epw->exp0[124])->pz = owk->mtx[14];
++            (((ATR_WORK*)BH_PGET(&epw->exp0[124])))->px = owk->mtx[12];
++            (((ATR_WORK*)BH_PGET(&epw->exp0[124])))->py = epw->py;
++            (((ATR_WORK*)BH_PGET(&epw->exp0[124])))->pz = owk->mtx[14];
+         }
+ 
+         if ((epw->frm_no > 10354688) && (epw->frm_no < 12189696)) 
+@@ -2144,13 +2144,13 @@ void bhEne02_DD00(BH_PWORK* epw)
+         {
+             epw->flg |= 0x100000;
+             
+-            (*(ATR_WORK**)&epw->exp0[124])->flg = 0;
++            (((ATR_WORK*)BH_PGET(&epw->exp0[124])))->flg = 0;
+         }
+ 
+         if (epw->frm_no == 21626880)
+         {
+-            (*(BH_PWORK**)&epw->exp0[40])->mode2 = 2;
+-            (*(BH_PWORK**)&epw->exp0[40])->mode3 = 0;
++            (((BH_PWORK*)BH_PGET(&epw->exp0[40])))->mode2 = 2;
++            (((BH_PWORK*)BH_PGET(&epw->exp0[40])))->mode3 = 0;
+         }
+ 
+         if ((epw->frm_no > 10878976) && (epw->frm_no < 11796480)) 
+@@ -2214,8 +2214,8 @@ void bhEne02_DD01(BH_PWORK* epw)
+         
+         epw->ct0 = epw->mnwP[epw->mtn_no].frm_num - 2;
+         
+-        (*(BH_PWORK**)(epw->exp0 + 40))->mode2 = 2;
+-        (*(BH_PWORK**)(epw->exp0 + 40))->mode3 = 0;
++        (((BH_PWORK*)BH_PGET(epw->exp0 + 40)))->mode2 = 2;
++        (((BH_PWORK*)BH_PGET(epw->exp0 + 40)))->mode3 = 0;
+         
+         epw->mode3++;
+         break;
+@@ -2976,9 +2976,9 @@ void bhEne02_DamageInit(BH_PWORK* epw)
+                     
+                     if (epw->type == 1)
+                     {
+-                        (*(BH_PWORK**)&epw->exp0[40])->mdflg |= 0x1;
++                        (((BH_PWORK*)BH_PGET(&epw->exp0[40])))->mdflg |= 0x1;
+                         
+-                        (*(BH_PWORK**)&epw->exp0[40])->flg &= ~0x48;
++                        (((BH_PWORK*)BH_PGET(&epw->exp0[40])))->flg &= ~0x48;
+                     }
+                 }
+                 else if (epw->total_dam > 50)
+@@ -3106,9 +3106,9 @@ void bhEne02_WarpCheck(BH_PWORK* epw)
+ 
+ 	hp = bhCheckFloorEnemy(epw->flr_no, plp->px, plp->pz);
+ 
+-	if (((hp != NULL) && (hp != *(ATR_WORK**)(epw->exp0 + 116))) && (hp->prm0 == 2))
++	if (((hp != NULL) && (hp != ((ATR_WORK*)BH_PGET(epw->exp0 + 116)))) && (hp->prm0 == 2))
+ 	{
+-		*(ATR_WORK**)(epw->exp0 + 116) = hp;
++		BH_PSET(epw->exp0 + 116, hp);
+ 
+ 		if (hp->prm1 == 0)
+ 		{
+@@ -3148,16 +3148,16 @@ void bhEne02_FallingRock(BH_PWORK* epw)
+ 
+ 	for (i = 0; i < 16; i++)
+ 	{
+-		if ((*(BH_PWORK**)((epw->exp0 + 48) + (i * 4)))->mode2 == 0)
++		if ((((BH_PWORK*)BH_PGET((epw->exp0 + 48) + (i * 4))))->mode2 == 0)
+ 		{
+-			(*(BH_PWORK**)((epw->exp0 + 48) + (i * 4)))->mode2 = 3;
+-			(*(BH_PWORK**)((epw->exp0 + 48) + (i * 4)))->mode3 = 0;
++			(((BH_PWORK*)BH_PGET((epw->exp0 + 48) + (i * 4))))->mode2 = 3;
++			(((BH_PWORK*)BH_PGET((epw->exp0 + 48) + (i * 4))))->mode3 = 0;
+ 
+-			(*(BH_PWORK**)((epw->exp0 + 48) + (i * 4)))->px = (dx + (80.0f * (-rand() / -2147483648.0f))) - 40.0f;
+-			(*(BH_PWORK**)((epw->exp0 + 48) + (i * 4)))->py = dy;
+-			(*(BH_PWORK**)((epw->exp0 + 48) + (i * 4)))->pz = (dz + (80.0f * (-rand() / -2147483648.0f))) - 40.0f;
++			(((BH_PWORK*)BH_PGET((epw->exp0 + 48) + (i * 4))))->px = (dx + (80.0f * (-rand() / -2147483648.0f))) - 40.0f;
++			(((BH_PWORK*)BH_PGET((epw->exp0 + 48) + (i * 4))))->py = dy;
++			(((BH_PWORK*)BH_PGET((epw->exp0 + 48) + (i * 4))))->pz = (dz + (80.0f * (-rand() / -2147483648.0f))) - 40.0f;
+ 
+-			(*(BH_PWORK**)((epw->exp0 + 48) + (i * 4)))->mlwP = &epw->mdl[(int)(3.0f * (-rand() / -2147483648.0f)) + 1];
++			(((BH_PWORK*)BH_PGET((epw->exp0 + 48) + (i * 4))))->mlwP = &epw->mdl[(int)(3.0f * (-rand() / -2147483648.0f)) + 1];
+ 
+ 			if (--num == 0)
+ 			{
+diff --git a/src/ps2/veronica/prog/en03.c b/src/ps2/veronica/prog/en03.c
+index d5bf7ed2..659f5664 100644
+--- a/src/ps2/veronica/prog/en03.c
++++ b/src/ps2/veronica/prog/en03.c
+@@ -627,7 +627,8 @@ void bhEne03(BH_PWORK* epw)
+ // 100% matching!
+ void bhEne03_Init(BH_PWORK* epw)
+ {
+-    BH_PWORK** epw2, *ep, *ep_leader;    
++    unsigned char* epw2;   /* byte cursor over 4-byte pointer slots */
++    BH_PWORK *ep, *ep_leader;    
+     O_WORK* owk;         
+     int i;              
+ 
+@@ -708,47 +709,47 @@ void bhEne03_Init(BH_PWORK* epw)
+             }
+         }
+ 
+-        epw2 = (BH_PWORK**)&EXP0_C(128); 
++        epw2 = (unsigned char*)&EXP0_C(128); 
+         
+         for (i = 0; i < 8; i++) 
+         {
+-            *epw2 = bhSetEnemy(&ene03_child, rom->ene_n);
++            BH_PSET(epw2, bhSetEnemy(&ene03_child, rom->ene_n));
+             
+-            (*epw2)->type = 0;
++            ((BH_PWORK*)BH_PGET(epw2))->type = 0;
+             
+-            (*epw2)->lkwkp = (unsigned char*)epw;
+-            (*epw2)->lkono = i >= 4;
++            ((BH_PWORK*)BH_PGET(epw2))->lkwkp = (unsigned char*)epw;
++            ((BH_PWORK*)BH_PGET(epw2))->lkono = i >= 4;
+             
+-            (*epw2)->lox = 0;
+-            (*epw2)->loy = 0;
+-            (*epw2)->loz = 0;
++            ((BH_PWORK*)BH_PGET(epw2))->lox = 0;
++            ((BH_PWORK*)BH_PGET(epw2))->loy = 0;
++            ((BH_PWORK*)BH_PGET(epw2))->loz = 0;
+             
+-            (*epw2)->mdflg |= 0x1;
+-            (*epw2)->mdflg |= 0x20;
++            ((BH_PWORK*)BH_PGET(epw2))->mdflg |= 0x1;
++            ((BH_PWORK*)BH_PGET(epw2))->mdflg |= 0x20;
+             
+             owk = &epw->mlwP->owP[BrokenParts[i]];
+             
+-            (*epw2)->mtx = &owk->mtx;
++            ((BH_PWORK*)BH_PGET(epw2))->mtx = &owk->mtx;
+             
+-            (*epw2++)->exp1 = (unsigned char*)owk;
++            ((BH_PWORK*)BH_PGET(epw2))->exp1 = (unsigned char*)owk; epw2 += 4;
+         }
+ 
+         bhEne_SetCallFunc(bhEne03s, 31);
+         
+-        epw2 = (BH_PWORK**)&EXP0_C(168);
++        epw2 = (unsigned char*)&EXP0_C(168);
+         
+         for (i = 0; i < 15; i++) 
+         {
+-            *epw2 = bhSetEnemy(&ene24, rom->ene_n);
++            BH_PSET(epw2, bhSetEnemy(&ene24, rom->ene_n));
+             
+-            (*epw2)->lkwkp = (unsigned char*)epw;
+-            (*epw2)->lkono = 0;
++            ((BH_PWORK*)BH_PGET(epw2))->lkwkp = (unsigned char*)epw;
++            ((BH_PWORK*)BH_PGET(epw2))->lkono = 0;
+             
+-            (*epw2)->lox = 0;
+-            (*epw2)->loy = 0;
+-            (*epw2)->loz = 0;
++            ((BH_PWORK*)BH_PGET(epw2))->lox = 0;
++            ((BH_PWORK*)BH_PGET(epw2))->loy = 0;
++            ((BH_PWORK*)BH_PGET(epw2))->loz = 0;
+             
+-            (*epw2++)->mlwP = &epw->mdl[1];
++            ((BH_PWORK*)BH_PGET(epw2))->mlwP = &epw->mdl[1]; epw2 += 4;
+         }
+     }
+ 
+@@ -788,11 +789,11 @@ void bhEne03_Init(BH_PWORK* epw)
+     NJS_POINT3 p; 
+ 	int sdw;      
+ 
+-    epw2 = (BH_PWORK**)&EXP0_C(168);
++    epw2 = (unsigned char*)&EXP0_C(168);
+         
+     for (i = 0; i < 15; i++) 
+     {
+-        (*epw2++)->mdflg |= 0x1;
++        ((BH_PWORK*)BH_PGET(epw2))->mdflg |= 0x1; epw2 += 4;
+     }
+ 
+     EPW_EXP1_I(0) = 0;
+@@ -802,7 +803,7 @@ void bhEne03_Init(BH_PWORK* epw)
+         
+     njRotateY((NJS_MATRIX*)epw->exp0, epw->ay);
+ 
+-    *(ATR_WORK**)&EXP0_I(96) = NULL;
++    BH_PSET(&EXP0_I(96), NULL);
+         
+     if ((epw->type & 0x2))
+     {
+@@ -810,7 +811,8 @@ void bhEne03_Init(BH_PWORK* epw)
+         p.y = epw->py + 999.0f;
+         p.z = epw->pz;
+         
+-        if ((*(ATR_WORK**)&EXP0_I(96) = bhCollisionCheckLine((NJS_POINT3*)&epw->px, &p)) != NULL) 
++        BH_PSET(&EXP0_I(96), bhCollisionCheckLine((NJS_POINT3*)&epw->px, &p));
++        if (BH_PGET(&EXP0_I(96)) != NULL) 
+         {
+             EXP0_C(105) = 1;
+             
+@@ -826,7 +828,7 @@ void bhEne03_Init(BH_PWORK* epw)
+     {
+         EXP0_C(105) = 0;
+         
+-        *(ATR_WORK**)&EXP0_I(96) = bhEne03_GetWall(epw);
++        BH_PSET(&EXP0_I(96), bhEne03_GetWall(epw));
+     }
+ 
+     epw->pxb = epw->px;
+@@ -1998,7 +2000,7 @@ void bhEne03_MV11(BH_PWORK* epw)
+         
+         epw->flg &= ~0x20;
+ 
+-        *(ATR_WORK**)&EXP0_I(96) = NULL;
++        BH_PSET(&EXP0_I(96), NULL);
+         
+         epw->mode3++;
+     case 1:
+@@ -2124,7 +2126,7 @@ void bhEne03_MV14(BH_PWORK* epw)
+         {
+             njCalcVector((NJS_MATRIX*)epw->exp0, &v, (NJS_VECTOR*)&EXP0_F(84));
+             
+-            *(ATR_WORK**)&EXP0_I(96) = NULL;
++            BH_PSET(&EXP0_I(96), NULL);
+             
+             epw->mode3++;
+         }
+@@ -2232,7 +2234,7 @@ void bhEne03_MV15(BH_PWORK* epw)
+         {
+             njCalcVector((NJS_MATRIX*)epw->exp0, &vwork, (NJS_VECTOR*)&EXP0_F(84));
+             
+-            *(ATR_WORK**)&EXP0_I(96) = NULL;
++            BH_PSET(&EXP0_I(96), NULL);
+             
+             EXP0_I(108) = 0;
+             EXP0_F(112) = 1.0f; 
+@@ -2345,7 +2347,7 @@ void bhEne03_MV16(BH_PWORK* epw)
+         epw->ct0 = epw->mnwP[epw->mtn_no].frm_num - 1;
+         epw->ct1 = 8;
+ 
+-        *(ATR_WORK**)&EXP0_I(96) = NULL;
++        BH_PSET(&EXP0_I(96), NULL);
+         
+         epw->mode3++;
+     case 1:
+@@ -2492,7 +2494,7 @@ void bhEne03_MV18(BH_PWORK* epw)
+ 
+             epw->flg &= ~0x10;
+             
+-            *(ATR_WORK**)&EXP0_I(96) = NULL;
++            BH_PSET(&EXP0_I(96), NULL);
+             
+             epw->mode3++;
+         }
+@@ -2658,7 +2660,7 @@ void bhEne03_MV19(BH_PWORK* epw)
+             
+             epw->mtn_no = 45;
+             
+-            *(ATR_WORK**)&EXP0_I(96) = NULL;
++            BH_PSET(&EXP0_I(96), NULL);
+             
+             epw->mode3++;
+         }
+@@ -2692,7 +2694,7 @@ void bhEne03_MV19(BH_PWORK* epw)
+             
+             if (epw->type == 1) 
+             {
+-                *(ATR_WORK**)&EXP0_I(96) = bhEne03_GetWall(epw);
++                BH_PSET(&EXP0_I(96), bhEne03_GetWall(epw));
+             }
+         }
+         
+@@ -3354,7 +3356,7 @@ void bhEne03_DG02(BH_PWORK* epw)
+         epw->mlwP->objP->ang[1] = mkaP->key[1];
+         epw->mlwP->objP->ang[2] = mkaP->key[2];
+ 
+-        *(ATR_WORK**)&EXP0_I(96) = NULL;
++        BH_PSET(&EXP0_I(96), NULL);
+         
+         epw->ar = 0.1f;
+         
+@@ -3590,7 +3592,7 @@ void bhEne03_DG07(BH_PWORK* epw)
+         EXP0_F(88) = EXP0_F(20);
+         EXP0_F(92) = EXP0_F(24);
+         
+-        *(ATR_WORK**)&EXP0_I(96) = NULL;
++        BH_PSET(&EXP0_I(96), NULL);
+         
+         epw->ct0 = 8;
+         
+@@ -3930,7 +3932,7 @@ void bhEne03_DG11(BH_PWORK* epw)
+             EXP0_F(92) = EXP0_F(24); 
+         }
+         
+-        *(ATR_WORK**)&EXP0_I(96) = NULL;
++        BH_PSET(&EXP0_I(96), NULL);
+         
+         epw->flg |= 0x30;
+         
+@@ -4122,7 +4124,7 @@ void bhEne03_DG12(BH_PWORK* epw)
+         njSubVector((NJS_VECTOR*)&epw->px, &trans);
+         }
+         
+-        *(ATR_WORK**)&EXP0_I(96) = NULL;
++        BH_PSET(&EXP0_I(96), NULL);
+         
+         epw->flg |= 0x30;
+         
+@@ -4358,7 +4360,7 @@ void bhEne03_DD01(BH_PWORK* epw)
+             epw->pzb = epw->pz;
+         }
+ 
+-        *(ATR_WORK**)&EXP0_I(96) = NULL;
++        BH_PSET(&EXP0_I(96), NULL);
+         
+         epw->ar = 0.1f;
+         
+@@ -4497,7 +4499,7 @@ void bhEne03_DD02(BH_PWORK* epw)
+         epw->mlwP->objP->ang[1] = mkaP->key[1];
+         epw->mlwP->objP->ang[2] = mkaP->key[2];
+ 
+-        *(ATR_WORK**)&EXP0_I(96) = NULL;
++        BH_PSET(&EXP0_I(96), NULL);
+         
+         epw->flg  &= ~0x8;
+         epw->flg2 |=  0x1;
+@@ -4675,7 +4677,7 @@ void bhEne03_DD04(BH_PWORK* epw)
+         epw->mlwP->objP->ang[1] = mkaP->key[1];
+         epw->mlwP->objP->ang[2] = mkaP->key[2];
+ 
+-        *(ATR_WORK**)&EXP0_I(96) = NULL;
++        BH_PSET(&EXP0_I(96), NULL);
+         
+         epw->flg |= 0x30;
+         
+@@ -6187,10 +6189,10 @@ int bhEne03_CollisionBoxEdge2(BH_PWORK* epw)
+ 
+ 		if (bhCollisionCheckLine(&p[i], &p2[i]) == 0)
+         {
+-            *(ATR_WORK **)(epw->exp0 + 0x60) = bhEne03_GetWall(epw);
+-    		if (*(ATR_WORK **)(epw->exp0 + 0x60) != NULL)
++            BH_PSET(epw->exp0 + 0x60, bhEne03_GetWall(epw));
++    		if (((ATR_WORK*)BH_PGET(epw->exp0 + 0x60)) != NULL)
+             {
+-                bhEne03_CollisionBoxEdge(*(ATR_WORK **)(epw->exp0 + 0x60), (NJS_POINT3*)&epw->px, epw->ar);
++                bhEne03_CollisionBoxEdge(((ATR_WORK*)BH_PGET(epw->exp0 + 0x60)), (NJS_POINT3*)&epw->px, epw->ar);
+                 break;
+             }    			
+         }         
+@@ -6208,9 +6210,9 @@ void bhEne03_CollisionLine(BH_PWORK* epw)
+     if (hp != NULL)
+     {        
+         bhGetHitCollisionNormal(&n);
+-        if (((*(ATR_WORK **)((char *)epw->exp0 + (0x60))) == NULL) && (n.y > 0.0f))
++        if (((((ATR_WORK*)BH_PGET((char *)epw->exp0 + (0x60)))) == NULL) && (n.y > 0.0f))
+         {
+-            (*(ATR_WORK **)((char *)epw->exp0 + (0x60))) = hp;
++            BH_PSET((char *)epw->exp0 + (0x60), hp);
+         }
+     }
+ }
+diff --git a/src/ps2/veronica/prog/en05.c b/src/ps2/veronica/prog/en05.c
+index 9fff2e27..e7b24bca 100644
+--- a/src/ps2/veronica/prog/en05.c
++++ b/src/ps2/veronica/prog/en05.c
+@@ -1012,14 +1012,14 @@ void bhEne05_Init(BH_PWORK* epw)
+     {
+         epw->exp0 = bhEne_CallocWork(132, 8);
+        
+-        (*(BH_PWORK**)(epw->exp0 + 0x64)) = bhSetEnemy(&ene05_child, rom->ene_n);
+-        (*(BH_PWORK**)(epw->exp0 + 0x64))->lkwkp = (unsigned char*)epw;
+-        (*(BH_PWORK**)(epw->exp0 + 0x64))->lkono = 0;
+-        (*(BH_PWORK**)(epw->exp0 + 0x64))->lox = 0.0f;
+-        (*(BH_PWORK**)(epw->exp0 + 0x64))->loy = 0.0f;
+-        (*(BH_PWORK**)(epw->exp0 + 0x64))->loz = 0.0f;
+-        (*(BH_PWORK**)(epw->exp0 + 0x64))->mdflg |= 0x21;
+-        (*(BH_PWORK**)(epw->exp0 + 0x64))->mtx = &plp->mlwP->owP[4].mtx;
++        BH_PSET(epw->exp0 + 0x64, bhSetEnemy(&ene05_child, rom->ene_n));
++        (((BH_PWORK*)BH_PGET(epw->exp0 + 0x64)))->lkwkp = (unsigned char*)epw;
++        (((BH_PWORK*)BH_PGET(epw->exp0 + 0x64)))->lkono = 0;
++        (((BH_PWORK*)BH_PGET(epw->exp0 + 0x64)))->lox = 0.0f;
++        (((BH_PWORK*)BH_PGET(epw->exp0 + 0x64)))->loy = 0.0f;
++        (((BH_PWORK*)BH_PGET(epw->exp0 + 0x64)))->loz = 0.0f;
++        (((BH_PWORK*)BH_PGET(epw->exp0 + 0x64)))->mdflg |= 0x21;
++        (((BH_PWORK*)BH_PGET(epw->exp0 + 0x64)))->mtx = &plp->mlwP->owP[4].mtx;
+         bhEne_SetCallFunc(bhEne05s, 31);
+     }
+     
+@@ -1045,14 +1045,14 @@ void bhEne05_Init(BH_PWORK* epw)
+     epw->lok_jno = 4;
+     epw->cpcl = CapColTab;
+ 
+-    *(BH_PWORK**)(epw->exp0 + 0x60) = NULL;
++    BH_PSET(epw->exp0 + 0x60, NULL);
+     ep = ene;
+     
+     for (i = 0; i < sys->ewk_n; i++, ep++)
+     {    
+         if ((ep != epw) && (ep->flg & 1) && (ep->id == 5))
+         {
+-            *(BH_PWORK**)(epw->exp0 + 0x60) = ep;
++            BH_PSET(epw->exp0 + 0x60, ep);
+             break;
+         }
+     }
+@@ -1089,10 +1089,10 @@ void bhEne05_BR00(BH_PWORK* epw)
+     // not present in DWARF
+     float tx, tz;
+ 
+-    if ((*(BH_PWORK**)(epw->exp0 + 0x60) != NULL) &&
+-        ((*(BH_PWORK**)(epw->exp0 + 0x60))->flg & 2))
++    if ((((BH_PWORK*)BH_PGET(epw->exp0 + 0x60)) != NULL) &&
++        ((((BH_PWORK*)BH_PGET(epw->exp0 + 0x60)))->flg & 2))
+     {
+-        *(BH_PWORK**)(epw->exp0 + 0x60) = NULL;
++        BH_PSET(epw->exp0 + 0x60, NULL);
+     }
+ 
+     if (plp->hp < 0)
+@@ -1107,8 +1107,8 @@ void bhEne05_BR00(BH_PWORK* epw)
+     }
+ 
+     if ((EXP0_UC(0x14) != 0) && (EXP0_F(0x0) > 20.0f) &&
+-        ((*(BH_PWORK**)(epw->exp0 + 0x60) == NULL) ||
+-         (EXP0_F(0x0) < *(float*)((*(BH_PWORK**)(epw->exp0 + 0x60))->exp0))))
++        ((((BH_PWORK*)BH_PGET(epw->exp0 + 0x60)) == NULL) ||
++         (EXP0_F(0x0) < *(float*)((((BH_PWORK*)BH_PGET(epw->exp0 + 0x60)))->exp0))))
+     {
+         if (epw->mode2 != 2)
+         {
+@@ -1117,8 +1117,8 @@ void bhEne05_BR00(BH_PWORK* epw)
+         }
+     }
+ 
+-    if ((*(BH_PWORK**)(epw->exp0 + 0x60) != NULL) &&
+-        ((*(BH_PWORK**)(epw->exp0 + 0x60))->mode0 == 3))
++    if ((((BH_PWORK*)BH_PGET(epw->exp0 + 0x60)) != NULL) &&
++        ((((BH_PWORK*)BH_PGET(epw->exp0 + 0x60)))->mode0 == 3))
+     {
+         EXP0_UC(0x14) = 1;
+         if (epw->mode2 != 2)
+@@ -1131,7 +1131,7 @@ void bhEne05_BR00(BH_PWORK* epw)
+     ang = (short)((epw->ay + NJM_DEG_ANG(45.0f)) & ~0x3FFF);
+     tx = epw->px - 7.0f * njSin(ang);
+     tz = epw->pz - 7.0f * njCos(ang);
+-    *(ATR_WORK**)(epw->exp0 + 0x74) = NULL;
++    BH_PSET(epw->exp0 + 0x74, NULL);
+ 
+     if (epw->flr_no != plp->flr_no)
+     {
+@@ -1142,7 +1142,7 @@ void bhEne05_BR00(BH_PWORK* epw)
+             {
+                 if (ang == (short)(-(hp->prm1 & 3) * NJM_DEG_ANG(90.0f)))
+                 {
+-                    *(ATR_WORK**)(epw->exp0 + 0x74) = hp;
++                    BH_PSET(epw->exp0 + 0x74, hp);
+                     EXP0_F(0x68) = epw->px - (10.0f + 3.0f * hp->attr) * njSin(ang);
+                     EXP0_F(0x70) = epw->pz - (10.0f + 3.0f * hp->attr) * njCos(ang);
+ 
+@@ -1183,7 +1183,7 @@ void bhEne05_BR00(BH_PWORK* epw)
+         {
+             if (ang == (short)(-(hp->prm1 & 3) * NJM_DEG_ANG(90.0f)))
+             {
+-                *(ATR_WORK**)(epw->exp0 + 0x74) = hp;
++                BH_PSET(epw->exp0 + 0x74, hp);
+                 EXP0_F(0x68) = epw->px - 20.0f * njSin(ang);
+                 EXP0_F(0x70) = epw->pz - 20.0f * njCos(ang);
+ 
+@@ -1217,7 +1217,7 @@ void bhEne05_BR00(BH_PWORK* epw)
+         {
+             if (ang == (short)(-(hp->prm1 & 3) * NJM_DEG_ANG(90.0f)))
+             {
+-                *(ATR_WORK**)(epw->exp0 + 0x74) = hp;
++                BH_PSET(epw->exp0 + 0x74, hp);
+ 
+                 if (hp->prm1 < 0x15)
+                 {
+@@ -1275,7 +1275,7 @@ void bhEne05_BR00(BH_PWORK* epw)
+             ang2 = (short)(-(hp->prm1 & 3) * NJM_DEG_ANG(90.0f));
+             if (ang == ang2)
+             {
+-                *(ATR_WORK**)(epw->exp0 + 0x74) = hp;
++                BH_PSET(epw->exp0 + 0x74, hp);
+                 EXP0_F(0x68) = epw->px - 15.0f * njSin(ang);
+                 EXP0_F(0x70) = epw->pz - 15.0f * njCos(ang);
+                 EXP0_F(0x6C) = epw->py;
+@@ -1298,8 +1298,8 @@ void bhEne05_BR00(BH_PWORK* epw)
+         return;
+     }
+ 
+-    if (!(epw->type & 1) && (*(BH_PWORK**)(epw->exp0 + 0x60) != NULL) &&
+-        ((*(BH_PWORK**)(epw->exp0 + 0x60))->flg & 4) && bhEne05_CheckJump(epw))
++    if (!(epw->type & 1) && (((BH_PWORK*)BH_PGET(epw->exp0 + 0x60)) != NULL) &&
++        ((((BH_PWORK*)BH_PGET(epw->exp0 + 0x60)))->flg & 4) && bhEne05_CheckJump(epw))
+     {
+         epw->mode1 = 0;
+         epw->mode2 = 5;
+@@ -1334,8 +1334,8 @@ void bhEne05_BR00(BH_PWORK* epw)
+     kubikari = 0;
+     hikkaki = 0;
+ 
+-    if ((*(BH_PWORK**)(epw->exp0 + 0x60) == NULL) ||
+-        !((*(BH_PWORK**)(epw->exp0 + 0x60))->flg & 0x40000000))
++    if ((((BH_PWORK*)BH_PGET(epw->exp0 + 0x60)) == NULL) ||
++        !((((BH_PWORK*)BH_PGET(epw->exp0 + 0x60)))->flg & 0x40000000))
+     {
+         if ((plp->hp < crit_hp[sys->ply_id]) && (EXP0_F(0x0) < 30.0f))
+         {
+@@ -5375,7 +5375,7 @@ void bhEne05_InitDamage(BH_PWORK* epw)
+                                           5, 12, 15);
+                 if ((hp != NULL) && (((short)(((DamageAngle + NJM_DEG_ANG(180.0f)) + NJM_DEG_ANG(45.0f)) & ~0x3FFF)) == (short)(-(hp->prm1 & 3) * NJM_DEG_ANG(90))))
+                 {
+-                    *(ATR_WORK**)(epw->exp0 + 0x74) = hp;
++                    BH_PSET(epw->exp0 + 0x74, hp);
+                     epw->mode2 = 12;
+                     DamageAngle = ((short)(((DamageAngle + NJM_DEG_ANG(180.0f)) + NJM_DEG_ANG(45.0f)) & ~0x3FFF)) + NJM_DEG_ANG(180.0f);
+                 }
+@@ -5462,7 +5462,7 @@ void bhEne05_InitDamage(BH_PWORK* epw)
+             {
+                 if (((short)(((DamageAngle + NJM_DEG_ANG(180.0f)) + NJM_DEG_ANG(45.0f)) & ~0x3FFF)) == (short)(-(hp->prm1 & 3) * NJM_DEG_ANG(90)))
+                 {
+-                    *(ATR_WORK**)(epw->exp0 + 0x74) = hp;
++                    BH_PSET(epw->exp0 + 0x74, hp);
+                     epw->mode2 = 7;
+                     DamageAngle = ((short)(((DamageAngle + NJM_DEG_ANG(180.0f)) + NJM_DEG_ANG(45.0f)) & ~0x3FFF)) - NJM_DEG_ANG(180.0f);
+                 }
+diff --git a/src/ps2/veronica/prog/en06.c b/src/ps2/veronica/prog/en06.c
+index 14d3a8c9..a826ea9d 100644
+--- a/src/ps2/veronica/prog/en06.c
++++ b/src/ps2/veronica/prog/en06.c
+@@ -280,7 +280,7 @@ void bhEne06_Init(BH_PWORK* epw)
+ 	int i;
+ 	BH_PWORK* ep_leader;
+ 	BH_PWORK* ep;
+-	BH_PWORK** epw2;
++	BH_PWORK* epw2;   /* the child being set up; its 4-byte slot is exp0 + 0x34 + 4 * i */
+ 	O_WORK* owk;
+     
+     // not present in DWARF
+@@ -349,18 +349,18 @@ void bhEne06_Init(BH_PWORK* epw)
+ 			}
+ 		}
+ 
+-		epw2 = (BH_PWORK**)(epw->exp0 + 0x34);
+-		for (i = 0; i < 14; i++, epw2++)
++		for (i = 0; i < 14; i++)
+         {
+ 			ene_n = rom->ene_n;
+-			*epw2 = bhSetEnemy((EGG_WORK*)&ene06_child, ene_n);
+-			(*epw2)->lkwkp = (unsigned char*)epw;
+-			(*epw2)->lkono = i;
+-			(*epw2)->lox = 0.0f;
+-			(*epw2)->loy = 0.0f;
+-			(*epw2)->loz = 0.0f;
+-			(*epw2)->mdflg |= 1;
+-			(*epw2)->mtx = &epw->mlwP->owP[BrokenParts[i]].mtx;
++			epw2 = bhSetEnemy((EGG_WORK*)&ene06_child, ene_n);
++			BH_PSET(epw->exp0 + 0x34 + 4 * i, epw2);
++			epw2->lkwkp = (unsigned char*)epw;
++			epw2->lkono = i;
++			epw2->lox = 0.0f;
++			epw2->loy = 0.0f;
++			epw2->loz = 0.0f;
++			epw2->mdflg |= 1;
++			epw2->mtx = &epw->mlwP->owP[BrokenParts[i]].mtx;
+         }
+ 		bhEne_SetCallFunc((void (*)(BH_PWORK*))&bhEne06s, 31);
+ 	}
+@@ -374,7 +374,7 @@ void bhEne06_Init(BH_PWORK* epw)
+ 		sdw = bhSetShadow(SdwTab, (unsigned char*)epw, 0, 5.0f, 4.0f, 4.0f);
+ 		eff[sdw].mdlver = 1;
+ 		epw->flg |= 0x800;
+-		*(O_WRK **)((epw->exp0 + 0x84)) = &eff[sdw];
++		BH_PSET((epw->exp0 + 0x84), &eff[sdw]);
+ 	}
+ 
+ 	epw->stflg &= ~8;
+@@ -1312,8 +1312,8 @@ void bhEne06_DG00(BH_PWORK* epw) {
+         pno = (int)(4.0f * njRandom());
+         owk[parts[pno]].flg |= 3;
+         
+-	    (*(unsigned char **)((char *)epw->exp0 + 0x34 + pno * 4))[12] = 1;
+-	    (*(unsigned char **)((char *)epw->exp0 + 0x34 + pno * 4))[14] = 1;
++	    (((unsigned char*)BH_PGET((char *)epw->exp0 + 0x34 + pno * 4)))[12] = 1;
++	    (((unsigned char*)BH_PGET((char *)epw->exp0 + 0x34 + pno * 4)))[14] = 1;
+         
+         EXP0_F(0x70) = 1.0f;
+         
+@@ -1408,8 +1408,8 @@ void bhEne06_DG01(BH_PWORK* epw)
+         pno = (int)(4.0f * njRandom());
+         owk[parts[pno]].flg |= 3;
+         
+-	    (*(unsigned char **)((char *)epw->exp0 + 0x34 + pno * 4))[12] = 1;
+-	    (*(unsigned char **)((char *)epw->exp0 + 0x34 + pno * 4))[14] = 1;
++	    (((unsigned char*)BH_PGET((char *)epw->exp0 + 0x34 + pno * 4)))[12] = 1;
++	    (((unsigned char*)BH_PGET((char *)epw->exp0 + 0x34 + pno * 4)))[14] = 1;
+         
+         bhEne_CallSE(epw, (NJS_POINT3*)&epw->px, 8964);
+         epw->ct0 = epw->mnwP[epw->mtn_no].frm_num;
+@@ -1863,7 +1863,7 @@ void bhEne06_CollisionWalls(BH_PWORK* epw)
+     epw->py += ofp.y;
+     epw->pz += ofp.z;
+     
+-    *(ATR_WORK**)((char *)epw->exp0 + 0x18) = bhEne03_Collision(epw);
++    BH_PSET((char *)epw->exp0 + 0x18, bhEne03_Collision(epw));
+     
+     epw->px -= ofp.x;
+     epw->py -= ofp.y;
+@@ -1885,7 +1885,7 @@ void bhEne06_FloorCollision(BH_PWORK* epw)
+     {
+         bhGetHitCollisionNormal((NJS_VECTOR*)((char *)epw->exp0 + 0x78));
+         njUnitVector((NJS_VECTOR*)((char *)epw->exp0 + 0x78));
+-        *(ATR_WORK**)((char *)epw->exp0 + 0x18) = hp;
++        BH_PSET((char *)epw->exp0 + 0x18, hp);
+         
+         if (EXP0_F(0x7C) > 0.9f)
+         {
+diff --git a/src/ps2/veronica/prog/en07.c b/src/ps2/veronica/prog/en07.c
+index 136a153a..8a55bf07 100644
+--- a/src/ps2/veronica/prog/en07.c
++++ b/src/ps2/veronica/prog/en07.c
+@@ -1881,7 +1881,7 @@ void bhEne07_FloorCollision(BH_PWORK* epw)
+ 
+     if (n.y > 0.9f) {
+         epw->flg &= ~0x200000;
+-        EXP0_ATR(7) = hp;
++        EXP0_ATR_SET(7, hp);
+     }
+ 
+     if (n.y < 0.9f) {
+@@ -1963,7 +1963,7 @@ int bhEne07_CheckHangingWall(BH_PWORK* epw)
+                 EXP0_F(0x14) = pos.x - vec.x;
+                 EXP0_F(0x18) = pos.y - vec.y;
+                 EXP0_F(0x1C) = pos.z - vec.z;
+-                EXP0_ATR(7) = hp;
++                EXP0_ATR_SET(7, hp);
+                 epw->ayp = epw->ay;
+ 
+                 return 1;
+diff --git a/src/ps2/veronica/prog/en09.c b/src/ps2/veronica/prog/en09.c
+index 9ff2f2f5..0caabee6 100644
+--- a/src/ps2/veronica/prog/en09.c
++++ b/src/ps2/veronica/prog/en09.c
+@@ -2205,7 +2205,7 @@ void bhEne09_CollCheckWall(BH_PWORK* epw)
+         ps.z = epw->pz + epw->aoz;
+         
+         hp = bhCheckWallType(&ps, epw->flg, epw->ar, epw->ah);
+-        *(ATR_WORK **)(epw->exp0 + 0x50) = hp;
++        BH_PSET(epw->exp0 + 0x50, hp);
+ 
+         if ((EXP0_I(0x18) & 0xF) == 1)
+         {
+@@ -3095,7 +3095,7 @@ void bhEne09_Brain(BH_PWORK* epw)
+                         {
+                             bhGetHitCollisionNormal(&pos);
+                             
+-                            *(ATR_WORK **)(epw->exp0 + 0x54) = hp;
++                            BH_PSET(epw->exp0 + 0x54, hp);
+                             
+                             if (hp->type == 0) 
+                             {
+@@ -3158,7 +3158,7 @@ void bhEne09_Brain(BH_PWORK* epw)
+                     
+                     hp = bhEne09_GetCloseEnemyAtari(epw, temp, 0xFFU);
+                     
+-                    *(ATR_WORK **)(epw->exp0 + 0x54) = hp;
++                    BH_PSET(epw->exp0 + 0x54, hp);
+                     
+                     if (hp != NULL)
+                     {
+@@ -3183,7 +3183,7 @@ void bhEne09_Brain(BH_PWORK* epw)
+                 {
+                     hp = bhEne09_GetCloseEnemyAtari(epw, hp->prm1, hp->prm3);
+                     
+-                    *(ATR_WORK **)(epw->exp0 + 0x54) = hp;
++                    BH_PSET(epw->exp0 + 0x54, hp);
+                     
+                     if (hp != NULL)
+                     {
+@@ -3206,7 +3206,7 @@ void bhEne09_Brain(BH_PWORK* epw)
+                 EXP0_F(0x34) = EXP0_F(0x4C);
+             }
+             
+-            if (bhEne09_JumpCheck(epw, *(ATR_WORK **)(epw->exp0 + 0x54)) != 0) 
++            if (bhEne09_JumpCheck(epw, ((ATR_WORK*)BH_PGET(epw->exp0 + 0x54))) != 0) 
+             {
+                 EXP0_I(0x18) &= 0xFDFFFFFF;
+             }
+@@ -6350,7 +6350,7 @@ void bhEne09_DG05(BH_PWORK* epw)
+             
+             EXP0_F(0x58) = 0.0f;
+             
+-            hp = *(ATR_WORK **)(epw->exp0 + 0x54);
++            hp = ((ATR_WORK*)BH_PGET(epw->exp0 + 0x54));
+             
+             if (hp->type == 0) 
+             {
+diff --git a/src/ps2/veronica/prog/en11.c b/src/ps2/veronica/prog/en11.c
+index 32c6660d..bfb6bb10 100644
+--- a/src/ps2/veronica/prog/en11.c
++++ b/src/ps2/veronica/prog/en11.c
+@@ -168,7 +168,7 @@ void bhEne11_Init(BH_PWORK* epw)
+     
+     EXP0_UC(0x56) = 0;
+     
+-    if (*(O_WRK **)(epw->exp0 + 0x60) == NULL)
++    if (((O_WRK*)BH_PGET(epw->exp0 + 0x60)) == NULL)
+     {
+         sys->ef.id = 0x105;
+         sys->ef.flg = 1;
+@@ -186,15 +186,15 @@ void bhEne11_Init(BH_PWORK* epw)
+         
+         if (eff_id >= 0)
+         {
+-            *(O_WRK **)(epw->exp0 + 0x60) = &eff[eff_id];
+-            (*(O_WRK **)(epw->exp0 + 0x60))->mode0 = 0;
++            BH_PSET(epw->exp0 + 0x60, &eff[eff_id]);
++            (((O_WRK*)BH_PGET(epw->exp0 + 0x60)))->mode0 = 0;
+             
+         }
+     }
+     else 
+     {
+-        (*(O_WRK **)(epw->exp0 + 0x60))->mode0 = 0;
+-        (*(O_WRK **)(epw->exp0 + 0x60))->ct2 = 0;
++        (((O_WRK*)BH_PGET(epw->exp0 + 0x60)))->mode0 = 0;
++        (((O_WRK*)BH_PGET(epw->exp0 + 0x60)))->ct2 = 0;
+     }
+     
+     epw->clp_jno[0] = 1;
+@@ -215,7 +215,7 @@ void bhEne11_Brain(BH_PWORK* epw)
+ // 100% matching!
+ void bhEne11_BR00(BH_PWORK* epw)
+ {
+-    if ((*(O_WRK **)(epw->exp0 + 0x60))->ct2 != 0)
++    if ((((O_WRK*)BH_PGET(epw->exp0 + 0x60)))->ct2 != 0)
+     {
+         EXP0_UC(0x56) = 1;
+     }
+@@ -227,10 +227,10 @@ void bhEne11_BR00(BH_PWORK* epw)
+             sys->rm_flg |= 1;
+         }
+     } 
+-    else if ((sys->rm_flg & 1) && ((*(O_WRK **)(epw->exp0 + 0x60))->mode0 == 2)) 
++    else if ((sys->rm_flg & 1) && ((((O_WRK*)BH_PGET(epw->exp0 + 0x60)))->mode0 == 2)) 
+     {
+         EXP0_UC(0x56) = 1;
+-        (*(O_WRK **)(epw->exp0 + 0x60))->ct2 = 1;
++        (((O_WRK*)BH_PGET(epw->exp0 + 0x60)))->ct2 = 1;
+     }
+ }
+ 
+@@ -1010,11 +1010,11 @@ void bhEne11_CollisionBoxEdge2(BH_PWORK* epw)
+ 
+         if (bhCollisionCheckLine(&p[i], &p2[i]) == NULL)
+         {
+-            *(ATR_WORK **)(epw->exp0 + 0x58) = bhEne03_GetWall(epw);
++            BH_PSET(epw->exp0 + 0x58, bhEne03_GetWall(epw));
+ 
+-            if (*(ATR_WORK **)(epw->exp0 + 0x58) != NULL)
++            if (((ATR_WORK*)BH_PGET(epw->exp0 + 0x58)) != NULL)
+             {
+-                bhEne03_CollisionBoxEdge(*(ATR_WORK **)(epw->exp0 + 0x58), (NJS_VECTOR *)&epw->px, epw->ar);
++                bhEne03_CollisionBoxEdge(((ATR_WORK*)BH_PGET(epw->exp0 + 0x58)), (NJS_VECTOR *)&epw->px, epw->ar);
+                 break;
+             }
+         }
+@@ -1101,9 +1101,9 @@ void bhEne11_MoveNearWall(BH_PWORK* epw)
+     pt.y = epw->py + vd.y;
+     pt.z = epw->pz + vd.z;
+     
+-    *(ATR_WORK **)(epw->exp0 + 0x58) = bhCollisionCheckLine((NJS_VECTOR *)&epw->px, &pt);
++    BH_PSET(epw->exp0 + 0x58, bhCollisionCheckLine((NJS_VECTOR *)&epw->px, &pt));
+     
+-    if (*(ATR_WORK **)(epw->exp0 + 0x58) != NULL)
++    if (((ATR_WORK*)BH_PGET(epw->exp0 + 0x58)) != NULL)
+     {
+         epw->px = epw->pxb = pt.x;
+         epw->py = epw->pyb = pt.y;
+@@ -1117,22 +1117,22 @@ void bhEne11_LightControl(BH_PWORK* epw, int flg)
+     switch (flg) 
+     {                          
+         case 0:
+-            (*(O_WRK **)(epw->exp0 + 0x60))->mode0 = 1;
+-            (*(O_WRK **)(epw->exp0 + 0x60))->axp = 0x38E;
++            (((O_WRK*)BH_PGET(epw->exp0 + 0x60)))->mode0 = 1;
++            (((O_WRK*)BH_PGET(epw->exp0 + 0x60)))->axp = 0x38E;
+             break;
+             
+         case 1:
+-            (*(O_WRK **)(epw->exp0 + 0x60))->mode0 = 3;
++            (((O_WRK*)BH_PGET(epw->exp0 + 0x60)))->mode0 = 3;
+             break;
+             
+         case 2:
+-            (*(O_WRK **)(epw->exp0 + 0x60))->mode0 = 0;
++            (((O_WRK*)BH_PGET(epw->exp0 + 0x60)))->mode0 = 0;
+             break;
+             
+         case 3:
+-            (*(O_WRK **)(epw->exp0 + 0x60))->mode0 = 2;
+-            (*(O_WRK **)(epw->exp0 + 0x60))->ax = 0x38E;
+-            (*(O_WRK **)(epw->exp0 + 0x60))->axp = 0x38E;
++            (((O_WRK*)BH_PGET(epw->exp0 + 0x60)))->mode0 = 2;
++            (((O_WRK*)BH_PGET(epw->exp0 + 0x60)))->ax = 0x38E;
++            (((O_WRK*)BH_PGET(epw->exp0 + 0x60)))->axp = 0x38E;
+             break;
+     }
+ }
+diff --git a/src/ps2/veronica/prog/en12.c b/src/ps2/veronica/prog/en12.c
+index ee3d4f06..dd2c547f 100644
+--- a/src/ps2/veronica/prog/en12.c
++++ b/src/ps2/veronica/prog/en12.c
+@@ -2129,9 +2129,9 @@ void bhEne12_SetFireBintaEffect(BH_PWORK* epw, int act)
+             eno = bhSetEffectTb(&sys->ef, &efp->ofp, (unsigned char*)epw, efp->jno);
+             
+             if (eno != -1) {
+-                ((O_WRK**)(epw->exp0))[i + 10] = &eff[eno];
+-                ((O_WRK**)(epw->exp0))[i + 10]->ct0 = efp->life;
+-                ((O_WRK**)(epw->exp0))[i + 10]->ct1 = efp->delay;
++                BH_PSET((char*)epw->exp0 + 4 * (i + 10), &eff[eno]);
++                ((O_WRK*)BH_PGET((char*)epw->exp0 + 4 * (i + 10)))->ct0 = efp->life;
++                ((O_WRK*)BH_PGET((char*)epw->exp0 + 4 * (i + 10)))->ct1 = efp->delay;
+             }
+ 
+             i++;
+@@ -2143,7 +2143,7 @@ void bhEne12_SetFireBintaEffect(BH_PWORK* epw, int act)
+         i = 0; 
+         efp = alex_eff_tab;
+         while (efp->jno != 0) {
+-            op = ((O_WRK**)(epw->exp0))[i + 10];
++            op = ((O_WRK*)BH_PGET((char*)epw->exp0 + 4 * (i + 10)));
+             if (op != NULL && (op->flg & 1) != 0 && op->id == 274) {
+                 op->mode0 = 3;
+             }
+diff --git a/src/ps2/veronica/prog/en13.c b/src/ps2/veronica/prog/en13.c
+index 211eeab5..e936a593 100644
+--- a/src/ps2/veronica/prog/en13.c
++++ b/src/ps2/veronica/prog/en13.c
+@@ -101,120 +101,120 @@ void bhEne13_Init(BH_PWORK* epw)
+     {
+         epw->exp0 = bhEne_CallocWork(992, 8);
+ 
+-        *(BH_PWORK**)&epw->exp0[8] = bhSetEnemy(&ene18, rom->ene_n);
++        BH_PSET(&epw->exp0[8], bhSetEnemy(&ene18, rom->ene_n));
+         
+-        (*(BH_PWORK**)&epw->exp0[8])->type = 1;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[8])))->type = 1;
+         
+-        (*(BH_PWORK**)&epw->exp0[8])->lkwkp = (unsigned char*)epw;
+-        (*(BH_PWORK**)&epw->exp0[8])->lkono = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[8])))->lkwkp = (unsigned char*)epw;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[8])))->lkono = 0;
+         
+-        (*(BH_PWORK**)&epw->exp0[8])->lox = 0;
+-        (*(BH_PWORK**)&epw->exp0[8])->loy = 0;
+-        (*(BH_PWORK**)&epw->exp0[8])->loz = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[8])))->lox = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[8])))->loy = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[8])))->loz = 0;
+         
+-        (*(BH_PWORK**)&epw->exp0[8])->mlwP = &epw->mdl[1];
++        (((BH_PWORK*)BH_PGET(&epw->exp0[8])))->mlwP = &epw->mdl[1];
+ 
+-        *(BH_PWORK**)&epw->exp0[12] = bhSetEnemy(&ene18, rom->ene_n);
++        BH_PSET(&epw->exp0[12], bhSetEnemy(&ene18, rom->ene_n));
+         
+-        (*(BH_PWORK**)&epw->exp0[12])->type = 2;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[12])))->type = 2;
+         
+-        (*(BH_PWORK**)&epw->exp0[12])->lkwkp = (unsigned char*)epw;
+-        (*(BH_PWORK**)&epw->exp0[12])->lkono = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[12])))->lkwkp = (unsigned char*)epw;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[12])))->lkono = 0;
+         
+-        (*(BH_PWORK**)&epw->exp0[12])->lox = 0;
+-        (*(BH_PWORK**)&epw->exp0[12])->loy = 0;
+-        (*(BH_PWORK**)&epw->exp0[12])->loz = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[12])))->lox = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[12])))->loy = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[12])))->loz = 0;
+         
+-        (*(BH_PWORK**)&epw->exp0[12])->mlwP = &epw->mdl[4];
++        (((BH_PWORK*)BH_PGET(&epw->exp0[12])))->mlwP = &epw->mdl[4];
+ 
+-        *(BH_PWORK**)&epw->exp0[16] = bhSetEnemy(&ene18, rom->ene_n);
++        BH_PSET(&epw->exp0[16], bhSetEnemy(&ene18, rom->ene_n));
+         
+-        (*(BH_PWORK**)&epw->exp0[16])->type = 3;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[16])))->type = 3;
+         
+-        (*(BH_PWORK**)&epw->exp0[16])->lkwkp = (unsigned char*)epw;
+-        (*(BH_PWORK**)&epw->exp0[16])->lkono = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[16])))->lkwkp = (unsigned char*)epw;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[16])))->lkono = 0;
+         
+-        (*(BH_PWORK**)&epw->exp0[16])->lox = 0;
+-        (*(BH_PWORK**)&epw->exp0[16])->loy = 0;
+-        (*(BH_PWORK**)&epw->exp0[16])->loz = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[16])))->lox = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[16])))->loy = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[16])))->loz = 0;
+         
+-        (*(BH_PWORK**)&epw->exp0[16])->mlwP = &epw->mdl[7];
++        (((BH_PWORK*)BH_PGET(&epw->exp0[16])))->mlwP = &epw->mdl[7];
+ 
+-        *(BH_PWORK**)&epw->exp0[4] = bhSetEnemy(&ene18, rom->ene_n);
++        BH_PSET(&epw->exp0[4], bhSetEnemy(&ene18, rom->ene_n));
+         
+-        (*(BH_PWORK**)&epw->exp0[4])->type = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[4])))->type = 0;
+         
+-        (*(BH_PWORK**)&epw->exp0[4])->lkwkp = (unsigned char*)epw;
+-        (*(BH_PWORK**)&epw->exp0[4])->lkono = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[4])))->lkwkp = (unsigned char*)epw;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[4])))->lkono = 0;
+         
+-        (*(BH_PWORK**)&epw->exp0[4])->lox = 0;
+-        (*(BH_PWORK**)&epw->exp0[4])->loy = 0;
+-        (*(BH_PWORK**)&epw->exp0[4])->loz = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[4])))->lox = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[4])))->loy = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[4])))->loz = 0;
+         
+-        (*(BH_PWORK**)&epw->exp0[4])->mlwP = &epw->mdl[10];
++        (((BH_PWORK*)BH_PGET(&epw->exp0[4])))->mlwP = &epw->mdl[10];
+ 
+-        *(NJS_CNK_OBJECT**)&epw->exp0[92]  = (*(BH_PWORK**)&epw->exp0[4])->mlwP->objP;
+-        *(NJS_CNK_OBJECT**)&epw->exp0[96]  = (*(BH_PWORK**)&epw->exp0[8])->mlwP->objP;
+-        *(NJS_CNK_OBJECT**)&epw->exp0[100] = (*(BH_PWORK**)&epw->exp0[12])->mlwP->objP;
+-        *(NJS_CNK_OBJECT**)&epw->exp0[104] = (*(BH_PWORK**)&epw->exp0[16])->mlwP->objP;
++        BH_PSET(&epw->exp0[92], (((BH_PWORK*)BH_PGET(&epw->exp0[4])))->mlwP->objP);
++        BH_PSET(&epw->exp0[96], (((BH_PWORK*)BH_PGET(&epw->exp0[8])))->mlwP->objP);
++        BH_PSET(&epw->exp0[100], (((BH_PWORK*)BH_PGET(&epw->exp0[12])))->mlwP->objP);
++        BH_PSET(&epw->exp0[104], (((BH_PWORK*)BH_PGET(&epw->exp0[16])))->mlwP->objP);
+ 
+         for (i = 0; i < 6; i++)
+         {
+-            ((BH_PWORK**)epw->exp0)[i + 5] = bhSetEnemy(&ene18, rom->ene_n);
++            BH_PSET((char*)epw->exp0 + 4 * (i + 5), bhSetEnemy(&ene18, rom->ene_n));
+             
+-            ((BH_PWORK**)epw->exp0)[i + 5]->type = i + 4;
++            ((BH_PWORK*)BH_PGET((char*)epw->exp0 + 4 * (i + 5)))->type = i + 4;
+             
+-            ((BH_PWORK**)epw->exp0)[i + 5]->lkwkp = (unsigned char*)epw;
+-            ((BH_PWORK**)epw->exp0)[i + 5]->lkono = 0;
++            ((BH_PWORK*)BH_PGET((char*)epw->exp0 + 4 * (i + 5)))->lkwkp = (unsigned char*)epw;
++            ((BH_PWORK*)BH_PGET((char*)epw->exp0 + 4 * (i + 5)))->lkono = 0;
+             
+-            ((BH_PWORK**)epw->exp0)[i + 5]->lox = 0;
+-            ((BH_PWORK**)epw->exp0)[i + 5]->loy = 0;
+-            ((BH_PWORK**)epw->exp0)[i + 5]->loz = 0;
++            ((BH_PWORK*)BH_PGET((char*)epw->exp0 + 4 * (i + 5)))->lox = 0;
++            ((BH_PWORK*)BH_PGET((char*)epw->exp0 + 4 * (i + 5)))->loy = 0;
++            ((BH_PWORK*)BH_PGET((char*)epw->exp0 + 4 * (i + 5)))->loz = 0;
+             
+-            ((BH_PWORK**)epw->exp0)[i + 5]->mlwP = &epw->mdl[10];
++            ((BH_PWORK*)BH_PGET((char*)epw->exp0 + 4 * (i + 5)))->mlwP = &epw->mdl[10];
+         }
+ 
+-        *(BH_PWORK**)&epw->exp0[976] = bhSetEnemy(&ene13B, rom->ene_n);
++        BH_PSET(&epw->exp0[976], bhSetEnemy(&ene13B, rom->ene_n));
+ 
+-        (*(BH_PWORK**)&epw->exp0[976])->type = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[976])))->type = 0;
+         
+-        (*(BH_PWORK**)&epw->exp0[976])->lkwkp = (unsigned char*)epw;
+-        (*(BH_PWORK**)&epw->exp0[976])->lkono = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[976])))->lkwkp = (unsigned char*)epw;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[976])))->lkono = 0;
+         
+-        (*(BH_PWORK**)&epw->exp0[976])->lox = 0;
+-        (*(BH_PWORK**)&epw->exp0[976])->loy = 0;
+-        (*(BH_PWORK**)&epw->exp0[976])->loz = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[976])))->lox = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[976])))->loy = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[976])))->loz = 0;
+         
+-        (*(BH_PWORK**)&epw->exp0[976])->mlwP = &epw->mdl[13];
++        (((BH_PWORK*)BH_PGET(&epw->exp0[976])))->mlwP = &epw->mdl[13];
+         
+-        (*(BH_PWORK**)&epw->exp0[976])->skp[0] = epw->skp[13];
++        (((BH_PWORK*)BH_PGET(&epw->exp0[976])))->skp[0] = epw->skp[13];
+         
+-        (*(BH_PWORK**)&epw->exp0[976])->mdl_no = 0;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[976])))->mdl_no = 0;
+         
+-        (*(BH_PWORK**)&epw->exp0[976])->mnwP  = epw->mnwP;
+-        (*(BH_PWORK**)&epw->exp0[976])->mnwPb = epw->mnwPb;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[976])))->mnwP  = epw->mnwP;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[976])))->mnwPb = epw->mnwPb;
+         
+         bhEne_SetCallFunc(bhEne13B, 31);
+         
+         EXP0_I(932) = 0;
+         EXP0_I(936) = bhEne13_StoreObject(                        epw, (NJS_POINT3*)&epw->exp0[132], (NJS_VECTOR**)&epw->exp0[732], EXP0_I(932));
+-        EXP0_I(940) = bhEne13_StoreObject( *(BH_PWORK**)&epw->exp0[4], (NJS_POINT3*)&epw->exp0[132], (NJS_VECTOR**)&epw->exp0[732], EXP0_I(936));
+-        EXP0_I(944) = bhEne13_StoreObject( *(BH_PWORK**)&epw->exp0[8], (NJS_POINT3*)&epw->exp0[132], (NJS_VECTOR**)&epw->exp0[732], EXP0_I(940));
+-        EXP0_I(948) = bhEne13_StoreObject(*(BH_PWORK**)&epw->exp0[12], (NJS_POINT3*)&epw->exp0[132], (NJS_VECTOR**)&epw->exp0[732], EXP0_I(944));
++        EXP0_I(940) = bhEne13_StoreObject( ((BH_PWORK*)BH_PGET(&epw->exp0[4])), (NJS_POINT3*)&epw->exp0[132], (NJS_VECTOR**)&epw->exp0[732], EXP0_I(936));
++        EXP0_I(944) = bhEne13_StoreObject( ((BH_PWORK*)BH_PGET(&epw->exp0[8])), (NJS_POINT3*)&epw->exp0[132], (NJS_VECTOR**)&epw->exp0[732], EXP0_I(940));
++        EXP0_I(948) = bhEne13_StoreObject(((BH_PWORK*)BH_PGET(&epw->exp0[12])), (NJS_POINT3*)&epw->exp0[132], (NJS_VECTOR**)&epw->exp0[732], EXP0_I(944));
+         
+-        bhEne13_StoreObject(*(BH_PWORK**)&epw->exp0[16], (NJS_POINT3*)&epw->exp0[132], (NJS_VECTOR**)&epw->exp0[732], EXP0_I(948));
++        bhEne13_StoreObject(((BH_PWORK*)BH_PGET(&epw->exp0[16])), (NJS_POINT3*)&epw->exp0[132], (NJS_VECTOR**)&epw->exp0[732], EXP0_I(948));
+     }
+ 
+-    (*(BH_PWORK**)&epw->exp0[4])->mlwP->objP  = *(NJS_CNK_OBJECT**)&epw->exp0[92];
+-    (*(BH_PWORK**)&epw->exp0[8])->mlwP->objP  = *(NJS_CNK_OBJECT**)&epw->exp0[96];
+-    (*(BH_PWORK**)&epw->exp0[12])->mlwP->objP = *(NJS_CNK_OBJECT**)&epw->exp0[100];
+-    (*(BH_PWORK**)&epw->exp0[16])->mlwP->objP = *(NJS_CNK_OBJECT**)&epw->exp0[104];
++    (((BH_PWORK*)BH_PGET(&epw->exp0[4])))->mlwP->objP  = ((NJS_CNK_OBJECT*)BH_PGET(&epw->exp0[92]));
++    (((BH_PWORK*)BH_PGET(&epw->exp0[8])))->mlwP->objP  = ((NJS_CNK_OBJECT*)BH_PGET(&epw->exp0[96]));
++    (((BH_PWORK*)BH_PGET(&epw->exp0[12])))->mlwP->objP = ((NJS_CNK_OBJECT*)BH_PGET(&epw->exp0[100]));
++    (((BH_PWORK*)BH_PGET(&epw->exp0[16])))->mlwP->objP = ((NJS_CNK_OBJECT*)BH_PGET(&epw->exp0[104]));
+ 
+     bhEne13_RestoreObject(                        epw, (NJS_POINT3*)&epw->exp0[132], (NJS_VECTOR**)&epw->exp0[732], EXP0_I(932));
+-    bhEne13_RestoreObject( *(BH_PWORK**)&epw->exp0[4], (NJS_POINT3*)&epw->exp0[132], (NJS_VECTOR**)&epw->exp0[732], EXP0_I(936));
+-    bhEne13_RestoreObject( *(BH_PWORK**)&epw->exp0[8], (NJS_POINT3*)&epw->exp0[132], (NJS_VECTOR**)&epw->exp0[732], EXP0_I(940));
+-    bhEne13_RestoreObject(*(BH_PWORK**)&epw->exp0[12], (NJS_POINT3*)&epw->exp0[132], (NJS_VECTOR**)&epw->exp0[732], EXP0_I(944));
+-    bhEne13_RestoreObject(*(BH_PWORK**)&epw->exp0[16], (NJS_POINT3*)&epw->exp0[132], (NJS_VECTOR**)&epw->exp0[732], EXP0_I(948));
++    bhEne13_RestoreObject( ((BH_PWORK*)BH_PGET(&epw->exp0[4])), (NJS_POINT3*)&epw->exp0[132], (NJS_VECTOR**)&epw->exp0[732], EXP0_I(936));
++    bhEne13_RestoreObject( ((BH_PWORK*)BH_PGET(&epw->exp0[8])), (NJS_POINT3*)&epw->exp0[132], (NJS_VECTOR**)&epw->exp0[732], EXP0_I(940));
++    bhEne13_RestoreObject(((BH_PWORK*)BH_PGET(&epw->exp0[12])), (NJS_POINT3*)&epw->exp0[132], (NJS_VECTOR**)&epw->exp0[732], EXP0_I(944));
++    bhEne13_RestoreObject(((BH_PWORK*)BH_PGET(&epw->exp0[16])), (NJS_POINT3*)&epw->exp0[132], (NJS_VECTOR**)&epw->exp0[732], EXP0_I(948));
+     
+     EXP0_I(108) = 0;
+ 
+@@ -224,7 +224,7 @@ void bhEne13_Init(BH_PWORK* epw)
+     {
+         if (((ep->flg & 0x1)) && (ep->id == 30))
+         {
+-            *((BH_PWORK**)epw->exp0 + (EXP0_I(108) + 11)) = ep;
++            BH_PSET((char*)epw->exp0 + 4 * ((EXP0_I(108) + 11)), ep);
+             
+             EXP0_I(108)++;
+             
+@@ -233,7 +233,7 @@ void bhEne13_Init(BH_PWORK* epw)
+         
+         if (((ep->flg & 0x1)) && (ep->id == 14)) 
+         {
+-            *(BH_PWORK**)&epw->exp0[112] = ep;
++            BH_PSET(&epw->exp0[112], ep);
+             
+             ep->lkwkp = (unsigned char*)epw;
+         }
+@@ -299,11 +299,11 @@ void bhEne13_BR00(BH_PWORK* epw)
+         return;
+     }
+ 
+-    if ((dist < 60.0f) && (EXP0_I(968) == 0) && ((((*(BH_PWORK**)&epw->exp0[8])->mode2  != 4) && ((*(BH_PWORK**)&epw->exp0[8])->mode2 != 5)) && (((*(BH_PWORK**)&epw->exp0[12])->mode2 != 4) && ((*(BH_PWORK**)&epw->exp0[12])->mode2 != 5)) && (((*(BH_PWORK**)&epw->exp0[16])->mode2 != 4) && ((*(BH_PWORK**)&epw->exp0[16])->mode2 != 5))))
++    if ((dist < 60.0f) && (EXP0_I(968) == 0) && ((((((BH_PWORK*)BH_PGET(&epw->exp0[8])))->mode2  != 4) && ((((BH_PWORK*)BH_PGET(&epw->exp0[8])))->mode2 != 5)) && (((((BH_PWORK*)BH_PGET(&epw->exp0[12])))->mode2 != 4) && ((((BH_PWORK*)BH_PGET(&epw->exp0[12])))->mode2 != 5)) && (((((BH_PWORK*)BH_PGET(&epw->exp0[16])))->mode2 != 4) && ((((BH_PWORK*)BH_PGET(&epw->exp0[16])))->mode2 != 5))))
+     {
+         j = bhEne13_SelectTentacle(epw);
+ 
+-        if ((*(BH_PWORK**)(&epw->exp0[8] + (4 * j)))->mode2 == 0)
++        if ((((BH_PWORK*)BH_PGET(&epw->exp0[8] + (4 * j))))->mode2 == 0)
+         {
+             EXP0_I(128) = j;
+ 
+@@ -343,7 +343,7 @@ void bhEne13_BR00(BH_PWORK* epw)
+ 
+         for (i = 0; i < 3; i++)
+         {
+-            if ((*(BH_PWORK**)(&epw->exp0[8] + (4 * j)))->mode2 == 0)
++            if ((((BH_PWORK*)BH_PGET(&epw->exp0[8] + (4 * j))))->mode2 == 0)
+             {
+                 EXP0_I(128) = j;
+                 break;
+@@ -359,7 +359,7 @@ void bhEne13_BR00(BH_PWORK* epw)
+         {
+             for (i = 0; i < EXP0_I(108); i++)
+             {
+-                ep = *(BH_PWORK**)(&epw->exp0[44] + (4 * i));
++                ep = ((BH_PWORK*)BH_PGET(&epw->exp0[44] + (4 * i)));
+ 
+                 if ((ep->mode0 == 1) && (ep->mode2 == 0))
+                 {
+@@ -408,11 +408,11 @@ void bhEne13_BR01(BH_PWORK* epw)
+         return;
+     }
+     
+-    if ((EXP0_I(968) == 0) && (((*(BH_PWORK**)(&epw->exp0[8]))->mode2 != 4) && ((*(BH_PWORK**)(&epw->exp0[8]))->mode2 != 5) && ((*(BH_PWORK**)(&epw->exp0[12]))->mode2 != 4) && ((*(BH_PWORK**)(&epw->exp0[12]))->mode2 != 5) && ((*(BH_PWORK**)(&epw->exp0[16]))->mode2 != 4) && ((*(BH_PWORK**)(&epw->exp0[16]))->mode2 != 5)))
++    if ((EXP0_I(968) == 0) && (((((BH_PWORK*)BH_PGET(&epw->exp0[8])))->mode2 != 4) && ((((BH_PWORK*)BH_PGET(&epw->exp0[8])))->mode2 != 5) && ((((BH_PWORK*)BH_PGET(&epw->exp0[12])))->mode2 != 4) && ((((BH_PWORK*)BH_PGET(&epw->exp0[12])))->mode2 != 5) && ((((BH_PWORK*)BH_PGET(&epw->exp0[16])))->mode2 != 4) && ((((BH_PWORK*)BH_PGET(&epw->exp0[16])))->mode2 != 5)))
+     {
+         j = bhEne13_SelectTentacle(epw);
+         
+-        if ((*(BH_PWORK**)(&epw->exp0[8] + (4 * j)))->mode2 == 0) 
++        if ((((BH_PWORK*)BH_PGET(&epw->exp0[8] + (4 * j))))->mode2 == 0) 
+         {
+             EXP0_I(128) = j;
+ 
+@@ -454,7 +454,7 @@ void bhEne13_Move(BH_PWORK* epw)
+     
+     bhEne13_MoveMode2[epw->mode2](epw);
+     
+-    if (((((*(BH_PWORK**)&epw->exp0[20])->flg & 0x4)) || (((*(BH_PWORK**)&epw->exp0[24])->flg & 0x4)) || (((*(BH_PWORK**)&epw->exp0[28])->flg & 0x4)) || (((*(BH_PWORK**)&epw->exp0[32])->flg & 0x4)) || (((*(BH_PWORK**)&epw->exp0[36])->flg & 0x4)) || (((*(BH_PWORK**)&epw->exp0[40])->flg & 0x4))) || ((*(BH_PWORK**)&epw->exp0[112] != NULL) && ((*(BH_PWORK**)&epw->exp0[112])->type == 0) && (((*(BH_PWORK**)&epw->exp0[112])->flg & 0x4)))) 
++    if (((((((BH_PWORK*)BH_PGET(&epw->exp0[20])))->flg & 0x4)) || (((((BH_PWORK*)BH_PGET(&epw->exp0[24])))->flg & 0x4)) || (((((BH_PWORK*)BH_PGET(&epw->exp0[28])))->flg & 0x4)) || (((((BH_PWORK*)BH_PGET(&epw->exp0[32])))->flg & 0x4)) || (((((BH_PWORK*)BH_PGET(&epw->exp0[36])))->flg & 0x4)) || (((((BH_PWORK*)BH_PGET(&epw->exp0[40])))->flg & 0x4))) || ((((BH_PWORK*)BH_PGET(&epw->exp0[112])) != NULL) && ((((BH_PWORK*)BH_PGET(&epw->exp0[112])))->type == 0) && (((((BH_PWORK*)BH_PGET(&epw->exp0[112])))->flg & 0x4)))) 
+     {
+         bhEne13_InitDamage(epw);
+     }
+@@ -491,10 +491,10 @@ void bhEne13_MV01(BH_PWORK* epw)
+         epw->hokan_count = 8;
+         epw->hokan_rate  = 45875;
+         
+-        if ((*(BH_PWORK**)&epw->exp0[112])->type == 0)
++        if ((((BH_PWORK*)BH_PGET(&epw->exp0[112])))->type == 0)
+         {
+-            (*(BH_PWORK**)&epw->exp0[112])->mode2 = 1;
+-            (*(BH_PWORK**)&epw->exp0[112])->mode3 = 0;
++            (((BH_PWORK*)BH_PGET(&epw->exp0[112])))->mode2 = 1;
++            (((BH_PWORK*)BH_PGET(&epw->exp0[112])))->mode3 = 0;
+         }
+         
+         epw->ct0 = 10;
+@@ -511,7 +511,7 @@ void bhEne13_MV01(BH_PWORK* epw)
+         
+         if (epw->ct0-- == 0)
+         {
+-            ep = *(BH_PWORK**)&epw->exp0[8] + EXP0_I(128);
++            ep = ((BH_PWORK*)BH_PGET(&epw->exp0[8])) + EXP0_I(128);
+             
+             ep->mode2 = 2;
+             ep->mode3 = 0;
+@@ -533,10 +533,10 @@ void bhEne13_MV02(BH_PWORK* epw)
+         epw->hokan_count = 8;
+         epw->hokan_rate  = 45875;
+         
+-        if ((*(BH_PWORK**)&epw->exp0[112])->type == 0)
++        if ((((BH_PWORK*)BH_PGET(&epw->exp0[112])))->type == 0)
+         { 
+-            (*(BH_PWORK**)&epw->exp0[112])->mode2 = 2;
+-            (*(BH_PWORK**)&epw->exp0[112])->mode3 = 0; 
++            (((BH_PWORK*)BH_PGET(&epw->exp0[112])))->mode2 = 2;
++            (((BH_PWORK*)BH_PGET(&epw->exp0[112])))->mode3 = 0; 
+         }
+         
+         epw->ct0 = epw->mnwP[epw->mtn_no].frm_num - 1;
+@@ -569,10 +569,10 @@ void bhEne13_MV03(BH_PWORK* epw)
+         epw->hokan_count = 8;
+         epw->hokan_rate  = 45875;
+         
+-        if ((*(BH_PWORK**)&epw->exp0[112])->type == 0)
++        if ((((BH_PWORK*)BH_PGET(&epw->exp0[112])))->type == 0)
+         {
+-            (*(BH_PWORK**)&epw->exp0[112])->mode2 = 1;
+-            (*(BH_PWORK**)&epw->exp0[112])->mode3 = 0;
++            (((BH_PWORK*)BH_PGET(&epw->exp0[112])))->mode2 = 1;
++            (((BH_PWORK*)BH_PGET(&epw->exp0[112])))->mode3 = 0;
+         }
+         
+         epw->ct0 = 10;
+@@ -589,7 +589,7 @@ void bhEne13_MV03(BH_PWORK* epw)
+         
+         if (epw->ct0-- == 0)
+         {
+-            ep = *(BH_PWORK**)&epw->exp0[8] + EXP0_I(128);
++            ep = ((BH_PWORK*)BH_PGET(&epw->exp0[8])) + EXP0_I(128);
+             
+             ep->mode3 = 0;
+             
+@@ -620,17 +620,17 @@ void bhEne13_Damage(BH_PWORK* epw)
+     int i;      
+     int max_dam; 
+     
+-    if ((((*(BH_PWORK**)&epw->exp0[20])->flg & 0x4)) || (((*(BH_PWORK**)&epw->exp0[24])->flg & 0x4)) || (((*(BH_PWORK**)&epw->exp0[28])->flg & 0x4)) || (((*(BH_PWORK**)&epw->exp0[32])->flg & 0x4)) || (((*(BH_PWORK**)&epw->exp0[36])->flg & 0x4)) || (((*(BH_PWORK**)&epw->exp0[40])->flg & 0x4)) || ((*(BH_PWORK**)&epw->exp0[112] != NULL) && ((*(BH_PWORK**)&epw->exp0[112])->type == 0) && (((*(BH_PWORK**)&epw->exp0[112])->flg & 0x4))))
++    if ((((((BH_PWORK*)BH_PGET(&epw->exp0[20])))->flg & 0x4)) || (((((BH_PWORK*)BH_PGET(&epw->exp0[24])))->flg & 0x4)) || (((((BH_PWORK*)BH_PGET(&epw->exp0[28])))->flg & 0x4)) || (((((BH_PWORK*)BH_PGET(&epw->exp0[32])))->flg & 0x4)) || (((((BH_PWORK*)BH_PGET(&epw->exp0[36])))->flg & 0x4)) || (((((BH_PWORK*)BH_PGET(&epw->exp0[40])))->flg & 0x4)) || ((((BH_PWORK*)BH_PGET(&epw->exp0[112])) != NULL) && ((((BH_PWORK*)BH_PGET(&epw->exp0[112])))->type == 0) && (((((BH_PWORK*)BH_PGET(&epw->exp0[112])))->flg & 0x4))))
+     {
+         max_dam = 0;
+ 
+         for (i = 0; i < 6; i++)
+         {
+-            if (((*(BH_PWORK**)(&epw->exp0[20] + (4 * i)))->flg & 0x4))
++            if (((((BH_PWORK*)BH_PGET(&epw->exp0[20] + (4 * i))))->flg & 0x4))
+             {
+-                (*(BH_PWORK**)(&epw->exp0[20] + (4 * i)))->flg &= ~0x4;
++                (((BH_PWORK*)BH_PGET(&epw->exp0[20] + (4 * i))))->flg &= ~0x4;
+ 
+-                dam = bhEne18_HitMark(*(BH_PWORK**)(&epw->exp0[20] + (4 * i)));
++                dam = bhEne18_HitMark(((BH_PWORK*)BH_PGET(&epw->exp0[20] + (4 * i))));
+ 
+                 if (max_dam < dam)
+                 {
+@@ -639,11 +639,11 @@ void bhEne13_Damage(BH_PWORK* epw)
+             }
+         }
+ 
+-        if (((*(BH_PWORK**)&epw->exp0[112])->type == 0) && (((*(BH_PWORK**)&epw->exp0[112])->flg & 0x4)))
++        if (((((BH_PWORK*)BH_PGET(&epw->exp0[112])))->type == 0) && (((((BH_PWORK*)BH_PGET(&epw->exp0[112])))->flg & 0x4)))
+         {
+-            (*(BH_PWORK**)&epw->exp0[112])->flg &= ~0x4;
++            (((BH_PWORK*)BH_PGET(&epw->exp0[112])))->flg &= ~0x4;
+ 
+-            dam = bhEne14_HitMark(*(BH_PWORK**)&epw->exp0[112]);
++            dam = bhEne14_HitMark(((BH_PWORK*)BH_PGET(&epw->exp0[112])));
+ 
+             if (max_dam < dam)
+             {
+@@ -698,25 +698,25 @@ void bhEne13_Die(BH_PWORK* epw)
+     switch (epw->mode3) 
+     {
+     case 0:
+-        (*(unsigned char**)&epw->exp0[976])[12] = 4;
+-        (*(unsigned char**)&epw->exp0[976])[13] = 0;
+-        (*(unsigned char**)&epw->exp0[976])[14] = 0;
+-        (*(unsigned char**)&epw->exp0[976])[15] = 0;
++        (((unsigned char*)BH_PGET(&epw->exp0[976])))[12] = 4;
++        (((unsigned char*)BH_PGET(&epw->exp0[976])))[13] = 0;
++        (((unsigned char*)BH_PGET(&epw->exp0[976])))[14] = 0;
++        (((unsigned char*)BH_PGET(&epw->exp0[976])))[15] = 0;
+ 
+         for (i = 0; i < 4; i++)
+         {
+-            ((unsigned char**)epw->exp0)[1 + i][12] = 4;
+-            ((unsigned char**)epw->exp0)[1 + i][13] = 0;
+-            ((unsigned char**)epw->exp0)[1 + i][14] = 0;
+-            ((unsigned char**)epw->exp0)[1 + i][15] = 0;
++            ((unsigned char*)BH_PGET((char*)epw->exp0 + 4 * (1 + i)))[12] = 4;
++            ((unsigned char*)BH_PGET((char*)epw->exp0 + 4 * (1 + i)))[13] = 0;
++            ((unsigned char*)BH_PGET((char*)epw->exp0 + 4 * (1 + i)))[14] = 0;
++            ((unsigned char*)BH_PGET((char*)epw->exp0 + 4 * (1 + i)))[15] = 0;
+         }
+ 
+         for (i = 0; i < 6; i++) 
+         {
+-            ((unsigned char**)epw->exp0)[5 + i][12] = 4;
+-            ((unsigned char**)epw->exp0)[5 + i][13] = 0;
+-            ((unsigned char**)epw->exp0)[5 + i][14] = 0;
+-            ((unsigned char**)epw->exp0)[5 + i][15] = 0;
++            ((unsigned char*)BH_PGET((char*)epw->exp0 + 4 * (5 + i)))[12] = 4;
++            ((unsigned char*)BH_PGET((char*)epw->exp0 + 4 * (5 + i)))[13] = 0;
++            ((unsigned char*)BH_PGET((char*)epw->exp0 + 4 * (5 + i)))[14] = 0;
++            ((unsigned char*)BH_PGET((char*)epw->exp0 + 4 * (5 + i)))[15] = 0;
+         }
+ 
+         epw->mode3++;
+@@ -741,36 +741,36 @@ void bhEne13_InitDamage(BH_PWORK* epw)
+ 
+     for (i = 0; i < 6; i++)
+     {
+-        if (((*(BH_PWORK**)(&epw->exp0[20] + (4 * i)))->flg & 0x4))
++        if (((((BH_PWORK*)BH_PGET(&epw->exp0[20] + (4 * i))))->flg & 0x4))
+         {
+-            (*(BH_PWORK**)(&epw->exp0[20] + (4 * i)))->flg &= ~0x4;
++            (((BH_PWORK*)BH_PGET(&epw->exp0[20] + (4 * i))))->flg &= ~0x4;
+ 
+-            dam = bhEne18_HitMark(*(BH_PWORK**)(&epw->exp0[20] + (4 * i)));
++            dam = bhEne18_HitMark(((BH_PWORK*)BH_PGET(&epw->exp0[20] + (4 * i))));
+ 
+             if (max_dam < dam)
+             {
+                 max_dam = dam;
+ 
+-                wep_no = (*(BH_PWORK**)(&epw->exp0[20] + (4 * i)))->wpnr_no;
++                wep_no = (((BH_PWORK*)BH_PGET(&epw->exp0[20] + (4 * i))))->wpnr_no;
+                 
+-                dflg = (*(BH_PWORK**)(&epw->exp0[20] + (4 * i)))->flg2 & 0x4;
++                dflg = (((BH_PWORK*)BH_PGET(&epw->exp0[20] + (4 * i))))->flg2 & 0x4;
+             }
+         }
+     }
+ 
+-    if (((*(BH_PWORK**)&epw->exp0[112])->type == 0) && (((*(BH_PWORK**)&epw->exp0[112])->flg & 0x4)))
++    if (((((BH_PWORK*)BH_PGET(&epw->exp0[112])))->type == 0) && (((((BH_PWORK*)BH_PGET(&epw->exp0[112])))->flg & 0x4)))
+     {
+-        (*(BH_PWORK**)&epw->exp0[112])->flg &= ~0x4;
++        (((BH_PWORK*)BH_PGET(&epw->exp0[112])))->flg &= ~0x4;
+ 
+-        dam = bhEne14_HitMark(*(BH_PWORK**)&epw->exp0[112]);
++        dam = bhEne14_HitMark(((BH_PWORK*)BH_PGET(&epw->exp0[112])));
+ 
+         if (max_dam < dam)
+         {
+             max_dam = dam;
+ 
+-            wep_no = (*(BH_PWORK**)&epw->exp0[112])->wpnr_no;
++            wep_no = (((BH_PWORK*)BH_PGET(&epw->exp0[112])))->wpnr_no;
+             
+-            dflg = (*(BH_PWORK**)(&epw->exp0[20] + (4 * i)))->flg2 & 0x4;
++            dflg = (((BH_PWORK*)BH_PGET(&epw->exp0[20] + (4 * i))))->flg2 & 0x4;
+         }
+     }
+ 
+@@ -836,21 +836,21 @@ void bhEne13_InitDamage(BH_PWORK* epw)
+             epw->mode2 = 0;
+             epw->mode3 = 0;
+ 
+-            if ((*(BH_PWORK**)&epw->exp0[112])->type == 0)
++            if ((((BH_PWORK*)BH_PGET(&epw->exp0[112])))->type == 0)
+             {
+                 if (epw->hp < 0)
+                 {
+-                    (*(BH_PWORK**)&epw->exp0[112])->mode0 = 3;
+-                    (*(BH_PWORK**)&epw->exp0[112])->mode1 = 0;
+-                    (*(BH_PWORK**)&epw->exp0[112])->mode2 = 1;
+-                    (*(BH_PWORK**)&epw->exp0[112])->mode3 = 0;
++                    (((BH_PWORK*)BH_PGET(&epw->exp0[112])))->mode0 = 3;
++                    (((BH_PWORK*)BH_PGET(&epw->exp0[112])))->mode1 = 0;
++                    (((BH_PWORK*)BH_PGET(&epw->exp0[112])))->mode2 = 1;
++                    (((BH_PWORK*)BH_PGET(&epw->exp0[112])))->mode3 = 0;
+                 }
+                 else
+                 {
+-                    (*(BH_PWORK**)&epw->exp0[112])->mode0 = 3;
+-                    (*(BH_PWORK**)&epw->exp0[112])->mode1 = 0;
+-                    (*(BH_PWORK**)&epw->exp0[112])->mode2 = 0;
+-                    (*(BH_PWORK**)&epw->exp0[112])->mode3 = 0;
++                    (((BH_PWORK*)BH_PGET(&epw->exp0[112])))->mode0 = 3;
++                    (((BH_PWORK*)BH_PGET(&epw->exp0[112])))->mode1 = 0;
++                    (((BH_PWORK*)BH_PGET(&epw->exp0[112])))->mode2 = 0;
++                    (((BH_PWORK*)BH_PGET(&epw->exp0[112])))->mode3 = 0;
+                 }
+             }
+         }
+@@ -866,8 +866,8 @@ void bhEne13_Finish(BH_PWORK* epw)
+ 
+     for (i = 0; i < 4; i++)
+     {
+-        pObj  = (*(BH_PWORK**)(&epw->exp0[4] + (4 * i)))->mlwP->objP;
+-        obj_n = (*(BH_PWORK**)(&epw->exp0[4] + (4 * i)))->mlwP->obj_num;
++        pObj  = (((BH_PWORK*)BH_PGET(&epw->exp0[4] + (4 * i))))->mlwP->objP;
++        obj_n = (((BH_PWORK*)BH_PGET(&epw->exp0[4] + (4 * i))))->mlwP->obj_num;
+ 
+         for (ono = 0; ono < obj_n; ono++, pObj++)
+         {
+@@ -957,9 +957,9 @@ int bhEne13_StoreObject(BH_PWORK* epw, NJS_POINT3* pos, NJS_VECTOR** v, int no)
+             
+             nVtx = pHdr->usIndexMax;
+             
+-            v[no] = bhEne_CallocWork(nVtx * 32, 64);
++            BH_PSET((unsigned char*)v + 4 * no, bhEne_CallocWork(nVtx * 32, 64));
+             
+-            pd = (NJS_POINT4*)v[no];
++            pd = (NJS_POINT4*)BH_PGET((unsigned char*)v + 4 * no);
+             ps = (NJS_POINT4*)&pHdr[1];
+ 
+             for (i = 0; i < nVtx; i++)
+@@ -1008,7 +1008,7 @@ int bhEne13_RestoreObject(BH_PWORK* epw, NJS_POINT3* pos, NJS_VECTOR** v, int no
+         {
+             pHdr = (HDR_PS*)pModel->vlist;
+             
+-            ps = (NJS_POINT4*)v[no];
++            ps = (NJS_POINT4*)BH_PGET((unsigned char*)v + 4 * no);
+             
+             nVtx = pHdr->usIndexMax;
+             
+@@ -1049,7 +1049,7 @@ void bhEne13_PutAttacker(BH_PWORK* epw, int no)
+     
+     for (i = 0; i < EXP0_I(108); i++)
+     {
+-        ep = *(BH_PWORK**)(&epw->exp0[44] + (4 * i));
++        ep = ((BH_PWORK*)BH_PGET(&epw->exp0[44] + (4 * i)));
+ 
+         if ((ep->mode0 == 1) && (ep->mode2 == 0))
+         {
+@@ -1077,12 +1077,12 @@ void bhEne13_PutAttacker(BH_PWORK* epw, int no)
+ // 100% matching!
+ void bhEne13_Tentacle(BH_PWORK* epw, int no)
+ {
+-    (*(unsigned char**)&epw->exp0[976])[12] = 1;
+-    (*(unsigned char**)&epw->exp0[976])[13] = 0;
+-    (*(unsigned char**)&epw->exp0[976])[14] = 1;
+-    (*(unsigned char**)&epw->exp0[976])[15] = 0;
++    (((unsigned char*)BH_PGET(&epw->exp0[976])))[12] = 1;
++    (((unsigned char*)BH_PGET(&epw->exp0[976])))[13] = 0;
++    (((unsigned char*)BH_PGET(&epw->exp0[976])))[14] = 1;
++    (((unsigned char*)BH_PGET(&epw->exp0[976])))[15] = 0;
+     
+-    (*(unsigned short**)&epw->exp0[976])[3] = no;
++    (((unsigned short*)BH_PGET(&epw->exp0[976])))[3] = no;
+ }
+ 
+ // 100% matching!
+diff --git a/src/ps2/veronica/prog/en13sub.c b/src/ps2/veronica/prog/en13sub.c
+index 7d2583bf..cc2678af 100644
+--- a/src/ps2/veronica/prog/en13sub.c
++++ b/src/ps2/veronica/prog/en13sub.c
+@@ -105,7 +105,7 @@ void bhEne13B_Init(BH_PWORK* epw)
+ 
+         for (i = 0; i < epw->mlwP->obj_num; i++)
+         {
+-            EXP0_ATR(i) = &sys->mwalp[sys->mwal_n];
++            EXP0_ATR_SET(i, &sys->mwalp[sys->mwal_n]);
+ 
+             sys->mwal_n++;
+ 
+@@ -145,7 +145,7 @@ void bhEne13B_MV01(BH_PWORK* epw)
+     O_WORK* owk;
+     int i, j;
+     int num;
+-    BH_PWORK** ep;
++    unsigned char* ep;   /* 4-byte pointer slots (BH_PGET) */
+     NJS_POINT3 p1;
+ 	float x, y, z; // not from DWARF
+ 
+@@ -368,15 +368,16 @@ void bhEne13B_MV01(BH_PWORK* epw)
+                     epw->ct0 = 0;
+                 }
+ 
+-                ep = bhEne13_GetChild((BH_PWORK*)epw->lkwkp, &num);
++                ep = (unsigned char*)bhEne13_GetChild((BH_PWORK*)epw->lkwkp, &num);
+ 
+-                for (j = 0; j < num; j++, ep++)
++                for (j = 0; j < num; j++, ep += 4)
+                 {
+-                    if ((((*ep)->flg & 0x20)) && (bhEne_AttackHitCheck(*ep, (NJS_POINT3*)&owk->mtx[12], 4.0f)))
++                    BH_PWORK* cep = (BH_PWORK*)BH_PGET(ep);
++                    if (((cep->flg & 0x20)) && (bhEne_AttackHitCheck(cep, (NJS_POINT3*)&owk->mtx[12], 4.0f)))
+                     {
+-						(*ep)->flg |= 0x4;
++						cep->flg |= 0x4;
+ 						
+-						(*ep)->dam[0] = 100;
++						cep->dam[0] = 100;
+                     }
+                 }
+             }
+diff --git a/src/ps2/veronica/prog/en14.c b/src/ps2/veronica/prog/en14.c
+index e26a7579..07a0e90e 100644
+--- a/src/ps2/veronica/prog/en14.c
++++ b/src/ps2/veronica/prog/en14.c
+@@ -210,12 +210,12 @@ void bhEne14(BH_PWORK* epw)
+         bhEne14_PlayerControl(epw);
+     }
+     
+-    *(O_WRK **)(epw->exp0 + 0x244) = NULL;
++    BH_PSET(epw->exp0 + 0x244, NULL);
+     for (i = 0, op = eff; i < 512; i++, op++)
+     {
+         if ((op->flg & 1) && !(op->stflg & 0x1000000) && (op->id == 130) && (op->type == 4))
+         {
+-            *(O_WRK **)(epw->exp0 + 0x244) = op;
++            BH_PSET(epw->exp0 + 0x244, op);
+             break;
+         }
+     }
 diff --git a/src/ps2/veronica/prog/en15.c b/src/ps2/veronica/prog/en15.c
-index 356652b0..84155d54 100644
+index 356652b0..c263d023 100644
 --- a/src/ps2/veronica/prog/en15.c
 +++ b/src/ps2/veronica/prog/en15.c
 @@ -302,7 +302,11 @@ static int GetLocalEneNo(BH_PWORK* epw)
@@ -973,8 +2954,52 @@ index 356652b0..84155d54 100644
      {
          if (&ene[i] == epw) 
          {
+@@ -2555,7 +2559,7 @@ static void PoisonAttack(O_WRK* op)
+ 
+     njSubVector(&attack_v, &col.c);
+ 
+-    if (*(short*)(*(unsigned char**)(op->exp0 + 0x2F0) + 0x5A) & 1)
++    if (*(short*)(((BH_PWORK*)op->exp0)->exp0 + 0x5A) & 1)
+     {
+         return;
+     }
+@@ -2571,7 +2575,7 @@ static void PoisonAttack(O_WRK* op)
+     } 
+     else
+     {
+-        if (*(short *)(*(int *)(op->exp0 + 0x2F0) + 0x5C) > 5)
++        if (*(short *)(((BH_PWORK*)op->exp0)->exp0 + 0x5C) > 5)
+         {
+             if (njRandom() < 0.6)
+             {
+@@ -2580,7 +2584,7 @@ static void PoisonAttack(O_WRK* op)
+         }
+         else
+         {
+-            (*(short *)(*(int *)(op->exp0 + 0x2F0) + 0x5C))++;
++            (*(short *)(((BH_PWORK*)op->exp0)->exp0 + 0x5C))++;
+         }
+ 
+         plp->flg |= 4;
+diff --git a/src/ps2/veronica/prog/en16.c b/src/ps2/veronica/prog/en16.c
+index 1651596c..34deb36b 100644
+--- a/src/ps2/veronica/prog/en16.c
++++ b/src/ps2/veronica/prog/en16.c
+@@ -260,9 +260,9 @@ void bhEne16_MV02(BH_PWORK* epw)
+                     v.y = epw->py - epw->yn;
+                     v.z = epw->pz - epw->zn;
+   
+-                    pos.x = (*(BH_PWORK**)epw->exp0)->lox;
+-                    pos.y = (*(BH_PWORK**)epw->exp0)->loy;
+-                    pos.z = (*(BH_PWORK**)epw->exp0)->loz;
++                    pos.x = ((BH_PWORK*)BH_PGET(epw->exp0))->lox;
++                    pos.y = ((BH_PWORK*)BH_PGET(epw->exp0))->loy;
++                    pos.z = ((BH_PWORK*)BH_PGET(epw->exp0))->loz;
+                     bhSetEffGunSpark(&pos, &v, 0xFFF8F8A0, 0x4CE04010, WpnTab[13].hiteff - 4);
+                     gap.wpn_no = 0xD;
+                     gap.ay = bhArcTan2(v.x, v.z);
 diff --git a/src/ps2/veronica/prog/en17.c b/src/ps2/veronica/prog/en17.c
-index c1876b3d..3d6554a1 100644
+index c1876b3d..6fa03ad9 100644
 --- a/src/ps2/veronica/prog/en17.c
 +++ b/src/ps2/veronica/prog/en17.c
 @@ -369,7 +369,11 @@ void bhEne17(BH_PWORK* epw)
@@ -989,8 +3014,341 @@ index c1876b3d..3d6554a1 100644
          if (plp->mode2 == 0) {
              bhEne17_PlyDG00(plp, epw);
          } else {
+@@ -788,7 +792,7 @@ void bhEne17_CollCheck(BH_PWORK* epw)
+ // 100% matching!
+ void bhEne17_CollCheckWall(BH_PWORK* ewp) 
+ {
+-    *(ATR_WORK**)((char*)ewp->exp0 + 64) = bhCheckWallType((NJS_POINT3*)&ewp->px, ewp->flg, ewp->ar, ewp->ah);
++    BH_PSET((char*)ewp->exp0 + 64, bhCheckWallType((NJS_POINT3*)&ewp->px, ewp->flg, ewp->ar, ewp->ah));
+     
+     if ((((unsigned int*)(ewp->exp0))[2] & 0xF) == 1 && (ewp->flg & 0x10)) {
+         bhCheckDansa(ewp);
+diff --git a/src/ps2/veronica/prog/en18.c b/src/ps2/veronica/prog/en18.c
+index bcfd0828..33e7a51f 100644
+--- a/src/ps2/veronica/prog/en18.c
++++ b/src/ps2/veronica/prog/en18.c
+@@ -363,7 +363,7 @@ void bhEne18(BH_PWORK* epw)
+     if (((BH_PWORK *)epw->lkwkp)->stflg & 0x01000000) 
+     {
+         epw->stflg |= 0x01000000;
+-        (*(ATR_WORK **)(epw->exp0 + 0x14))->flg = 0;
++        (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->flg = 0;
+     }
+     
+     bhCalcModel(epw);
+@@ -422,20 +422,20 @@ void bhEne18_Init(BH_PWORK* epw)
+     {
+         epw->exp0 = bhEne_CallocWork(0x18, 8);
+         
+-        *(NJS_CNK_OBJECT **)(epw->exp0 + 0x4) = epw->mlwP->objP;
+-        *(NJS_CNK_OBJECT **)(epw->exp0 + 0x8) = epw->mlwP[1].objP;
+-        *(NJS_CNK_OBJECT **)(epw->exp0 + 0xC) = epw->mlwP[2].objP;
++        BH_PSET(epw->exp0 + 0x4, epw->mlwP->objP);
++        BH_PSET(epw->exp0 + 0x8, epw->mlwP[1].objP);
++        BH_PSET(epw->exp0 + 0xC, epw->mlwP[2].objP);
+         
+-        *(ATR_WORK **)(epw->exp0 + 0x14) = &sys->mwalp[sys->mwal_n];
++        BH_PSET(epw->exp0 + 0x14, &sys->mwalp[sys->mwal_n]);
+         
+         sys->mwal_n++;
+         
+-        (*(ATR_WORK **)(epw->exp0 + 0x14))->flg = 0;
+-        (*(ATR_WORK **)(epw->exp0 + 0x14))->type = 3;
+-        (*(ATR_WORK **)(epw->exp0 + 0x14))->w = 0.0f;
+-        (*(ATR_WORK **)(epw->exp0 + 0x14))->h = 0.0f;
+-        (*(ATR_WORK **)(epw->exp0 + 0x14))->d = 0.0f;
+-        (*(ATR_WORK **)(epw->exp0 + 0x14))->attr = 0;
++        (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->flg = 0;
++        (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->type = 3;
++        (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->w = 0.0f;
++        (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->h = 0.0f;
++        (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->d = 0.0f;
++        (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->attr = 0;
+     }
+ 
+     if (epw->type < 4) return;
+@@ -630,7 +630,7 @@ void bhEne18_MV00(BH_PWORK* epw)
+     switch (epw->mode3)
+     {
+         case 0:
+-            epw->mlwP->objP = *(NJS_CNK_OBJECT **)(epw->exp0 + 0x4);
++            epw->mlwP->objP = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0x4));
+         
+             epw->shp_ct = 0.0f;
+             epw->mdflg &= ~2;
+@@ -654,13 +654,13 @@ void bhEne18_MV01(BH_PWORK* epw)
+             
+             if (epw->shp_ct < 1000.0f)
+             {
+-                epw->obj_a = *(NJS_CNK_OBJECT **)(epw->exp0 + 0x4);
+-                epw->obj_b = *(NJS_CNK_OBJECT **)(epw->exp0 + 0x8);
++                epw->obj_a = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0x4));
++                epw->obj_b = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0x8));
+             } 
+             else 
+             {
+-                epw->obj_a = *(NJS_CNK_OBJECT **)(epw->exp0 + 0x8);
+-                epw->obj_b = *(NJS_CNK_OBJECT **)(epw->exp0 + 0xC);
++                epw->obj_a = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0x8));
++                epw->obj_b = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0xC));
+                 
+                 epw->shp_ct -= 1000.0f;
+             }
+@@ -696,12 +696,12 @@ void bhEne18_MV02(BH_PWORK* epw)
+             
+             ep = (BH_PWORK *)epw->lkwkp;
+             
+-            (*(ATR_WORK **)(epw->exp0 + 0x14))->flg = 1;
++            (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->flg = 1;
+             
+             njUnitMatrix(NULL);
+             njRotateY(NULL, ep->ay);
+-            njCalcVector(NULL, &pos[epw->ct1], (NJS_VECTOR *)&((*(ATR_WORK **)(epw->exp0 + 0x14))->px));
+-            njAddVector((NJS_VECTOR *)&((*(ATR_WORK **)(epw->exp0 + 0x14))->px), (NJS_VECTOR *)&ep->px);
++            njCalcVector(NULL, &pos[epw->ct1], (NJS_VECTOR *)&((((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->px));
++            njAddVector((NJS_VECTOR *)&((((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->px), (NJS_VECTOR *)&ep->px);
+             
+             epw->mode3++;
+         case 1:
+@@ -709,29 +709,29 @@ void bhEne18_MV02(BH_PWORK* epw)
+             
+             if (epw->shp_ct < 1000.0f)
+             {
+-                epw->obj_a = *(NJS_CNK_OBJECT **)(epw->exp0 + 0x4);
+-                epw->obj_b = *(NJS_CNK_OBJECT **)(epw->exp0 + 0x8);
++                epw->obj_a = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0x4));
++                epw->obj_b = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0x8));
+                 
+-                (*(ATR_WORK **)(epw->exp0 + 0x14))->w = (10.0f * epw->shp_ct) / 1000.0f;
++                (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->w = (10.0f * epw->shp_ct) / 1000.0f;
+             }
+             
+             else if (epw->shp_ct < 2000.0f) 
+             {
+-                epw->obj_a = *(NJS_CNK_OBJECT **)(epw->exp0 + 0x8);
+-                epw->obj_b = *(NJS_CNK_OBJECT **)(epw->exp0 + 0xC);
++                epw->obj_a = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0x8));
++                epw->obj_b = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0xC));
+                 
+                 epw->shp_ct -= 1000.0f;
+                 
+-                (*(ATR_WORK **)(epw->exp0 + 0x14))->w = 10.0f;
++                (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->w = 10.0f;
+             }
+             else 
+             {
+-                epw->obj_a = *(NJS_CNK_OBJECT **)(epw->exp0 + 0x4);
+-                epw->obj_b = *(NJS_CNK_OBJECT **)(epw->exp0 + 0xC);
++                epw->obj_a = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0x4));
++                epw->obj_b = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0xC));
+                 
+                 epw->shp_ct = 3000.0f - epw->shp_ct;
+                 
+-                (*(ATR_WORK **)(epw->exp0 + 0x14))->w = (10.0f * epw->shp_ct) / 1000.0f;
++                (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->w = (10.0f * epw->shp_ct) / 1000.0f;
+             }
+             
+             epw->ct0++;
+@@ -748,7 +748,7 @@ void bhEne18_MV02(BH_PWORK* epw)
+                 epw->mode2 = 0;
+                 epw->mode3 = 0;
+                 
+-                (*(ATR_WORK **)(epw->exp0 + 0x14))->flg = 0;
++                (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->flg = 0;
+             }
+             
+             break;
+@@ -783,12 +783,12 @@ void bhEne18_MV04(BH_PWORK* epw)
+             
+             ep = (BH_PWORK *)epw->lkwkp;
+             
+-            (*(ATR_WORK **)(epw->exp0 + 0x14))->flg = 1;
++            (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->flg = 1;
+             
+             njUnitMatrix(NULL);
+             njRotateY(NULL, ep->ay);
+-            njCalcVector(NULL, &pos[epw->ct1], (NJS_VECTOR *)&((*(ATR_WORK **)(epw->exp0 + 0x14))->px));
+-            njAddVector((NJS_VECTOR *)&((*(ATR_WORK **)(epw->exp0 + 0x14))->px), (NJS_VECTOR *)&ep->px);
++            njCalcVector(NULL, &pos[epw->ct1], (NJS_VECTOR *)&((((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->px));
++            njAddVector((NJS_VECTOR *)&((((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->px), (NJS_VECTOR *)&ep->px);
+             
+             epw->mode3++;
+         case 1:
+@@ -803,27 +803,27 @@ void bhEne18_MV04(BH_PWORK* epw)
+             
+             if (epw->shp_ct < 1000.0f) 
+             {
+-                epw->obj_a = *(NJS_CNK_OBJECT **)(epw->exp0 + 0x4);
+-                epw->obj_b = *(NJS_CNK_OBJECT **)(epw->exp0 + 0x8);
++                epw->obj_a = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0x4));
++                epw->obj_b = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0x8));
+                 
+-                (*(ATR_WORK **)(epw->exp0 + 0x14))->w = (10.0f * epw->shp_ct) / 1000.0f;
++                (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->w = (10.0f * epw->shp_ct) / 1000.0f;
+             }
+             else if (epw->shp_ct < 2000.0f) 
+             {
+-                epw->obj_a = *(NJS_CNK_OBJECT **)(epw->exp0 + 0x8);
+-                epw->obj_b = *(NJS_CNK_OBJECT **)(epw->exp0 + 0xC);
++                epw->obj_a = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0x8));
++                epw->obj_b = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0xC));
+                 
+                 epw->shp_ct -= 1000.0f;
+-                (*(ATR_WORK **)(epw->exp0 + 0x14))->w = 10.0f;
++                (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->w = 10.0f;
+             }
+             else 
+             {
+-                epw->obj_a = *(NJS_CNK_OBJECT **)(epw->exp0 + 0x4);
+-                epw->obj_b = *(NJS_CNK_OBJECT **)(epw->exp0 + 0xC);
++                epw->obj_a = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0x4));
++                epw->obj_b = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0xC));
+                 
+                 epw->shp_ct = 3000.0f - epw->shp_ct;
+                 
+-                (*(ATR_WORK **)(epw->exp0 + 0x14))->w = (10.0f * epw->shp_ct) / 1000.0f;
++                (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->w = (10.0f * epw->shp_ct) / 1000.0f;
+             }
+             
+             epw->ct0++;
+@@ -840,7 +840,7 @@ void bhEne18_MV04(BH_PWORK* epw)
+                 epw->mode2 = 0;
+                 epw->mode3 = 0;
+                 
+-                (*(ATR_WORK **)(epw->exp0 + 0x14))->flg = 0;
++                (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->flg = 0;
+             }
+             
+             break;
+@@ -869,12 +869,12 @@ void bhEne18_MV05(BH_PWORK* epw)
+             
+             ep = (BH_PWORK *)epw->lkwkp;
+             
+-            (*(ATR_WORK **)(epw->exp0 + 0x14))->flg = 1;
++            (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->flg = 1;
+             
+             njUnitMatrix(NULL);
+             njRotateY(NULL, ep->ay);
+-            njCalcVector(NULL, &pos[epw->ct1], (NJS_VECTOR *)&((*(ATR_WORK **)(epw->exp0 + 0x14))->px));
+-            njAddVector((NJS_VECTOR *)&((*(ATR_WORK **)(epw->exp0 + 0x14))->px), (NJS_VECTOR *)&ep->px);
++            njCalcVector(NULL, &pos[epw->ct1], (NJS_VECTOR *)&((((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->px));
++            njAddVector((NJS_VECTOR *)&((((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->px), (NJS_VECTOR *)&ep->px);
+             
+             epw->mode3++;
+         case 1:
+@@ -889,27 +889,27 @@ void bhEne18_MV05(BH_PWORK* epw)
+             
+             if (epw->shp_ct < 1000.0f) 
+             {
+-                epw->obj_a = *(NJS_CNK_OBJECT **)(epw->exp0 + 0x4);
+-                epw->obj_b = *(NJS_CNK_OBJECT **)(epw->exp0 + 0x8);
++                epw->obj_a = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0x4));
++                epw->obj_b = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0x8));
+                 
+-                (*(ATR_WORK **)(epw->exp0 + 0x14))->w = (10.0f * epw->shp_ct) / 1000.0f;
++                (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->w = (10.0f * epw->shp_ct) / 1000.0f;
+             }
+             else if (epw->shp_ct < 2000.0f) 
+             {
+-                epw->obj_a = *(NJS_CNK_OBJECT **)(epw->exp0 + 0x8);
+-                epw->obj_b = *(NJS_CNK_OBJECT **)(epw->exp0 + 0xC);
++                epw->obj_a = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0x8));
++                epw->obj_b = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0xC));
+                 
+                 epw->shp_ct -= 1000.0f;
+-                (*(ATR_WORK **)(epw->exp0 + 0x14))->w = 10.0f;
++                (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->w = 10.0f;
+             }
+             else 
+             {
+-                epw->obj_a = *(NJS_CNK_OBJECT **)(epw->exp0 + 0x4);
+-                epw->obj_b = *(NJS_CNK_OBJECT **)(epw->exp0 + 0xC);
++                epw->obj_a = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0x4));
++                epw->obj_b = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0xC));
+                 
+                 epw->shp_ct = 3000.0f - epw->shp_ct;
+                 
+-                (*(ATR_WORK **)(epw->exp0 + 0x14))->w = (10.0f * epw->shp_ct) / 1000.0f;
++                (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->w = (10.0f * epw->shp_ct) / 1000.0f;
+             }
+             
+             epw->ct0++;
+@@ -926,7 +926,7 @@ void bhEne18_MV05(BH_PWORK* epw)
+                 epw->mode2 = 0;
+                 epw->mode3 = 0;
+                 
+-                (*(ATR_WORK **)(epw->exp0 + 0x14))->flg = 0;
++                (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->flg = 0;
+             }
+             
+             break;
+@@ -950,14 +950,14 @@ void bhEne18_Die(BH_PWORK* epw)
+ {
+     epw->flg |= 2;
+     
+-    epw->mlwP->objP = *(NJS_CNK_OBJECT **)(epw->exp0 + 0x4);
++    epw->mlwP->objP = ((NJS_CNK_OBJECT*)BH_PGET(epw->exp0 + 0x4));
+     
+     epw->shp_ct = 0.0f;
+     epw->mdflg &= ~2;
+     
+-    if (*(ATR_WORK **)(epw->exp0 + 0x14) != NULL) 
++    if (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)) != NULL) 
+     {
+-        (*(ATR_WORK **)(epw->exp0 + 0x14))->flg = 0;
++        (((ATR_WORK*)BH_PGET(epw->exp0 + 0x14)))->flg = 0;
+     }
+ }
+ 
+diff --git a/src/ps2/veronica/prog/en19.c b/src/ps2/veronica/prog/en19.c
+index 1ca685a5..273fe256 100644
+--- a/src/ps2/veronica/prog/en19.c
++++ b/src/ps2/veronica/prog/en19.c
+@@ -247,7 +247,7 @@ void bhEne19(BH_PWORK* ewP)
+ 
+             if ((sts & 0x20000000))
+             {
+-                fwP->cam_clrP = (R0A_WORK*)bhSetRapEff(310, fwP->e0aP, 8)->free4;
++                fwP->cam_clrP = (R0A_WORK*)bhSetRapEff(310, fwP->e0aP, RAPW(8, fwP->e0aP[0]))->free4;
+             }
+ 
+             if ((sts & 0x10000000))
+@@ -2281,7 +2281,7 @@ static void bhEne19_Mv10(BH_PWORK* ewP, FW_WORK* fwP, int count)
+         bhSetEffSpark(&pos, &dir, -1, 0x40F04000, 0);
+         bhSetEffSpark(&pos, &dir, -1, 0x40F04000, 1);
+         
+-        bhSetRapEff(310, &fwP->e0aP[1], 8);
++        bhSetRapEff(310, &fwP->e0aP[1], RAPW(8, fwP->e0aP[1]));
+         
+         fwP->snd_no = 19;
+     }
+@@ -4288,7 +4288,7 @@ static void bhEne19_PlyDmg052_053(BH_PWORK* plP, FW_WORK* fwP)
+             
+             if (fwP->ewP->type == 1)
+             {
+-                bhSetRapEff(310, &fwP->e0aP[2], 8);
++                bhSetRapEff(310, &fwP->e0aP[2], RAPW(8, fwP->e0aP[2]));
+             }
+                 
+             fwP->snd_no = 9;
+@@ -4822,7 +4822,7 @@ static R0_WK* bhEne19_SetLeftClaw(ML_WORK* mlwP, TY_OBJ_MODE tgt_bas, TY_OBJ_MOD
+     prm.ang[1] = 32768 - objP->ang[1];
+     prm.ang[2] = -objP->ang[2];
+ 
+-    return (R0_WK*)((bhSetRapEff(312, &prm, 9))->free4);
++    return (R0_WK*)((bhSetRapEff(312, &prm, RAPW(9, prm)))->free4);
+ }
+ 
+ // 100% matching!
+@@ -4848,5 +4848,5 @@ static void bhEne19_SetClawPlane(BH_PWORK* ewP, NJS_MATRIX* mtxP, int col, int t
+ 
+     Dat307.mtxP = mtxP;
+ 	
+-    bhSetRapEff(307, &Dat307, 12);
++    bhSetRapEff(307, &Dat307, RAPW(12, Dat307));
+ }
 diff --git a/src/ps2/veronica/prog/en22.c b/src/ps2/veronica/prog/en22.c
-index d7f589e1..8c9a5278 100644
+index d7f589e1..35ab5069 100644
 --- a/src/ps2/veronica/prog/en22.c
 +++ b/src/ps2/veronica/prog/en22.c
 @@ -516,7 +516,11 @@ void bhEne22(BH_PWORK* epw)
@@ -1005,8 +3363,282 @@ index d7f589e1..8c9a5278 100644
      {
          if (plp->mode2 == 0)
          {
+@@ -659,11 +663,11 @@ void bhEne22_ChgDmgMode(BH_PWORK* epw)
+     {
+         if (EXP0_I(0x8) & 0x1000)
+         {
+-            if (((*(O_WRK**)(epw->exp0 + 0x4C))->flg != 0)
+-                && ((*(O_WRK**)(epw->exp0 + 0x4C))->id == 353)
+-                && ((BH_PWORK*)(*(O_WRK**)(epw->exp0 + 0x4C))->lkwkp == epw))
++            if (((((O_WRK*)BH_PGET(epw->exp0 + 0x4C)))->flg != 0)
++                && ((((O_WRK*)BH_PGET(epw->exp0 + 0x4C)))->id == 353)
++                && ((BH_PWORK*)(((O_WRK*)BH_PGET(epw->exp0 + 0x4C)))->lkwkp == epw))
+             {
+-                (*(O_WRK**)(epw->exp0 + 0x4C))->mode0 = 4;
++                (((O_WRK*)BH_PGET(epw->exp0 + 0x4C)))->mode0 = 4;
+             }
+ 
+             if (EXP0_I(0x8) & 0x80000)
+@@ -777,7 +781,7 @@ void bhEne22_CollCheckWall(BH_PWORK* epw)
+         epw->stflg |= 0x100000;
+     }
+ 
+-    EXP0_ATR(17) = bhCheckWallType((NJS_POINT3*)&epw->px, epw->flg, epw->ar, epw->ah);
++    EXP0_ATR_SET(17, bhCheckWallType((NJS_POINT3*)&epw->px, epw->flg, epw->ar, epw->ah));
+ 
+     if (((EXP0_I(0x8) & 0xF) == 0x1) && (epw->flg & 0x10))
+     {
+@@ -1717,11 +1721,11 @@ void bhEne22_MV04(BH_PWORK* epw)
+                 epw->mode2 = 2;
+                 epw->mode3 = 0;
+ 
+-                if (((*(O_WRK**)(epw->exp0 + 0x4C))->flg != 0)
+-                    && ((*(O_WRK**)(epw->exp0 + 0x4C))->id == 353)
+-                    && ((BH_PWORK*)(*(O_WRK**)(epw->exp0 + 0x4C))->lkwkp == epw))
++                if (((((O_WRK*)BH_PGET(epw->exp0 + 0x4C)))->flg != 0)
++                    && ((((O_WRK*)BH_PGET(epw->exp0 + 0x4C)))->id == 353)
++                    && ((BH_PWORK*)(((O_WRK*)BH_PGET(epw->exp0 + 0x4C)))->lkwkp == epw))
+                 {
+-                    (*(O_WRK**)(epw->exp0 + 0x4C))->mode0 = 4;
++                    (((O_WRK*)BH_PGET(epw->exp0 + 0x4C)))->mode0 = 4;
+                 }
+ 
+                 if (EXP0_I(0x8) & 0x80000)
+@@ -2348,7 +2352,7 @@ void bhEne22_SparkEffect(BH_PWORK* epw, int frm)
+         }
+ 
+         EXP0_I(0x18) = 0;
+-        *(O_WRK**)(epw->exp0 + 0x4C) = NULL;
++        BH_PSET(epw->exp0 + 0x4C, NULL);
+     }
+     else if ((frm >= 30) && (frm < 70))
+     {
+@@ -2412,7 +2416,7 @@ void bhEne22_SparkEffect(BH_PWORK* epw, int frm)
+ 
+     if (frm == 11)
+     {
+-        *(O_WRK**)(epw->exp0 + 0x4C) = bhEne22_SetElectricLightEffect(epw);
++        BH_PSET(epw->exp0 + 0x4C, bhEne22_SetElectricLightEffect(epw));
+         bhEne22_SetLight(epw, 4, &ps, 1);
+         EXP0_I(0x8) |= 0x1000;
+     }
+diff --git a/src/ps2/veronica/prog/en23.c b/src/ps2/veronica/prog/en23.c
+index 2a850bcf..d02c5aad 100644
+--- a/src/ps2/veronica/prog/en23.c
++++ b/src/ps2/veronica/prog/en23.c
+@@ -449,7 +449,8 @@ void bhEne23(BH_PWORK* epw)
+ // 99.44% matching
+ void bhEne23_Init(BH_PWORK* epw)
+ {
+-    BH_PWORK** epw2, *ep;    
++    unsigned char* epw2;   /* byte cursor over 4-byte pointer slots */
++    BH_PWORK *ep;    
+     O_WORK* owk;         
+     int i;              
+     NJS_POINT3 p;
+@@ -488,30 +489,30 @@ void bhEne23_Init(BH_PWORK* epw)
+     {
+         epw->exp0 = bhEne_CallocWork(304, 8);  
+ 
+-        epw2 = (BH_PWORK**)&EXP0_C(248);      
++        epw2 = (unsigned char*)&EXP0_C(248);      
+ 
+         for (i = 0; i < 2; i++)               
+         {
+-            *epw2 = bhSetEnemy(&ene23_child, rom->ene_n);
++            BH_PSET(epw2, bhSetEnemy(&ene23_child, rom->ene_n));
+ 
+-            (*epw2)->type = 1;                 
++            ((BH_PWORK*)BH_PGET(epw2))->type = 1;                 
+ 
+-            (*epw2)->lkwkp = (unsigned char*)epw;
+-            (*epw2)->lkono = i;                 
++            ((BH_PWORK*)BH_PGET(epw2))->lkwkp = (unsigned char*)epw;
++            ((BH_PWORK*)BH_PGET(epw2))->lkono = i;                 
+ 
+-            (*epw2)->lox = 0;
+-            (*epw2)->loy = 0;
+-            (*epw2)->loz = 0;
++            ((BH_PWORK*)BH_PGET(epw2))->lox = 0;
++            ((BH_PWORK*)BH_PGET(epw2))->loy = 0;
++            ((BH_PWORK*)BH_PGET(epw2))->loz = 0;
+ 
+-            (*epw2)->mdflg |= 0x1;
++            ((BH_PWORK*)BH_PGET(epw2))->mdflg |= 0x1;
+ 
+             ((unsigned char*)epw->exp0)[i + 256] = BrokenParts[i][(int)(2.0f * (-rand() / -2147483648.0f))];
+ 
+             owk = &epw->mlwP->owP[((unsigned char*)epw->exp0)[i + 256]];
+ 
+-            (*epw2)->mtx = &owk->mtx;
++            ((BH_PWORK*)BH_PGET(epw2))->mtx = &owk->mtx;
+ 
+-            (*epw2++)->exp1 = (unsigned char*)owk;
++            ((BH_PWORK*)BH_PGET(epw2))->exp1 = (unsigned char*)owk; epw2 += 4;
+         }
+ 
+         bhEne_SetCallFunc(bhEne03s, 31);
+@@ -539,7 +540,7 @@ void bhEne23_Init(BH_PWORK* epw)
+     {
+         if (((ep->flg & 0x1)) && (ep->id == 24))
+         {
+-            ((BH_PWORK**)epw->exp0)[32 + EXP0_I(268)] = ep;
++            BH_PSET((char*)epw->exp0 + 4 * (32 + EXP0_I(268)), ep);
+             
+             EXP0_I(268)++;
+ 
+@@ -596,7 +597,7 @@ void bhEne23_Init(BH_PWORK* epw)
+     epw->pyb = epw->py;
+     epw->pzb = epw->pz;
+ 
+-    *(ATR_WORK**)&EXP0_I(96) = bhEne03_GetWall(epw);
++    BH_PSET(&EXP0_I(96), bhEne03_GetWall(epw));
+ 
+     epw->clp_jno[0] = 1;
+     epw->clp_jno[1] = 10;
+@@ -1420,7 +1421,7 @@ void bhEne23_MV05(BH_PWORK* epw)
+             epw->flg |=  0x4000000;
+             epw->flg &= ~0x400000;
+ 
+-            *(ATR_WORK**)&EXP0_I(96) = bhEne03_GetWall(epw);
++            BH_PSET(&EXP0_I(96), bhEne03_GetWall(epw));
+             
+             EXP0_F(108) = 20.0f;
+         }
+@@ -1728,7 +1729,7 @@ void bhEne23_MV11(BH_PWORK* epw)
+ 
+             epw->py += 1.0f;
+ 
+-            *(ATR_WORK**)&EXP0_I(96) = bhEne03_GetWall(epw);
++            BH_PSET(&EXP0_I(96), bhEne03_GetWall(epw));
+             
+             epw->py = ((ATR_WORK*)EXP0_I(96))->py;
+ 
+@@ -1789,7 +1790,7 @@ void bhEne23_MV12(BH_PWORK* epw)
+ 
+     bhEne03_MakeMatrix(epw);
+ 
+-    *(ATR_WORK**)&EXP0_I(96) = bhEne03_GetWall(epw);
++    BH_PSET(&EXP0_I(96), bhEne03_GetWall(epw));
+ 
+     epw->mode0 = 1;
+     epw->mode1 = 1;
+@@ -3175,7 +3176,7 @@ void bhEne23_CollisionLine(BH_PWORK* epw)
+ 		{
+ 			epw->flg |= 0x4000000;
+ 
+-			*(ATR_WORK**)&EXP0_I(96) = bhEne03_GetWall(epw);
++			BH_PSET(&EXP0_I(96), bhEne03_GetWall(epw));
+ 		}
+     }
+ }
+@@ -3225,7 +3226,7 @@ int bhEne23_CheckClimbWall(BH_PWORK* epw, int flg)
+ 
+     if (((hp != NULL) && (hp->prm0 == 23) && (hp->prm1 < 4)) && (ang == (short)((-(hp->prm1 & 0x3)) * 16384)))
+     {
+-        *(ATR_WORK**)&EXP0_I(260) = hp;
++        BH_PSET(&EXP0_I(260), hp);
+     
+         epw->xn = epw->px;
+         epw->yn = epw->py;
+@@ -3274,7 +3275,7 @@ int bhEne23_CheckClimbWall(BH_PWORK* epw, int flg)
+                 pos2.y = pos.y + 999.0f;
+                 pos2.z = pos.z;
+     
+-                *(ATR_WORK**)&EXP0_I(100) = bhCollisionCheckLine(&pos, &pos2);
++                BH_PSET(&EXP0_I(100), bhCollisionCheckLine(&pos, &pos2));
+     
+                 return root + 1;
+             }
+@@ -3518,9 +3519,9 @@ void bhEne23_LegBreak(BH_PWORK* epw)
+         owk[1].flg |= 0x2;
+         owk[2].flg |= 0x2;
+ 
+-        ((BH_PWORK**)epw->exp0)[62 + i]->mode0 = 1;
+-        ((BH_PWORK**)epw->exp0)[62 + i]->mode2 = 0;
+-        ((BH_PWORK**)epw->exp0)[62 + i]->mode3 = 0;
++        ((BH_PWORK*)BH_PGET((char*)epw->exp0 + 4 * (62 + i)))->mode0 = 1;
++        ((BH_PWORK*)BH_PGET((char*)epw->exp0 + 4 * (62 + i)))->mode2 = 0;
++        ((BH_PWORK*)BH_PGET((char*)epw->exp0 + 4 * (62 + i)))->mode3 = 0;
+ 
+         epw->mdflg |= 0x20;
+ 
+@@ -3535,34 +3536,34 @@ void bhEne23_LegBreak(BH_PWORK* epw)
+ void bhEne23_InitChild(BH_PWORK* epw)
+ {
+     int i;          
+-    BH_PWORK** epw2; 
++    unsigned char* epw2;   /* byte cursor over 4-byte pointer slots */ 
+     int ang;         
+     NJS_VECTOR v;    
+ 	float spd;      
+     float px, py, pz; // not from DWARF
+ 
+-    epw2 = (BH_PWORK**)&EXP0_C(128);
++    epw2 = (unsigned char*)&EXP0_C(128);
+ 
+-    for (i = 0; i < EXP0_I(268); i++, epw2++)
++    for (i = 0; i < EXP0_I(268); i++, epw2 += 4)
+     {
+-        if (((((BH_PWORK**)epw->exp0)[32 + i]->flg & 0x1)) && (((BH_PWORK**)epw->exp0)[32 + i]->id == 24))
++        if (((((BH_PWORK*)BH_PGET((char*)epw->exp0 + 4 * (32 + i)))->flg & 0x1)) && (((BH_PWORK*)BH_PGET((char*)epw->exp0 + 4 * (32 + i)))->id == 24))
+         {
+-            (*epw2)->mode0 = 1;
+-            (*epw2)->mode1 = 1;
+-            (*epw2)->mode2 = 5;
+-            (*epw2)->mode3 = 0;
++            ((BH_PWORK*)BH_PGET(epw2))->mode0 = 1;
++            ((BH_PWORK*)BH_PGET(epw2))->mode1 = 1;
++            ((BH_PWORK*)BH_PGET(epw2))->mode2 = 5;
++            ((BH_PWORK*)BH_PGET(epw2))->mode3 = 0;
+ 
+-            (*epw2)->mdflg &= ~0x1;
++            ((BH_PWORK*)BH_PGET(epw2))->mdflg &= ~0x1;
+ 
+             ang = 65536.0f * (-rand() / -2147483648.0f);
+ 
+             spd = 0.5f + (1.2f * (-rand() / -2147483648.0f));
+ 
+-            (*epw2)->ay = ang;
++            ((BH_PWORK*)BH_PGET(epw2))->ay = ang;
+ 
+-            (*epw2)->xn = spd * -njSin(ang);
+-            (*epw2)->yn = 0.5f + (1.5f * (-rand() / -2147483648.0f));
+-            (*epw2)->zn = spd * -njCos(ang);
++            ((BH_PWORK*)BH_PGET(epw2))->xn = spd * -njSin(ang);
++            ((BH_PWORK*)BH_PGET(epw2))->yn = 0.5f + (1.5f * (-rand() / -2147483648.0f));
++            ((BH_PWORK*)BH_PGET(epw2))->zn = spd * -njCos(ang);
+ 
+             v.x = 0;
+             v.y = 5.0f + (10.0f * (-rand() / -2147483648.0f));
+@@ -3576,9 +3577,9 @@ void bhEne23_InitChild(BH_PWORK* epw)
+ 
+             spd = 3.0f + (3.0f * (-rand() / -2147483648.0f));
+ 
+-            (*epw2)->px = (*epw2)->pxb = px - (spd * njSin(ang));
+-            (*epw2)->py = (*epw2)->pyb = py;
+-            (*epw2)->pz = (*epw2)->pzb = pz - (spd * njCos(ang));
++            ((BH_PWORK*)BH_PGET(epw2))->px = ((BH_PWORK*)BH_PGET(epw2))->pxb = px - (spd * njSin(ang));
++            ((BH_PWORK*)BH_PGET(epw2))->py = ((BH_PWORK*)BH_PGET(epw2))->pyb = py;
++            ((BH_PWORK*)BH_PGET(epw2))->pz = ((BH_PWORK*)BH_PGET(epw2))->pzb = pz - (spd * njCos(ang));
+         }
+     }
+ }
+diff --git a/src/ps2/veronica/prog/en25.c b/src/ps2/veronica/prog/en25.c
+index 0499af7a..6f7ca330 100644
+--- a/src/ps2/veronica/prog/en25.c
++++ b/src/ps2/veronica/prog/en25.c
+@@ -55,7 +55,7 @@ void bhEne25_Init(BH_PWORK* epw)
+     if (epw->exp0 == NULL)
+     {
+         epw->exp0 = bhEne_CallocWork(0xC, 0x8);
+-        EXP0_ATR(0) = &sys->mwalp[sys->mwal_n++];
++        EXP0_ATR_SET(0, &sys->mwalp[sys->mwal_n++]);
+         EXP0_ATR(0)->flg |= 0x81;
+         EXP0_ATR(0)->type = 0;
+         EXP0_ATR(0)->flr_no = 0;
 diff --git a/src/ps2/veronica/prog/en26.c b/src/ps2/veronica/prog/en26.c
-index 17cfeb72..22fd1274 100644
+index 17cfeb72..21d9a5c5 100644
 --- a/src/ps2/veronica/prog/en26.c
 +++ b/src/ps2/veronica/prog/en26.c
 @@ -891,6 +891,17 @@ void bhEne26_DmgCheckType00(BH_PWORK* epw, EN26_WPNDAMAGE_WORK* wp_tbl)
@@ -1027,6 +3659,15 @@ index 17cfeb72..22fd1274 100644
      if (act == 0)
      {
          if (!(EXP0_I(0x40) & 0x8000000))
+@@ -1532,7 +1543,7 @@ void bhEne26_CollCheckWall(BH_PWORK* epw)
+     ps.y = plp->py;
+     ps.z = plp->pz;
+     
+-    *(ATR_WORK **)(epw->exp0 + 0x70) = bhCollisionCheckLine((NJS_VECTOR*)&epw->px, &ps);
++    BH_PSET(epw->exp0 + 0x70, bhCollisionCheckLine((NJS_VECTOR*)&epw->px, &ps));
+ 
+     t = EXP0_I(0x40) & 0xF;
+     
 diff --git a/src/ps2/veronica/prog/en29.c b/src/ps2/veronica/prog/en29.c
 index eb397a8d..a8a1fc25 100644
 --- a/src/ps2/veronica/prog/en29.c
@@ -1258,10 +3899,30 @@ index 1449f0dc..f7deb7a8 100644
      }
  }
 diff --git a/src/ps2/veronica/prog/event.c b/src/ps2/veronica/prog/event.c
-index ad87e6c3..3a270360 100644
+index ad87e6c3..a851c372 100644
 --- a/src/ps2/veronica/prog/event.c
 +++ b/src/ps2/veronica/prog/event.c
-@@ -390,6 +390,8 @@ void bhControlEvent()
+@@ -360,10 +360,19 @@ void bhInitEvent()
+     
+     bhControlEnemy();
+ 
++#if defined(TARGET_PC) && defined(__LP64__)
++    /* LP64: rom->evtp is the disc EVT block itself (lp64_realize.c), whose first three words are
++       32-bit offsets from it; EVT_WORK's fields are pointer-sized here, so read the words */
++    bhScdPtr = (unsigned short*)(uintptr_t)((const unsigned int*)rom->evtp)[0];
++    bhScd2Ptr = (unsigned short*)(uintptr_t)((const unsigned int*)rom->evtp)[1];
++
++    bhEvdPtr = (unsigned char*)(uintptr_t)((const unsigned int*)rom->evtp)[2];
++#else
+     bhScdPtr = rom->evtp->scd0;
+     bhScd2Ptr = rom->evtp->scd1;
+     
+     bhEvdPtr = (unsigned char*)rom->evtp->evd;
++#endif
+     
+     bhCetask = bhEtask;
+     
+@@ -390,6 +399,8 @@ void bhControlEvent()
  #ifdef TARGET_PC
      pc_unlock_scd1(0);   /* F2 cheat "Unlock all": a key's use spot sees the key used, as from the item screen (pc/glue/cheat_glue.c) */
      
@@ -1270,7 +3931,7 @@ index ad87e6c3..3a270360 100644
      if (coop_on)
      {
          pc_detector_scd1(); /* co-op rule "Metal detector: Skipped": the empty security boxes of 0/9 rest (pc/glue/detector_glue.c) */
-@@ -1337,6 +1339,12 @@ unsigned int bhArmsItemChange()
+@@ -1337,6 +1348,12 @@ unsigned int bhArmsItemChange()
      
      bhScePtr++;
      
@@ -1283,7 +3944,7 @@ index ad87e6c3..3a270360 100644
      plp->wpnr_no = v0;
      
      sys->ply_wno[sys->ply_id] = v0;
-@@ -1541,9 +1549,22 @@ unsigned int bhVoiceOn()
+@@ -1541,9 +1558,22 @@ unsigned int bhVoiceOn()
      }
      
      bhCetask->mode2 = 1;
@@ -1308,7 +3969,7 @@ index ad87e6c3..3a270360 100644
      return 1;
  }
  
-@@ -3138,6 +3159,19 @@ unsigned int bhWeaponSeCall()
+@@ -3138,6 +3168,19 @@ unsigned int bhWeaponSeCall()
  		enep = &rom->enep[v7];
  		e_ep = &ene[enep->wrk_no];
  
@@ -1328,7 +3989,7 @@ index ad87e6c3..3a270360 100644
  		if (v2 == 0) 
  		{
  			if (WpnTab[plp->wpnr_no].seno0 != 0) 
-@@ -3156,6 +3190,7 @@ unsigned int bhWeaponSeCall()
+@@ -3156,6 +3199,7 @@ unsigned int bhWeaponSeCall()
  			
  			bhSetGunFire(e_ep, v3, v1, v2, v6);
  		}
@@ -1336,7 +3997,7 @@ index ad87e6c3..3a270360 100644
  
  		break;
  	case 2:
-@@ -3458,9 +3493,12 @@ unsigned int bhLipSet()
+@@ -3458,9 +3502,12 @@ unsigned int bhLipSet()
      pp = &ene[enep->wrk_no];
      
      ((int*)pp->exp0)[4] = v0;
@@ -1351,7 +4012,7 @@ index ad87e6c3..3a270360 100644
      return 1;
  }
  
-@@ -8782,6 +8820,17 @@ unsigned int bhPlItemChangeM()
+@@ -8782,6 +8829,17 @@ unsigned int bhPlItemChangeM()
      
      v1 = *bhScePtr;
      
@@ -1369,7 +4030,7 @@ index ad87e6c3..3a270360 100644
      bhScePtr += 2;
  
      for (cnt = (sys->ply_id * 16) + 2; cnt < ((sys->ply_id * 16) + 12); cnt++) 
-@@ -13039,7 +13088,16 @@ int Event_init(BH_SCEWORK* a0, unsigned int evt_id)
+@@ -13039,7 +13097,16 @@ int Event_init(BH_SCEWORK* a0, unsigned int evt_id)
      *(short*)&a0->mode0 = 0;
      
      a0->data = (unsigned char*)rom->evtp;
@@ -1387,7 +4048,7 @@ index ad87e6c3..3a270360 100644
      a0->loop = -1;
      
 diff --git a/src/ps2/veronica/prog/face_bh.c b/src/ps2/veronica/prog/face_bh.c
-index 7da2bf4d..260855f7 100644
+index 7da2bf4d..396bb832 100644
 --- a/src/ps2/veronica/prog/face_bh.c
 +++ b/src/ps2/veronica/prog/face_bh.c
 @@ -830,6 +830,28 @@ void _fmCnkCalcMuscle(MASK_WORK* fm)
@@ -1704,6 +4365,33 @@ index 7da2bf4d..260855f7 100644
  #endif
              
              tang++; 
+@@ -1620,7 +1836,7 @@ void _fmCnkCalcNormal(MASK_WORK* fm)
+     NJS_POINT3* dvp1, *dnp1;  
+     NJS_POINT3 norm;   
+     VLIST_WORK* list;  
+-    NJS_POINT3** nvp;  
++    unsigned int* nvp;   /* 32-bit slots: _fmCnkSetFace relocates them in place as 32-bit addresses */
+     unsigned int vofs; 
+ 
+     dvp = (float*)&fm->dst->vlist[fm->vtop];
+@@ -1628,7 +1844,7 @@ void _fmCnkCalcNormal(MASK_WORK* fm)
+     
+     list = fm->vlist;
+     
+-    nvp = (NJS_POINT3**)fm->nvpt;
++    nvp = (unsigned int*)fm->nvpt;
+     
+     vofs = fm->vofs;
+     
+@@ -1643,7 +1859,7 @@ void _fmCnkCalcNormal(MASK_WORK* fm)
+         
+         for (i = 0; i++ < list->nvnum; )
+         {
+-            njGetPlaneNormal2(dvp1, nvp[0], nvp[1], &norm);
++            njGetPlaneNormal2(dvp1, (NJS_POINT3*)(uintptr_t)nvp[0], (NJS_POINT3*)(uintptr_t)nvp[1], &norm);
+             
+             njUnitVector(&norm);
+             
 diff --git a/src/ps2/veronica/prog/fileview.c b/src/ps2/veronica/prog/fileview.c
 index 03b56852..73add66e 100644
 --- a/src/ps2/veronica/prog/fileview.c
@@ -2766,7 +5454,7 @@ index afa57305..95b1404b 100644
  #endif
  }
 diff --git a/src/ps2/veronica/prog/ps2_NaMath.c b/src/ps2/veronica/prog/ps2_NaMath.c
-index 8eb43e66..00eb5a3e 100644
+index 8eb43e66..227d0eed 100644
 --- a/src/ps2/veronica/prog/ps2_NaMath.c
 +++ b/src/ps2/veronica/prog/ps2_NaMath.c
 @@ -242,6 +242,53 @@ void njSinCos(int lAngle, float* sin, float* cos)
@@ -2831,6 +5519,81 @@ index 8eb43e66..00eb5a3e 100644
  }
  
  // 100% matching! 
+@@ -442,12 +490,20 @@ void	njLinear(Float *idata, Float *odata, NJS_SPLINE *attr, Float frame)
+ 	    op3.f[0] = (float)(frame);
+ 	    R8.sd[0] = (int32_t)(op0.w[0] + (uint32_t)(12));
+ 	    R9.sd[0] = (int32_t)(ee_f2u(op3.f[0]));
++	    #ifdef __LP64__
++	    /* LP64: idata / odata are the caller's buffers (host addresses), which the emulated 32-bit EE
++	       register view cannot hold: the same unaligned 64-bit + 32-bit accesses through the real pointer */
++	    { const unsigned char* ip_ = (const unsigned char*)idata; int32_t sw_;
++	      memcpy(&R10.d[0], ip_ + 0, 8);  memcpy(&sw_, ip_ + 8, 4);  R11.sd[0] = sw_;
++	      memcpy(&R12.d[0], ip_ + 12, 8); memcpy(&sw_, ip_ + 20, 4); R13.sd[0] = sw_; }
++	    #else
+ 	    R10.d[0] = ee_ldl(R10.d[0], (op0.w[0] + (uint32_t)(7)));
+ 	    R10.d[0] = ee_ldr(R10.d[0], (op0.w[0] + (uint32_t)(0)));
+ 	    R11.sd[0] = EE_LW((op0.w[0] + (uint32_t)(8)));
+ 	    R12.d[0] = ee_ldl(R12.d[0], (R8.w[0] + (uint32_t)(7)));
+ 	    R12.d[0] = ee_ldr(R12.d[0], (R8.w[0] + (uint32_t)(0)));
+ 	    R13.sd[0] = EE_LW((R8.w[0] + (uint32_t)(8)));
++	    #endif
+ 	    ee_pcpyld(&R10, &R11, &R10);
+ 	    ee_pcpyld(&R12, &R13, &R12);
+ 	    vu_load_vf(10, &R10);
+@@ -458,9 +514,14 @@ void	njLinear(Float *idata, Float *odata, NJS_SPLINE *attr, Float frame)
+ 	    vu_upper(U_ADD, 14, 4, 12, 10, BC_NONE);
+ 	    vu_store_vf(&R10, 4);
+ 	    ee_pcpyud(&R11, &R10, &R10);
++	    #ifdef __LP64__
++	    { unsigned char* op_ = (unsigned char*)odata; uint32_t hi_ = (uint32_t)R11.d[0];   /* the same 8 + 4 byte stores */
++	      memcpy(op_, &R10.d[0], 8); memcpy(op_ + 8, &hi_, 4); }
++	    #else
+ 	    ee_sdl((op1.w[0] + (uint32_t)(7)), R10.d[0]);
+ 	    ee_sdr((op1.w[0] + (uint32_t)(0)), R10.d[0]);
+ 	    EE_SW((op1.w[0] + (uint32_t)(8)), R11.d[0]);
++	    #endif
+ 	}
+ #endif
+ }
+@@ -595,6 +656,15 @@ void	njOverhauserSpline(Float *idata, Float *odata, NJS_SPLINE *attr, Float fram
+ 	    vu_upper(U_SUB, 8, 11, 6, 5, BC_NONE);
+ 	    R9.sd[0] = (int32_t)(ee_f2u(op4.f[0]));
+ 	    vu_load_vf(12, &R9);
++	    #ifdef __LP64__
++	    /* LP64: idata / odata are the caller's buffers (host addresses), which the emulated 32-bit EE
++	       register view cannot hold: the same unaligned 64-bit + 32-bit accesses through the real pointer */
++	    { const unsigned char* ip_ = (const unsigned char*)idata; int32_t sw_;
++	      memcpy(&R8.d[0], ip_ + 0, 8);   memcpy(&sw_, ip_ + 8, 4);  R9.sd[0] = sw_;
++	      memcpy(&R10.d[0], ip_ + 12, 8); memcpy(&sw_, ip_ + 20, 4); R11.sd[0] = sw_;
++	      memcpy(&R12.d[0], ip_ + 24, 8); memcpy(&sw_, ip_ + 32, 4); R13.sd[0] = sw_;
++	      memcpy(&R14.d[0], ip_ + 36, 8); memcpy(&sw_, ip_ + 44, 4); R15.sd[0] = sw_; }
++	    #else
+ 	    R8.d[0] = ee_ldl(R8.d[0], (op0.w[0] + (uint32_t)(7)));
+ 	    R8.d[0] = ee_ldr(R8.d[0], (op0.w[0] + (uint32_t)(0)));
+ 	    R9.sd[0] = EE_LW((op0.w[0] + (uint32_t)(8)));
+@@ -607,6 +677,7 @@ void	njOverhauserSpline(Float *idata, Float *odata, NJS_SPLINE *attr, Float fram
+ 	    R14.d[0] = ee_ldl(R14.d[0], (op0.w[0] + (uint32_t)(43)));
+ 	    R14.d[0] = ee_ldr(R14.d[0], (op0.w[0] + (uint32_t)(36)));
+ 	    R15.sd[0] = EE_LW((op0.w[0] + (uint32_t)(44)));
++	    #endif
+ 	    ee_pcpyld(&R8, &R9, &R8);
+ 	    ee_pcpyld(&R10, &R11, &R10);
+ 	    ee_pcpyld(&R12, &R13, &R12);
+@@ -625,9 +696,14 @@ void	njOverhauserSpline(Float *idata, Float *odata, NJS_SPLINE *attr, Float fram
+ 	    vu_upper(U_MUL, 14, 4, 4, 12, BC_X);
+ 	    vu_store_vf(&R10, 4);
+ 	    ee_pcpyud(&R11, &R10, &R10);
++	    #ifdef __LP64__
++	    { unsigned char* op_ = (unsigned char*)odata; uint32_t hi_ = (uint32_t)R11.d[0];   /* the same 8 + 4 byte stores */
++	      memcpy(op_, &R10.d[0], 8); memcpy(op_ + 8, &hi_, 4); }
++	    #else
+ 	    ee_sdl((op1.w[0] + (uint32_t)(7)), R10.d[0]);
+ 	    ee_sdr((op1.w[0] + (uint32_t)(0)), R10.d[0]);
+ 	    EE_SW((op1.w[0] + (uint32_t)(8)), R11.d[0]);
++	    #endif
+ 	}
+ #endif
+ }
 diff --git a/src/ps2/veronica/prog/ps2_NaMatrix.c b/src/ps2/veronica/prog/ps2_NaMatrix.c
 index 4d65ad4b..b0b0899b 100644
 --- a/src/ps2/veronica/prog/ps2_NaMatrix.c
@@ -3794,7 +6557,7 @@ index 27eae686..0ef7f358 100644
  }
  
 diff --git a/src/ps2/veronica/prog/ps2_Vu1Strip.c b/src/ps2/veronica/prog/ps2_Vu1Strip.c
-index 11f7aae1..5381c91f 100644
+index 11f7aae1..a4336718 100644
 --- a/src/ps2/veronica/prog/ps2_Vu1Strip.c
 +++ b/src/ps2/veronica/prog/ps2_Vu1Strip.c
 @@ -430,6 +430,20 @@ int _Clip_ViewVolume(float* clip, float local_clip[4], float* vertex)
@@ -3854,6 +6617,76 @@ index 11f7aae1..5381c91f 100644
  #endif
  
      return ret;
+@@ -2863,6 +2892,61 @@ void vu1DrawTriangleStripTransDoubleI(unsigned long ulType, VU1_STRIP_BUF* pS, u
+             l_002D5AE0:
+             sw           t2, SCISSOR.rotflag(%0)    
+         " : : "r"(&scissorflip), "r"(&clipflag), "r"(pS), "r"(pP) : "$t0", "$t1", "$t2", "$t3", "$t4", "$t5", "memory");
++#else
++#ifdef __LP64__
++        /* asm2c on LP64: pS is the caller's stack strip buffer and clipflag a local; those host
++           addresses do not survive the emulated 32-bit EE register view, so the strip, prim and
++           clip-flag accesses go through the real pointers. scissorflip is a game global (window
++           address), the VU sequence is unchanged. */
++        { /* asm2c */
++            ee_reg R8 = {{0}}, R9 = {{0}}, R10 = {{0}}, R11 = {{0}}, R12 = {{0}}, R13 = {{0}};
++            const ee_reg ee_zero = {{0}};
++            ee_reg op0 = {{0}};
++            ee_reg op1 = {{0}};
++            ee_reg op2 = {{0}};
++            ee_reg op3 = {{0}};
++            op0.sd[0] = (int32_t)(uintptr_t)(&scissorflip);
++            op1.sd[0] = (int32_t)(uintptr_t)(&clipflag);
++            op2.sd[0] = (int32_t)(uintptr_t)(pS);
++            op3.sd[0] = (int32_t)(uintptr_t)(pP);
++            vu_load_vf(4, ((const char*)pS + offsetof(VU1_STRIP_BUF, fSx)));
++            vu_load_vf(5, ((const char*)pS + offsetof(VU1_STRIP_BUF, fU)));
++            vu_load_vf(6, ((const char*)pS + offsetof(VU1_STRIP_BUF, fVx)));
++            vu_upper(U_MUL, 12, 5, 5, 4, BC_Z);
++            vu_upper(U_ADD, 2, 5, 0, 4, BC_NONE);
++            vu_upper(U_SUB, 1, 5, 5, 5, BC_NONE);
++            vu_store_vf(((char*)pP + offsetof(VU1_PRIM_BUF, fS)), 5);
++            vu_load_vf(8, ((const char*)pS + offsetof(VU1_STRIP_BUF, fVx)));
++            vu_load_vf(10, ((const char*)pS + offsetof(VU1_STRIP_BUF, fU)));
++            vu_load_vf(9, ((char*)pP + offsetof(VU1_PRIM_BUF, fR)));
++            vu_upper(U_MULA, 15, 0, 24, 8, BC_X);
++            vu_upper(U_MADDA, 15, 0, 25, 8, BC_Y);
++            vu_upper(U_MADDA, 15, 0, 26, 8, BC_Z);
++            vu_upper(U_MADD, 15, 11, 27, 0, BC_W);
++            vu_clipw(11, 11);
++            vu_move(15, 7, 6);
++            vu_upper(U_ADD, 12, 7, 4, 16, BC_NONE);
++            vu_store_vf(((char*)pP + offsetof(VU1_PRIM_BUF, fX)), 7);
++            R9.sd[0] = (int32_t)clipflag;
++            R8.sd[0] = (int32_t)(vu_cfc2(18));
++            R8.d[0] = R8.d[0] & (uint64_t)(uint16_t)(63);
++            R9.d[0] = R8.d[0] | R9.d[0];
++            clipflag = (unsigned int)R9.d[0];
++            R10.sd[0] = EE_LW((op0.w[0] + (uint32_t)(offsetof(SCISSOR, rotflag))));
++            R11.sd[0] = (int32_t)(R10.w[0] * (uint32_t)(64));
++            R10.sd[0] = (int32_t)(R10.w[0] + (uint32_t)(1));
++            R12.sd[0] = (int32_t)(R11.w[0] + op0.w[0]);
++            R10.d[0] = R10.d[0] & (uint64_t)(uint16_t)(3);
++            vu_store_vf(EE_PTR((R12.w[0] + (uint32_t)(offsetof(SCISSOR, triangle.node[0].vertex)))), 8);
++            vu_store_vf(EE_PTR((R12.w[0] + (uint32_t)(offsetof(SCISSOR, triangle.node[0].color)))), 9);
++            vu_store_vf(EE_PTR((R12.w[0] + (uint32_t)(offsetof(SCISSOR, triangle.node[0].texUV)))), 10);
++            vu_store_vf(EE_PTR((R12.w[0] + (uint32_t)(offsetof(SCISSOR, triangle.node[0].clipV)))), 11);
++            R13.sd[0] = (int32_t)(R10.w[0] + (uint32_t)(-3));
++            if (R13.sd[0] < 0) goto l_002D5AE0;
++            R10.sd[0] = (int32_t)(0u - ee_zero.w[0]);
++        l_002D5AE0:;
++            EE_SW((op0.w[0] + (uint32_t)(offsetof(SCISSOR, rotflag))), R10.d[0]);
++        }
+ #else
+         { /* asm2c */
+             ee_reg R8 = {{0}}, R9 = {{0}}, R10 = {{0}}, R11 = {{0}}, R12 = {{0}}, R13 = {{0}};
+@@ -2913,6 +2997,7 @@ void vu1DrawTriangleStripTransDoubleI(unsigned long ulType, VU1_STRIP_BUF* pS, u
+         l_002D5AE0:;
+             EE_SW((op0.w[0] + (uint32_t)(offsetof(SCISSOR, rotflag))), R10.d[0]);
+         }
++#endif
+ #endif
+     
+         flg |= _Check_DisplayAreaPoint((NJS_VECTOR*)&pP->fX); 
 diff --git a/src/ps2/veronica/prog/ps2_dummy.c b/src/ps2/veronica/prog/ps2_dummy.c
 index c7463508..e940ac0a 100644
 --- a/src/ps2/veronica/prog/ps2_dummy.c

@@ -36,7 +36,7 @@
 #if ASHFORD_LP64
 
 #define LP64_ROOM_ARENA    (10u << 20)   /* room models, CUT/LGT/EVC arrays, EVT view */
-#define LP64_SESSION_ARENA (6u << 20)    /* player, weapons, item-view models, motions */
+#define LP64_SESSION_ARENA (16u << 20)   /* player, weapons, item-view models, motions, swapped (appearance/cast) models */
 
 static unsigned char lp64_room_arena[LP64_ROOM_ARENA] __attribute__((aligned(64)));
 static unsigned char lp64_session_arena[LP64_SESSION_ARENA] __attribute__((aligned(64)));
@@ -46,10 +46,14 @@ static unsigned char* lp64_base[LP64_SLOT_COUNT];
 static const unsigned char* lp64_limit[LP64_SLOT_COUNT];
 
 /* Deduplication of unpacked Ninja binaries by disc base (rooms realize the
-   same model set once per enemy/object/item that shares it). */
-#define LP64_DEDUP_MAX 128
+   same model set once per enemy/object/item that shares it). The disc base alone is not an identity:
+   equipped weapons and items are copied into the same fixed buffers with different contents, so an
+   entry also carries a signature of the structure it unpacked (header, object/motion table, model
+   headers, texture table) and only a hit on both is reused. */
+#define LP64_DEDUP_MAX 2048   /* RM_0020 alone needs well over 128 distinct binaries; 2 slots x 2048 x 40 bytes */
 typedef struct {
     const void* bin;
+    uint32_t sig;  /* lp64_ml_sig / lp64_mn_sig of the content unpacked */
     void* objP;    /* unpacked NJS_CNK_OBJECT array (ML) */
     void* texP;    /* unpacked NJS_TEXLIST (ML) */
     void* md2P;    /* unpacked NJS_MDATA2_MOD array (MN) */
@@ -81,22 +85,29 @@ static unsigned char* lp64_alloc(int slot, size_t size, size_t align)
     return p;
 }
 
-static const LP64_DEDUP* lp64_dedup_find(int slot, const void* bin)
+static const LP64_DEDUP* lp64_dedup_find(int slot, const void* bin, uint32_t sig)
 {
     int i;
     for (i = 0; i < lp64_dedup_n[slot]; i++)
-        if (lp64_dedup[slot][i].bin == bin) return &lp64_dedup[slot][i];
+        if (lp64_dedup[slot][i].bin == bin && lp64_dedup[slot][i].sig == sig) return &lp64_dedup[slot][i];
     return 0;
 }
 
-static LP64_DEDUP* lp64_dedup_add(int slot, const void* bin)
+static LP64_DEDUP* lp64_dedup_add(int slot, const void* bin, uint32_t sig)
 {
     LP64_DEDUP* e;
     if (lp64_dedup_n[slot] >= LP64_DEDUP_MAX)
-        host_fatal("lp64 dedup table exhausted (slot %d)\n", slot);
+        return 0;   /* full: this unpack is simply not shared (correct, only the arena pays); never fatal */
     e = &lp64_dedup[slot][lp64_dedup_n[slot]++];
     e->bin = bin;
+    e->sig = sig;
     return e;
+}
+
+static uint32_t lp64_fnv(uint32_t h, const unsigned char* p, size_t n)
+{
+    while (n--) { h ^= *p++; h *= 16777619u; }
+    return h;
 }
 
 void lp64_reset(int slot)
@@ -116,11 +127,14 @@ void lp64_arena_bounds(int slot, const void** lo, const void** hi)
 
 int lp64_is_on(void) { return 1; }
 
+static size_t lp64_slot_free(int slot) { lp64_arena_init(); return (size_t)(lp64_limit[slot] - lp64_bump[slot]); }
+
 #else /* 32-bit host: zero-cost pass-through */
 
 void lp64_reset(int slot) { (void)slot; }
 void lp64_arena_bounds(int slot, const void** lo, const void** hi) { (void)slot; *lo = 0; *hi = 0; }
 int  lp64_is_on(void) { return 0; }
+static size_t lp64_slot_free(int slot) { (void)slot; return (size_t)-1; }
 
 #endif
 
@@ -212,7 +226,6 @@ static EVC_WORK* lp64_evc_unpack(const unsigned char* disc, unsigned count)
 int lp64_room_rom(ROM_WORK* rom, const unsigned char* rdtp)
 {
     const unsigned char* disc = rdtp + rd32(rdtp + 16);   /* &rdtp[byte offset] */
-    EVT_WORK* evt;
     unsigned cut_n, lgt_n, evc_n;
     unsigned i;
 
@@ -286,14 +299,14 @@ int lp64_room_rom(ROM_WORK* rom, const unsigned char* rdtp)
     }
     if (evc_n < 0x1000u) rom->evcp = lp64_evc_unpack((const unsigned char*)rom->evcp, evc_n);
 
-    /* EVT block: {scd0, scd1, evd} used directly as window pointers, the
-       words after them per-event byte offsets (event.c Event_init). */
-    lp64_evt_disc = (const unsigned char*)rom->evtp;
-    evt = (EVT_WORK*)lp64_alloc(LP64_SLOT_ROOM, sizeof(EVT_WORK), 8);
-    evt->scd0 = (unsigned short*)(uintptr_t)rd32(lp64_evt_disc);
-    evt->scd1 = (unsigned short*)(uintptr_t)rd32(lp64_evt_disc + 4);
-    evt->evd = (unsigned short*)(uintptr_t)rd32(lp64_evt_disc + 8);
-    rom->evtp = evt;
+    /* EVT block: bhSetRoom (room.c) overwrites rom->evtp after the ROM_WORK copy with
+       &rdtp[word at rdtp + 28]; the ROM_WORK's own evtp word is not the EVT block (on retail rooms
+       it points elsewhere). The script interpreter, Event_init and the glue (biorand, cast, cheat,
+       enemyopt) all treat rom->evtp as the block's base address: its first three words {scd0,
+       scd1, evd} are byte offsets from it (read as 32-bit words by bhInitEvent on LP64, where
+       EVT_WORK's fields are pointer-sized), the words after them per-event offsets (Event_init). */
+    lp64_evt_disc = (const unsigned char*)reloff(rdtp, rd32(rdtp + 28));
+    rom->evtp = (EVT_WORK*)lp64_evt_disc;
     return 1;
 }
 
@@ -395,6 +408,44 @@ static NJS_MODEL* lp64_bsc_model_unpack(const unsigned char* mdisc, const unsign
     return m;
 }
 
+/* What an ML unpack is built from: the 16-byte header, the object table, each object's model header
+   and the texture table. The unpacked trees are fully determined by these bytes (vertex / strip data
+   stay in the disc buffer, reached by pointer), so equal signatures mean an equal unpack. */
+static uint32_t lp64_ml_sig(const unsigned char* bin)
+{
+    uint32_t h = 2166136261u;
+    uint32_t status = bin[3], obj_num = rd16(bin + 6), tex_off = rd32(bin + 8), obj_off = rd32(bin + 12);
+    const unsigned char* dat = bin + rd16(bin + 4);
+    h = lp64_fnv(h, bin, 16);
+    if (obj_off != 0xFFFFFFFFu) {
+        uint32_t i;
+        h = lp64_fnv(h, dat + obj_off, (size_t)obj_num * LP64_CNKOBJ_DISC);
+        for (i = 0; i < obj_num; i++) {
+            uint32_t v = rd32(dat + obj_off + i * LP64_CNKOBJ_DISC + 4);
+            if (v != 0xFFFFFFFFu) h = lp64_fnv(h, dat + v, (status & 0x80) ? LP64_CNKMDL_DISC : LP64_MODEL_DISC);
+        }
+    }
+    if (tex_off != 0xFFFFFFFFu) {
+        const unsigned char* tdisc = dat + tex_off;
+        uint32_t nb = rd32(tdisc + 4);
+        h = lp64_fnv(h, tdisc, 8);
+        h = lp64_fnv(h, dat + rd32(tdisc), (size_t)nb * LP64_TEXNAME_DISC);
+    }
+    return h;
+}
+
+/* The same for an MN motion: header, NJS_MOTION record and the MDATA2 table. */
+static uint32_t lp64_mn_sig(const unsigned char* bin)
+{
+    uint32_t h = 2166136261u, n = rd16(bin + 6);
+    const unsigned char* dat_top = bin + rd16(bin + 4);
+    const unsigned char* mtn_disc = dat_top + rd32(bin + 8);
+    h = lp64_fnv(h, bin, 16);
+    h = lp64_fnv(h, mtn_disc, LP64_MOTION_DISC);
+    h = lp64_fnv(h, dat_top + rd32(mtn_disc), (size_t)n * LP64_MDATA2_DISC);
+    return h;
+}
+
 int lp64_mlb(const void* bin_datP, ML_WORK* mlwP, int slot)
 {
     const unsigned char* bin = (const unsigned char*)bin_datP;
@@ -402,6 +453,7 @@ int lp64_mlb(const void* bin_datP, ML_WORK* mlwP, int slot)
     uint32_t tex_off, obj_off;
     uint32_t obj_num, status;
     const LP64_DEDUP* hit;
+    uint32_t sig = lp64_ml_sig(bin);
 
     status = bin[3];
     obj_num = rd16(bin + 6);
@@ -409,7 +461,7 @@ int lp64_mlb(const void* bin_datP, ML_WORK* mlwP, int slot)
     obj_off = rd32(bin + 12);
     dat = bin + rd16(bin + 4);
 
-    hit = lp64_dedup_find(slot, bin);
+    hit = lp64_dedup_find(slot, bin, sig);
     if (hit) {
         mlwP->flg = status;
         mlwP->obj_num = (obj_off != 0xFFFFFFFFu) ? obj_num : 0;
@@ -471,10 +523,12 @@ int lp64_mlb(const void* bin_datP, ML_WORK* mlwP, int slot)
     }
 
     {
-        LP64_DEDUP* e = lp64_dedup_add(slot, bin);
-        e->objP = mlwP->objP;
-        e->texP = mlwP->texP;
-        e->md2P = 0;
+        LP64_DEDUP* e = lp64_dedup_add(slot, bin, sig);
+        if (e) {
+            e->objP = mlwP->objP;
+            e->texP = mlwP->texP;
+            e->md2P = 0;
+        }
     }
     return 1;
 }
@@ -488,10 +542,11 @@ int lp64_mnb(const void* bin_datP, MN_WORK* mnwP, int slot)
     uint32_t n = rd16(bin + 6);
     uint32_t atr = rd32(bin + 12);
     NJS_MDATA2_MOD* md2;
-    uint32_t i;
+    uint32_t i, sig;
 
+    sig = lp64_mn_sig(bin);
     {
-        const LP64_DEDUP* hit = lp64_dedup_find(slot, bin);
+        const LP64_DEDUP* hit = lp64_dedup_find(slot, bin, sig);
         if (hit && hit->md2P) {
             mnwP->flg = bin[3];
             mnwP->obj_num = n;
@@ -518,10 +573,12 @@ int lp64_mnb(const void* bin_datP, MN_WORK* mnwP, int slot)
     mnwP->atrP = (atr != 0xFFFFFFFFu) ? (unsigned short*)reloff(dat_top, atr) : NULL;
 
     {
-        LP64_DEDUP* e = lp64_dedup_add(slot, bin);
-        e->objP = 0;
-        e->texP = 0;
-        e->md2P = md2;
+        LP64_DEDUP* e = lp64_dedup_add(slot, bin, sig);
+        if (e) {
+            e->objP = 0;
+            e->texP = 0;
+            e->md2P = md2;
+        }
     }
     return 1;
 }
@@ -531,6 +588,36 @@ int lp64_mnb(const void* bin_datP, MN_WORK* mnwP, int slot)
 int lp64_mlb(const void* bin_datP, ML_WORK* mlwP, int slot) { (void)bin_datP; (void)mlwP; (void)slot; return 0; }
 int lp64_mnb(const void* bin_datP, MN_WORK* mnwP, int slot) { (void)bin_datP; (void)mnwP; (void)slot; return 0; }
 
+#endif
+
+/* Glue-side (model swap, enemy variants, placed objects) callers realize models whose number is not
+   bounded by the room or the player, so they cannot afford the arena's fatal exhaustion: below
+   LP64_SOFT_MIN free bytes a model that is not already unpacked is left empty (objP NULL: nothing
+   loaded, which the callers handle) instead of aborting. A deduplicated model costs nothing and is
+   always served. 32-bit hosts: 0, the caller runs the original realizer. */
+#if ASHFORD_LP64
+#define LP64_SOFT_MIN (2u << 20)
+int lp64_mlb_soft(const void* bin_datP, ML_WORK* mlwP, int slot)
+{
+    if (lp64_slot_free(slot) < LP64_SOFT_MIN && !lp64_dedup_find(slot, bin_datP, lp64_ml_sig((const unsigned char*)bin_datP))) {
+        host_log("lp64: arena slot %d nearly full (%zu bytes free): model not loaded\n", slot, lp64_slot_free(slot));
+        memset(mlwP, 0, sizeof(*mlwP));
+        return 1;
+    }
+    return lp64_mlb(bin_datP, mlwP, slot);
+}
+int lp64_mnb_soft(const void* bin_datP, MN_WORK* mnwP, int slot)
+{
+    if (lp64_slot_free(slot) < LP64_SOFT_MIN) {
+        host_log("lp64: arena slot %d nearly full (%zu bytes free): motion not loaded\n", slot, lp64_slot_free(slot));
+        memset(mnwP, 0, sizeof(*mnwP));
+        return 1;
+    }
+    return lp64_mnb(bin_datP, mnwP, slot);
+}
+#else
+int lp64_mlb_soft(const void* bin_datP, ML_WORK* mlwP, int slot) { (void)bin_datP; (void)mlwP; (void)slot; return 0; }
+int lp64_mnb_soft(const void* bin_datP, MN_WORK* mnwP, int slot) { (void)bin_datP; (void)mnwP; (void)slot; return 0; }
 #endif
 
 /* -------------------------------------------- decomp-facing hook wrappers */
@@ -543,3 +630,4 @@ int pc_lp64_mlb_session(void* bin_datP, ML_WORK* mlwP) { return lp64_mlb(bin_dat
 int pc_lp64_mnb_room(void* bin_datP, MN_WORK* mnwP) { return lp64_mnb(bin_datP, mnwP, LP64_SLOT_ROOM); }
 int pc_lp64_mnb_session(void* bin_datP, MN_WORK* mnwP) { return lp64_mnb(bin_datP, mnwP, LP64_SLOT_SESSION); }
 void pc_lp64_room_reset(void) { lp64_reset(LP64_SLOT_ROOM); }
+

@@ -106,9 +106,16 @@ int pc_skip_intro_press_start(void)
 int pc_config_native_tex(void) { return g_config.native_tex; }
 int pc_native_3d(void)
 {
+#ifdef __LP64__
+    /* LP64 (Android arm64): the emulated VU1/GS path still carries 32-bit pointer truncations
+       (njCnkCsUvh's zbuff, Vu1Strip, NaMatrix ...: host-stack operands cut to 32 bits, then read
+       back through vu_load_vf), so it faults at the first model. Always the native renderer. */
+    return 1;
+#else
     static int env = -2;
     if (env == -2) env = getenv("RECVX_NATIVE3D") ? atoi(getenv("RECVX_NATIVE3D")) != 0 : -1;
     return env >= 0 ? env : g_config.native_3d;
+#endif
 }
 
 /* full-screen 2D overlays: 0 original 4:3, 1 stretched to the (widened) view, 2 off;
@@ -511,8 +518,61 @@ static int SDLCALL game_thread(void* ud)
     { extern void crash_thread_init(void); crash_thread_init(); }
     prof_thread(PROF_LOGIC);
     { extern void profile_thread(char); profile_thread('g'); }   /* RECVX_PROFILE */
+#if defined(__LP64__)
+    { char here; host_log("game thread stack at %p (%s 4 GiB)\n", (void*)&here, (uintptr_t)&here < 0x80000000u ? "below" : "ABOVE"); }
+#endif
     exit(recvx_game_main(1, game_argv));
 }
+
+#if defined(__ANDROID__) && defined(__LP64__)
+/* LP64: the decomp's asm2c code passes addresses of its stack locals through 32-bit EE registers
+   ((int32_t)(uintptr_t)buf, ~300 sites), which only works when every such address fits in 32 bits.
+   Game data, code and the DMA pool are in the low-memory window (window_load.h); the game thread's
+   stack is the one remaining place a host default would put it far above 4 GiB. So the game thread
+   runs on a stack reserved below 2 GiB, with a guard page: first in the gap under the Java heap
+   ([0x10000000, 0x12c00000), where ART puts its main space on Android 13), else in the unused upper
+   half of the DMA guard range; the default thread stack is the last resort (logged). */
+#include <errno.h>
+#include <pthread.h>
+#include <sys/mman.h>
+#include <sys/prctl.h>
+#define GAME_STACK_SIZE (24ul << 20)
+static void* game_pthread(void* ud)
+{
+    (void)ud;
+    prctl(PR_SET_NAME, "game", 0, 0, 0);
+    game_thread(NULL);
+    return NULL;
+}
+static int start_game_thread_low(void)
+{
+    static const uintptr_t bases[] = { 0x10400000ul, 0x61000000ul };
+    pthread_attr_t at;
+    pthread_t th;
+    void* stk = MAP_FAILED;
+    size_t i;
+    if (SDL_getenv("RECVX_HIGH_STACK")) return 0;   /* test aid: the default stack, to compare */
+    for (i = 0; i < sizeof(bases) / sizeof(bases[0]) && stk == MAP_FAILED; i++) {
+        void* p = mmap((void*)bases[i], GAME_STACK_SIZE, PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+        if (p == (void*)bases[i]) stk = p;
+        else {
+            host_log("game stack: %#lx unavailable (%s)\n", (unsigned long)bases[i], p == MAP_FAILED ? strerror(errno) : "moved");
+            if (p != MAP_FAILED) munmap(p, GAME_STACK_SIZE);
+        }
+    }
+    if (stk == MAP_FAILED) { host_log("game stack: no low address free; default thread stack\n"); return 0; }
+    mprotect(stk, 4096, PROT_NONE);   /* guard page at the bottom (the stack grows down) */
+    pthread_attr_init(&at);
+    if (pthread_attr_setstack(&at, stk, GAME_STACK_SIZE) || pthread_create(&th, &at, game_pthread, NULL)) {
+        host_log("game stack: pthread_create on the low stack failed; default thread stack\n");
+        munmap(stk, GAME_STACK_SIZE);
+        return 0;
+    }
+    pthread_detach(th);
+    return 1;
+}
+#endif
 
 int main(int argc, char** argv)
 {
@@ -600,6 +660,9 @@ int main(int argc, char** argv)
     audio_init();
 
     stream_init();
+#if defined(__ANDROID__) && defined(__LP64__)
+    if (!start_game_thread_low())
+#endif
     if (!SDL_CreateThread(game_thread, "game", NULL)) host_fatal("cannot start the game thread: %s", SDL_GetError());
     render_loop();   /* the main thread renders and presents; never returns */
     return 0;

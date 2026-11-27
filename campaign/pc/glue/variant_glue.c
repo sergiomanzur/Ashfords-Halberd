@@ -27,6 +27,7 @@
 #include "../src/host/actors.h"
 #include "../src/host/enemies.h"
 #include "../src/host/variants.h"
+#include "lp64_realize.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -129,7 +130,7 @@ static int donor_load(int type, int ver)
     memset(&dw, 0, sizeof(dw));
     memset(dmth, 0, sizeof(dmth));
     for (p = dbuf + mofs; (dt = *(int*)p) != -1; p += 4 + (dt > 0 ? dt : 0))   /* its first model (not a face mask, not skin) */
-        if (dt > 0 && *(int*)(p + 4) != 0x4B53414D && *(int*)(p + 4) != SKIN_MAGIC) { bhMlbBinRealize(p + 4, &dw.mdl[0]); break; }
+        if (dt > 0 && *(int*)(p + 4) != 0x4B53414D && *(int*)(p + 4) != SKIN_MAGIC) { GLUE_MLB(p + 4, &dw.mdl[0], LP64_SLOT_SESSION); break; }
     if (!dw.mdl[0].objP || dw.mdl[0].obj_num > 64) return 0;
     dw.mdl[0].owP = dow;
     dw.mlwP = &dw.mdl[0];
@@ -137,7 +138,7 @@ static int donor_load(int type, int ver)
     dw.mtx = (float(*)[16])dw.mtxbuf;
     dw.flg = 0x1 | 0x1000;   /* bhCalcModel: the base matrix as set (the enemy's) */
     for (i = 0, mtn = dbuf + nofs; (dt = *(int*)mtn) != -1 && i < 512; i++, mtn += 4 + dt)
-        if (dt) bhMnbBinRealize(mtn + 4, &dmth[i]);
+        if (dt) GLUE_MNB(mtn + 4, &dmth[i], LP64_SLOT_SESSION);
     dw.mnwP = dw.mnwPb = dmth;
     donor_key = key;
     host_log("variant: donor %s (type %d model %d) loaded: %d nodes, %d KB of motions\n", am->name, type, ver, (int)dw.mdl[0].obj_num, a.nlen >> 10);

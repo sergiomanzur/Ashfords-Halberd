@@ -790,7 +790,7 @@ static int realize(Disguise* d, unsigned char* p, unsigned char* own)
         if (!dt || d->w.mdl_n == 16) continue;
         if (rd32(p) == MAGIC_MASK) { d->w.mskp = p; continue; }   /* (as room.c bhSetEneMdl; set up only for the double, face_init) */
         if (rd32(p) == SKIN_MAGIC) { d->w.skp[d->w.mdl_n] = (int*)(p + 4); continue; }
-        bhMlbBinRealize(p, m);
+        GLUE_MLB(p, m, LP64_SLOT_SESSION);
         if (d->w.skp[d->w.mdl_n]) npSkinConvert(m->objP, d->w.skp[d->w.mdl_n]);
         if (m->texP) { last = m->texP; own[d->w.mdl_n] = 1; texn += m->texP->nbTexture; }
         else m->texP = last;   /* as sys->et_lp: the last textured sub-model's */
@@ -975,7 +975,7 @@ static int load_room_model(Disguise* d, int idx)
     if (a.mtn)   /* the type's motions (bhSetEneMtn) */
         for (i = 0, p = d->keep + nofs; (dt = (int)rd32(p)) != -1 && i < 512; i++, p += dt) {
             p += 4;
-            if (dt) bhMnbBinRealize(p, &d->mth[i]);
+            if (dt) GLUE_MNB(p, &d->mth[i], LP64_SLOT_SESSION);
         }
     return 1;
 }
@@ -1046,7 +1046,7 @@ static void load_head(Disguise* d, int chr)
     memset(&d->hp.w, 0, sizeof(d->hp.w));
     if (skin) d->hp.w.skp[4] = (int*)((unsigned char*)memcpy(d->hp.keep + ((skin - pack) & 63), skin, slen) + 4);   /* (the data's alignment kept) */
     p = memcpy(d->hp.keep + 2048 + ((c - pack) & 63), c, clen);
-    bhMlbBinRealize(p, m);
+    GLUE_MLB(p, m, LP64_SLOT_SESSION);
     if (!m->objP || m->obj_num > 16 || !m->texP || !tex_room("head part", 1)) { host_log("actor: head part of part file %d not loaded (%d nodes)\n", 10 + chr, m->objP ? (int)m->obj_num : -1); return; }
     if (d->hp.w.skp[4]) npSkinConvert(m->objP, d->hp.w.skp[4]);
     m->owP = d->hp.ow;
@@ -1329,7 +1329,7 @@ static void realize_motions(MN_WORK* mth, int first, unsigned char* p)
     int i, dt;
     for (i = first; (dt = (int)rd32(p)) != -1 && i < 512; i++, p += dt) {
         p += 4;
-        if (dt) bhMnbBinRealize(p, &mth[i]);
+        if (dt) GLUE_MNB(p, &mth[i], LP64_SLOT_SESSION);
     }
 }
 
@@ -2150,7 +2150,7 @@ void actor_cast_hands(int who)
         p += 4;
         if (t & 0x80000000) { p = pack + ((p - pack + 63) & ~63); t &= ~0x80000000u; }
         if (t > (unsigned)(pend - p)) return;
-        bhMlbBinRealize(ch[who].mdl[side], m);
+        GLUE_MLB(ch[who].mdl[side], m, LP64_SLOT_SESSION);
         if (!m->objP || m->obj_num > 4 || !m->texP || !t || d->tex_n >= (int)(sizeof(d->tex) / sizeof(d->tex[0])) || !tex_room("hands", 1)) {
             host_log("actor: slot %d: hands of character %d not loaded\n", who, c);
             return;

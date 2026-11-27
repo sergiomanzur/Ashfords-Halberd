@@ -56,6 +56,7 @@ static void build_room_file(void)
     memset(room_file, 0xAB, sizeof(room_file));
     wf(room_file + 0, 1.8f);          /* version */
     w32(room_file + 16, ROMW);        /* the ROM_WORK, a byte offset like &rdtp[val] */
+    w32(room_file + 28, EVT_REL);     /* the EVT block: bhSetRoom sets rom->evtp from this header word, not from the ROM_WORK's */
 
     unsigned char* r = room_file + ROMW;
     /* the 16 leading pointer words: room-file-relative offsets */
@@ -71,7 +72,7 @@ static void build_room_file(void)
     w32(r + 0x24, 0x37 * 4);   /* posp */
     w32(r + 0x28, 0x38 * 4);   /* rutp */
     w32(r + 0x2C, 0x39 * 4);   /* ruttp */
-    w32(r + 0x30, EVT_REL);   /* evtp */
+    w32(r + 0x30, 0x3C4);     /* evtp: a stale value, overwritten by the header word above (real retail rooms: not the EVT block) */
     w32(r + 0x34, EVC_REL);   /* evcp */
     w32(r + 0x38, MESP_REL);  /* mesp */
     w32(r + 0x3C, EVL_REL);   /* evlp */
@@ -208,11 +209,12 @@ static int test_rom_work(void)
         CHECK(rom.evcp[0].keyf[0].recp == NULL);
         CHECK(rom.evcp[0].keyf[1].frame == 0x4242);
 
-        /* the EVT view: the three words zero-extended, offsets by index */
-        CHECK(in_bounds(rom.evtp, LP64_SLOT_ROOM));
-        CHECK((uintptr_t)rom.evtp->scd0 == 0x33000100u);
-        CHECK((uintptr_t)rom.evtp->scd1 == 0x33000200u);
-        CHECK((uintptr_t)rom.evtp->evd == 0x33000300u);
+        /* the EVT block: rom->evtp IS the disc block (the interpreter adds the words' offsets to it);
+           its first three 32-bit words are scd0/scd1/evd, the offsets by index follow */
+        CHECK((const unsigned char*)rom.evtp == room_file + EVT_REL);
+        CHECK(((const unsigned int*)rom.evtp)[0] == 0x33000100u);
+        CHECK(((const unsigned int*)rom.evtp)[1] == 0x33000200u);
+        CHECK(((const unsigned int*)rom.evtp)[2] == 0x33000300u);
         CHECK(lp64_evt_offset(0) == (ptrdiff_t)(int32_t)0x33000300u);   /* the decomp reads word[evt_id+2]: event 0's offset IS the evd word */
         CHECK(lp64_evt_offset(1) == 16);
         CHECK(lp64_evt_offset(2) == -32);
@@ -500,6 +502,82 @@ static int test_arena_reset(void)
     return 0;
 }
 
+/* ------------------------------------------- one disc buffer, successive contents */
+
+/* The game loads equipped weapons / items into the same fixed buffer (sys->wrmdlp) with different
+   contents; realizing must follow the content, not the address (a stale dedup hit applied the new
+   object count to the old, smaller array: the walk ran past it and read model data as pointers). */
+static int test_reused_buffer(void)
+{
+    if (lp64_is_on()) {
+        static unsigned char buf[0x2000];
+        ML_WORK a, b, c;
+        unsigned char* dat = buf + MLB_HDR;
+        lp64_reset(LP64_SLOT_SESSION);
+        build_mlb_file(buf);                         /* 2 objects */
+        CHECK(lp64_mlb(buf, &a, LP64_SLOT_SESSION) == 1);
+        CHECK(a.obj_num == 2);
+        /* the same buffer, now a 3-object model */
+        w16(buf + 6, 3);
+        buf[3] = 0x80 | 3;
+        {
+            unsigned char* o = dat + MLB_OBJ + 2 * 52;
+            w32(o + 0, 0x33u);
+            w32(o + 4, 0xFFFFFFFFu);
+            wf(o + 8, 7.0f);
+            w32(o + 44, 0xFFFFFFFFu);
+            w32(o + 48, 0xFFFFFFFFu);
+        }
+        CHECK(lp64_mlb(buf, &b, LP64_SLOT_SESSION) == 1);
+        CHECK(b.obj_num == 3);
+        CHECK(b.objP[2].evalflags == 0x33 && b.objP[2].pos[0] == 7.0f);   /* a stale hit reads past the 2-entry array */
+        CHECK(b.objP != a.objP);
+        /* the same content again: shared, no new unpack */
+        CHECK(lp64_mlb(buf, &c, LP64_SLOT_SESSION) == 1);
+        CHECK(c.objP == b.objP);
+        /* and the first content back: a repeated equip must find (or rebuild) its 2-object tree */
+        w16(buf + 6, 2);
+        buf[3] = 0x80 | 2;
+        CHECK(lp64_mlb(buf, &c, LP64_SLOT_SESSION) == 1);
+        CHECK(c.obj_num == 2 && c.objP == a.objP);
+    } else {
+        lp64_reset(LP64_SLOT_SESSION);
+    }
+    printf("lp64 reused buffer: ok (%s)\n", lp64_is_on() ? "LP64" : "32-bit pass-through");
+    return 0;
+}
+
+/* ------------------------------------------- a room with very many distinct models */
+
+/* RM_0020 (the graveyard) unpacks more distinct model/motion binaries than the dedup table had
+   entries; a full table was fatal ("lp64 dedup table exhausted"). It now holds many more, and a full
+   table only stops sharing: every unpack still succeeds and is correct. */
+static int test_many_distinct(void)
+{
+    if (lp64_is_on()) {
+        static unsigned char buf[0x2000];
+        ML_WORK m;
+        int i;
+        lp64_reset(LP64_SLOT_ROOM);
+        for (i = 0; i < 2300; i++) {   /* past the 2048-entry table: the full-table path too */   /* distinct content each time: a different object flag word */
+            build_mlb_file(buf);
+            w32(buf + MLB_HDR + MLB_OBJ, 0x1000u + (uint32_t)i);
+            CHECK(lp64_mlb(buf, &m, LP64_SLOT_ROOM) == 1);
+            CHECK(m.objP != NULL && m.objP[0].evalflags == 0x1000u + (uint32_t)i && m.obj_num == 2);
+        }
+        /* an early content again, long after the table filled: still correct */
+        build_mlb_file(buf);
+        w32(buf + MLB_HDR + MLB_OBJ, 0x1000u + 3u);
+        CHECK(lp64_mlb(buf, &m, LP64_SLOT_ROOM) == 1);
+        CHECK(m.objP[0].evalflags == 0x1003u && m.objP[1].child == &m.objP[0]);
+        lp64_reset(LP64_SLOT_ROOM);
+    } else {
+        lp64_reset(LP64_SLOT_ROOM);
+    }
+    printf("lp64 many distinct binaries: ok (%s)\n", lp64_is_on() ? "LP64" : "32-bit pass-through");
+    return 0;
+}
+
 int main(void)
 {
     CHECK(!test_rom_work());
@@ -507,6 +585,8 @@ int main(void)
     CHECK(!test_bsc());
     CHECK(!test_mnb());
     CHECK(!test_arena_reset());
+    CHECK(!test_reused_buffer());
+    CHECK(!test_many_distinct());
     printf("lp64 realize: ok\n");
     return 0;
 }

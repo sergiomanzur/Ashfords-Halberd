@@ -367,6 +367,7 @@ void log_start(const char* path)
     host_log("log: writing %s\n", path);
 }
 #else
+void crash_log_ready(void) {}   /* Android only (above); host.c calls it on every platform */
 /* fixed image base (no ASLR): addresses map to functions with i686-w64-mingw32-addr2line -f -e AshfordsHalberd.exe;
    the Windows build keeps frame pointers (pc/CMakeLists.txt), so EBP is the frame chain */
 static void out_file(void* f, const char* p, size_t n) { fwrite(p, 1, n, (FILE*)f); }

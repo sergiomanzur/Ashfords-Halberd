@@ -233,6 +233,9 @@ void config_load(void)
     g_appear_chr = appear_canon(g_appear_chr);
     for (int i = 0; i < 2; i++) if (g_appear_own[i] >= 0) g_appear_own[i] = appear_canon(g_appear_own[i]);
     g_enemy_opts.cast = g_enemy_opts.cast == 1 || g_enemy_opts.cast == 3;
+#ifdef __LP64__
+    g_config.native_3d = 1;   /* locked on 64-bit (pc_native_3d): a saved 0 must not show as off */
+#endif
 }
 
 static int write_ini(FILE* f, void* ud)

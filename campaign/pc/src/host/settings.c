@@ -194,6 +194,9 @@ static const char* size_name(int v, char* b, int n)
 }
 static const char* interp_off(void) { return g_config.interpolate ? NULL : "Needs Display-rate frames."; }
 static const char* fullscreen_on(void) { return g_config.fullscreen ? "Only in windowed mode." : NULL; }
+#ifdef __LP64__
+static const char* native_3d_forced(void) { return "Always on in 64-bit builds (the emulated renderer is not available)."; }
+#endif
 /* Display mode: windowed / borderless / exclusive over fullscreen + fullscreen_exclusive (F11 flips
    only the first, so it returns to the kind chosen last) */
 static int dmode_get(void) { return !g_config.fullscreen ? 0 : g_config.fullscreen_exclusive ? 2 : 1; }
@@ -459,7 +462,11 @@ const Setting g_settings[] = {
       .help = "Colour intensity of the game image: 0% greyscale, 100% original, 200% stronger colours. Does not change the F1 overlay." },
     { SP_DISPLAY, "Reset picture calibration", NULL, .flags = SET_ACTION | SET_NOW, .apply = picture_reset,
       .help = "Brightness, contrast, gamma and saturation back to neutral: the original picture." },
-    { SP_DISPLAY, "Native 3D renderer", V(g_config.native_3d), 0, 1, 1, .help = "3D models projected and clipped by the GPU instead of the emulated VU1 and GS.", .group = "RENDERER" },
+    { SP_DISPLAY, "Native 3D renderer", V(g_config.native_3d), 0, 1, 1, .help = "3D models projected and clipped by the GPU instead of the emulated VU1 and GS.", .group = "RENDERER",
+#ifdef __LP64__
+      .locked = native_3d_forced,
+#endif
+    },
     { SP_DISPLAY, "Native textures", V(g_config.native_tex), 0, 1, 1, .help = "Textures uploaded once and bound afterwards instead of re-uploaded on every switch." },
     { SP_DISPLAY, "Cull off-screen models", V(g_config.model_cull), 0, 1, 1, .help = "As on the PS2. Off: characters, enemies and objects no longer pop at the screen edges (the room itself is not affected). Third person never culls." },
     { SP_DISPLAY, "HD textures", V(g_config.hd_textures), 0, 1, 1, .flags = SET_RESTART,
@@ -747,7 +754,7 @@ static void scripted_settings(void)
         }
         if (!found) host_log("settings test: unknown label %s\n", label);
         p += n;
-        if (*p == ';') ++p; else if (*p) { host_log("settings test: missing separator\n"); p = NULL; }
+        if (*p == ';' || *p == '|') ++p; else if (*p) {   /* '|': the Android launcher splits its env extra on ';' */ host_log("settings test: missing separator\n"); p = NULL; }
     }
 }
 

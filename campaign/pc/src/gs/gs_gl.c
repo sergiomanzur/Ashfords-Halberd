@@ -125,6 +125,11 @@ static int vcount;
 #define VBO_VERTS (MAX_VERTS * 8)
 static int vbo_first;
 static int vbo_next;
+#define PSEG_VERTS 65536   /* GLES vertex ring segment (pring_reserve), >= MAX_VERTS: a flush always fits */
+#define PSEGS 4
+static GlVertex* pmap;     /* its persistent mapping (NULL: glBufferSubData, or the non-ring path) */
+static int pring, pseg_cur;
+static GLsync pseg_fence[PSEGS];
 /* parts of the batch drawn from the executed frame's vertices on the GPU (svbo, a replay's
    unblended native strips, gs_draw_native_cached) instead of vbuf: batch positions
    start..start+count-1 (vbuf has a gap there), static vertex first */
@@ -394,7 +399,20 @@ static void gs_renderer_init_gl_objects(void)
     for (int i = 0; i < 2; i++) {   /* the vertex stream, the executed frame's native strips */
         glBindVertexArray(i ? svao : vao);
         glBindBuffer(GL_ARRAY_BUFFER, i ? svbo : vbo);
-        if (!i) glBufferData(GL_ARRAY_BUFFER, VBO_VERTS * sizeof(GlVertex), NULL, GL_STREAM_DRAW);
+        if (!i) {
+            pmap = NULL; pring = 0; pseg_cur = -1; memset(pseg_fence, 0, sizeof(pseg_fence));
+            if (g_gl_es && glBufferStorage) {
+                /* GLES: a persistently mapped ring, written by plain memcpy (below, vbo ring). Mapping per
+                   upload (glBufferSubData / glMapBufferRange) costs the Adreno driver ~0.5 ms a call. */
+                const GLsizeiptr sz = (GLsizeiptr)PSEGS * PSEG_VERTS * (GLsizeiptr)sizeof(GlVertex);
+                glBufferStorage(GL_ARRAY_BUFFER, sz, NULL, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT | GL_DYNAMIC_STORAGE_BIT);
+                pmap = glMapBufferRange ? (GlVertex*)glMapBufferRange(GL_ARRAY_BUFFER, 0, sz, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT) : NULL;
+                pring = 1;   /* (without a mapping: the same ring, written with glBufferSubData) */
+                host_log("gs: vertex ring %d x %d vertices, %s\n", PSEGS, PSEG_VERTS, pmap ? "persistently mapped" : "glBufferSubData");
+            } else {
+                glBufferData(GL_ARRAY_BUFFER, VBO_VERTS * sizeof(GlVertex), NULL, GL_STREAM_DRAW);
+            }
+        }
         glEnableVertexAttribArray(0); glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(GlVertex), (void*)offsetof(GlVertex, x));
         glEnableVertexAttribArray(1); glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(GlVertex), (void*)offsetof(GlVertex, s));
         glEnableVertexAttribArray(2); glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(GlVertex), (void*)offsetof(GlVertex, r));
@@ -1579,6 +1597,36 @@ static int fast_clear(const DrawState* st, int tme)
     return 1;
 }
 
+/* GLES vertex ring (persistently mapped, see gs_renderer_init_gl_objects): PSEGS segments of PSEG_VERTS
+   vertices; a flush's vertices go to one segment; a segment is rewritten only after a fence says the
+   GPU finished the draws that read it. pmap NULL with pring set: the same ring through glBufferSubData. */
+static void pring_reserve(int n)   /* where n vertices go: vbo_next */
+{
+    int seg = vbo_next / PSEG_VERTS;
+    if (pseg_cur == seg && vbo_next % PSEG_VERTS + n <= PSEG_VERTS) return;
+    if (pseg_cur >= 0) {   /* leaving a segment: its draws are all issued, the fence marks their end */
+        if (pseg_fence[pseg_cur]) glDeleteSync(pseg_fence[pseg_cur]);
+        pseg_fence[pseg_cur] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        seg = (pseg_cur + 1) % PSEGS;
+    } else seg = 0;
+    pseg_cur = seg;
+    vbo_next = seg * PSEG_VERTS;
+    if (pseg_fence[seg]) {   /* reusing it: the GPU must be done reading it (normally long since) */
+        for (int tries = 0; tries < 200 && glClientWaitSync(pseg_fence[seg], GL_SYNC_FLUSH_COMMANDS_BIT, 50000000) == GL_TIMEOUT_EXPIRED; tries++) ;
+        glDeleteSync(pseg_fence[seg]);
+        pseg_fence[seg] = NULL;
+    }
+}
+
+/* Write vertices into the stream buffer: the persistent mapping when there is one (the GLES ring; a
+   glBufferSubData / map per upload costs the Adreno driver ~0.5 ms a call, which at ~1,800 flushes a
+   second was the render thread's whole budget), glBufferSubData otherwise (as before). */
+static void vbo_put(GLintptr off, GLsizeiptr bytes, const void* src)
+{
+    if (pmap) memcpy((char*)pmap + off, src, (size_t)bytes);
+    else glBufferSubData(GL_ARRAY_BUFFER, off, bytes, src);
+}
+
 void gs_flush(void)
 {
     const DrawState* st = &batch_state;
@@ -1756,16 +1804,17 @@ void gs_flush(void)
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     {
-        if (vbo_next + vcount > VBO_VERTS) {
+        if (pring) pring_reserve(vcount);
+        else if (vbo_next + vcount > VBO_VERTS) {
             glBufferData(GL_ARRAY_BUFFER, VBO_VERTS * sizeof(GlVertex), NULL, GL_STREAM_DRAW);   /* orphan */
             vbo_next = 0;
         }
         vbo_first = vbo_next;
-        if (!nsruns) glBufferSubData(GL_ARRAY_BUFFER, (GLintptr)vbo_first * (GLintptr)sizeof(GlVertex), (GLsizeiptr)(vcount * sizeof(GlVertex)), vbuf);
+        if (!nsruns) vbo_put((GLintptr)vbo_first * (GLintptr)sizeof(GlVertex), (GLsizeiptr)(vcount * sizeof(GlVertex)), vbuf);
         else for (int r = 0, at = 0; r <= nsruns; r++) {   /* the parts between the static runs */
             int end = r < nsruns ? sruns[r].start : vcount;
             if (end > at)
-                glBufferSubData(GL_ARRAY_BUFFER, (GLintptr)(vbo_first + at) * (GLintptr)sizeof(GlVertex), (GLsizeiptr)((end - at) * sizeof(GlVertex)), vbuf + at);
+                vbo_put((GLintptr)(vbo_first + at) * (GLintptr)sizeof(GlVertex), (GLsizeiptr)((end - at) * sizeof(GlVertex)), vbuf + at);
             if (r < nsruns) at = sruns[r].start + sruns[r].count;
         }
         vbo_next += vcount;

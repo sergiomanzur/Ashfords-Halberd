@@ -249,6 +249,23 @@ extern PFN_glBufferData gl_BufferData;
 typedef void (GLAPIENTRY *PFN_glBufferSubData)(GLenum target, GLintptr offset, GLsizeiptr size, const void* data);
 extern PFN_glBufferSubData gl_BufferSubData;
 #define glBufferSubData gl_BufferSubData
+/* optional (GL 3.0 / ES 3.0, NULL if absent): unsynchronized writes into an append-only stream buffer */
+#define GL_MAP_WRITE_BIT 0x0002
+#define GL_MAP_INVALIDATE_RANGE_BIT 0x0004
+#define GL_MAP_UNSYNCHRONIZED_BIT 0x0020
+/* optional (ES: GL_EXT_buffer_storage, NULL if absent): immutable storage mapped once for good */
+#define GL_MAP_PERSISTENT_BIT 0x0040
+#define GL_MAP_COHERENT_BIT 0x0080
+#define GL_DYNAMIC_STORAGE_BIT 0x0100
+typedef void (GLAPIENTRY *PFN_glBufferStorage)(GLenum target, GLsizeiptr size, const void* data, GLbitfield flags);
+extern PFN_glBufferStorage gl_BufferStorage;
+#define glBufferStorage gl_BufferStorage
+typedef void* (GLAPIENTRY *PFN_glMapBufferRange)(GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access);
+extern PFN_glMapBufferRange gl_MapBufferRange;
+#define glMapBufferRange gl_MapBufferRange
+typedef GLboolean (GLAPIENTRY *PFN_glUnmapBuffer)(GLenum target);
+extern PFN_glUnmapBuffer gl_UnmapBuffer;
+#define glUnmapBuffer gl_UnmapBuffer
 typedef void (GLAPIENTRY *PFN_glEnableVertexAttribArray)(GLuint index);
 extern PFN_glEnableVertexAttribArray gl_EnableVertexAttribArray;
 #define glEnableVertexAttribArray gl_EnableVertexAttribArray

@@ -97,6 +97,14 @@ struct MN_WORK;
 int      lp64_mlb(const void* bin_datP, struct ML_WORK* mlwP, int slot);
 int      lp64_mnb(const void* bin_datP, struct MN_WORK* mnwP, int slot);
 
+/* The glue's model swapping (actor_glue, placer_glue, variant_glue) realizes models from its own 32-bit
+   copies of the disc data: lp64_*_soft unpack them like the decomp's hooks, but leave the work empty
+   (objP NULL) instead of aborting when the slot is nearly full. 0 on 32-bit hosts. */
+int      lp64_mlb_soft(const void* bin_datP, struct ML_WORK* mlwP, int slot);
+int      lp64_mnb_soft(const void* bin_datP, struct MN_WORK* mnwP, int slot);
+#define GLUE_MLB(p, m, slot) do { if (!lp64_mlb_soft((p), (m), (slot))) bhMlbBinRealize((p), (m)); } while (0)
+#define GLUE_MNB(p, m, slot) do { if (!lp64_mnb_soft((p), (m), (slot))) bhMnbBinRealize((p), (m)); } while (0)
+
 /* Test/introspection: current bounds of a slot's arena. */
 void     lp64_arena_bounds(int slot, const void** lo, const void** hi);
 

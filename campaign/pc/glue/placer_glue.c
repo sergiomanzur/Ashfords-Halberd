@@ -292,7 +292,7 @@ static int build_record(unsigned int off, int is_obj, unsigned int list, Part* p
     memcpy(c, rf + off, len);
     m = is_obj ? obj_mlb(c) : c;
     if (m < c || m + 16 > c + len) { why = "bad model chunk"; return 0; }
-    bhMlbBinRealize((void*)m, ml);
+    GLUE_MLB((void*)m, ml, LP64_SLOT_ROOM);
     ml->owP = p->ow;   /* (the realizer clears it) */
     if (m != c) { p->w.skp[0] = (int*)(c + 8); npSkinConvert(ml->objP, p->w.skp[0]); }
     if (!ml->objP || ml->obj_num > NODES) { why = "too many nodes"; return 0; }
