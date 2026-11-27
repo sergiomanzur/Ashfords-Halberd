@@ -69,7 +69,10 @@ static inline uint32_t lp64_rom_field(const unsigned char* rom_disc, uint32_t of
 
 /* Arena slots. ROOM is reset at every room load; SESSION (player, weapons,
    item-view models) lives for the whole game session. */
-enum { LP64_SLOT_ROOM = 0, LP64_SLOT_SESSION = 1, LP64_SLOT_COUNT = 2 };
+enum { LP64_SLOT_ROOM = 0, LP64_SLOT_SESSION = 1, LP64_SLOT_DOOR = 2, LP64_SLOT_COUNT = 3 };
+/* DOOR: the door animation's model. The next room is loaded (and the ROOM arena reset) while the door
+   animation is still playing, so the door model cannot live in the ROOM arena; it is reset when the
+   next door's data is read (door.c bhReadDoorData). */
 
 /* All hooks return 0 on 32-bit hosts (the caller runs the original code). */
 int      lp64_is_on(void);

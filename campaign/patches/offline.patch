@@ -593,16 +593,26 @@ index b6c88042..a9e6a56f 100644
      cam.ln = 0x100;
      cam.pers = 0x2000;
 diff --git a/src/ps2/veronica/prog/door.c b/src/ps2/veronica/prog/door.c
-index 250abb95..8f78d4ac 100644
+index 250abb95..fd615644 100644
 --- a/src/ps2/veronica/prog/door.c
 +++ b/src/ps2/veronica/prog/door.c
-@@ -115,7 +115,10 @@ int bhReadDoorData()
+@@ -82,6 +82,9 @@ int bhReadDoorData()
+     switch (status) 
+     {                
+     case 0:                                  
++#ifdef TARGET_PC
++        pc_lp64_door_reset();   /* LP64: the previous door's model (its own arena: the room arena is reset mid-animation) */
++#endif
+         dwP->prti_no = sys->dor_partid;
+         
+         if (RequestReadInsideFile(dwP->prti_no, dwP->dmo_typ + 71, dwP->dmo_bufP) != 0)
+@@ -115,7 +118,10 @@ int bhReadDoorData()
                  
                  if (next != -1) 
                  {
 -                    bhMlbBinRealize(pacP, &dwP->dor_mdl);
 +#ifdef TARGET_PC
-+                    if (!pc_lp64_mlb_room(pacP, &dwP->dor_mdl))   /* LP64: unpacked into the room arena */
++                    if (!pc_lp64_mlb_door(pacP, &dwP->dor_mdl))   /* LP64: unpacked into the door arena */
 +#endif
 +                        bhMlbBinRealize(pacP, &dwP->dor_mdl);
                      

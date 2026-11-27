@@ -432,7 +432,10 @@ void cheat_room_warp(int stg, int rom, int pos, int rcase)
     sys->rcase = (char)rcase;
     plp->mnwP = plp->mnwPb;
     warp_sound = 1;
-    bhSetDoorDemo(0, stg, rom, pos, 255);
+    {
+        const char* dt = getenv("RECVX_WARP_DOOR");   /* test aid: play a real door animation (e.g. 1: the stairs) instead of the load screen */
+        bhSetDoorDemo(0, stg, rom, pos, dt ? atoi(dt) : 255);
+    }
 }
 
 static void teleport(int stg, int rom, int pos)

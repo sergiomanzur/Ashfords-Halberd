@@ -40,6 +40,8 @@
 
 static unsigned char lp64_room_arena[LP64_ROOM_ARENA] __attribute__((aligned(64)));
 static unsigned char lp64_session_arena[LP64_SESSION_ARENA] __attribute__((aligned(64)));
+#define LP64_DOOR_ARENA    (6u << 20)    /* the door animation's model (one door at a time) */
+static unsigned char lp64_door_arena[LP64_DOOR_ARENA] __attribute__((aligned(64)));
 
 static unsigned char* lp64_bump[LP64_SLOT_COUNT];
 static unsigned char* lp64_base[LP64_SLOT_COUNT];
@@ -68,6 +70,8 @@ static void lp64_arena_init(void)
     lp64_limit[LP64_SLOT_ROOM] = lp64_room_arena + sizeof(lp64_room_arena);
     lp64_base[LP64_SLOT_SESSION] = lp64_bump[LP64_SLOT_SESSION] = lp64_session_arena;
     lp64_limit[LP64_SLOT_SESSION] = lp64_session_arena + sizeof(lp64_session_arena);
+    lp64_base[LP64_SLOT_DOOR] = lp64_bump[LP64_SLOT_DOOR] = lp64_door_arena;
+    lp64_limit[LP64_SLOT_DOOR] = lp64_door_arena + sizeof(lp64_door_arena);
 }
 
 static unsigned char* lp64_alloc(int slot, size_t size, size_t align)
@@ -114,6 +118,9 @@ void lp64_reset(int slot)
 {
     lp64_arena_init();
     if ((unsigned)slot >= LP64_SLOT_COUNT) return;
+    if (slot == LP64_SLOT_ROOM && lp64_bump[slot] != lp64_base[slot])   /* headroom of the 10 MB arena, per room */
+        host_log("lp64: room arena used %zu of %u bytes, session arena %zu of %u\n", (size_t)(lp64_bump[slot] - lp64_base[slot]), (unsigned)LP64_ROOM_ARENA,
+                 (size_t)(lp64_bump[LP64_SLOT_SESSION] - lp64_base[LP64_SLOT_SESSION]), (unsigned)LP64_SESSION_ARENA);
     lp64_bump[slot] = lp64_base[slot];
     lp64_dedup_n[slot] = 0;
 }
@@ -630,4 +637,13 @@ int pc_lp64_mlb_session(void* bin_datP, ML_WORK* mlwP) { return lp64_mlb(bin_dat
 int pc_lp64_mnb_room(void* bin_datP, MN_WORK* mnwP) { return lp64_mnb(bin_datP, mnwP, LP64_SLOT_ROOM); }
 int pc_lp64_mnb_session(void* bin_datP, MN_WORK* mnwP) { return lp64_mnb(bin_datP, mnwP, LP64_SLOT_SESSION); }
 void pc_lp64_room_reset(void) { lp64_reset(LP64_SLOT_ROOM); }
+int pc_lp64_mlb_door(void* bin_datP, ML_WORK* mlwP)
+{
+    int r = lp64_mlb(bin_datP, mlwP, LP64_SLOT_DOOR);
+#if ASHFORD_LP64
+    if (r) host_log("lp64: door model unpacked, %zu of %u bytes of the door arena used\n", (size_t)(lp64_bump[LP64_SLOT_DOOR] - lp64_base[LP64_SLOT_DOOR]), (unsigned)LP64_DOOR_ARENA);
+#endif
+    return r;
+}
+void pc_lp64_door_reset(void) { lp64_reset(LP64_SLOT_DOOR); }
 

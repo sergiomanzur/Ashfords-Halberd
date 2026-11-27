@@ -29,6 +29,7 @@ static void wf(unsigned char* p, float f) { w32(p, packf(f)); }
 /* The symbols lp64_realize.c's host-facing stubs reference. The host layer
    (pc/src/host/log.c, the game's romp) is not linked into this test. */
 ROM_WORK* rom;
+void host_log(const char* fmt, ...) { (void)fmt; }
 void host_fatal(const char* fmt, ...)
 {
     va_list ap;

@@ -285,6 +285,8 @@ int    pc_lp64_mlb_session(void* bin_datP, struct ML_WORK* mlwP);           /* d
 int    pc_lp64_mnb_room(void* bin_datP, struct MN_WORK* mnwP);              /* bhMnbBinRealize: room motions */
 int    pc_lp64_mnb_session(void* bin_datP, struct MN_WORK* mnwP);          /* dread.c player/weapon motions */
 void   pc_lp64_room_reset(void);                                            /* room.c bhSetRoom start: the room arena and its dedup go */
+int    pc_lp64_mlb_door(void* bin_datP, struct ML_WORK* mlwP);              /* door.c: the door animation's model, outside the room arena (the next room resets that one mid-animation) */
+void   pc_lp64_door_reset(void);                                            /* door.c bhReadDoorData start: the previous door's model goes */
 
 /* Single-player title menu pointer controls and EXIT row (pc/glue/options_glue.c). */
 void  pc_title_menu_init(void);                  /* Adv_BioCvTitle mode 0: append EXIT row */
